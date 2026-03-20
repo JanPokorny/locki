@@ -1,0 +1,309 @@
+[tools]
+uv = "latest"
+lima = "2.1.0"
+
+[settings]
+experimental = true
+python.uv_venv_auto = true
+task.disable_spec_from_run_scripts = true
+
+[env]
+UV_PYTHON_PREFERENCE = "only-managed"
+
+# setup
+
+[tasks.setup]
+run = "uv sync --all-extras --dev"
+sources = ["uv.lock", "pyproject.toml"]
+
+# check
+
+[tasks.check]
+depends = ["check:*"]
+
+[tasks."check:ruff"]
+run = "uv run ruff check --quiet"
+sources = ["src/**/*.py"]
+
+[tasks."check:ruff-format"]
+run = "uv run ruff format --quiet --check"
+sources = ["src/**/*.py"]
+
+# fix
+
+[tasks.fix]
+depends = ["fix:*"]
+
+[tasks."fix:ruff"]
+run = "uv run ruff check --quiet --fix"
+
+[tasks."fix:ruff-format"]
+run = "uv run ruff format --quiet"
+
+# build
+
+[tasks."build:download-binaries"]
+description = "Download Lima binaries for all platforms"
+run = '''
+set -euxo pipefail
+LIMA_VERSION=$(mise current lima)
+mkdir -p ./vendor
+echo '*' >./vendor/.gitignore
+( test -f ./vendor/lima-$LIMA_VERSION/manylinux_2_34_x86_64/bin/limactl  || ( mkdir -p ./vendor/lima-$LIMA_VERSION/manylinux_2_34_x86_64  && curl -fsL https://github.com/lima-vm/lima/releases/download/v${LIMA_VERSION}/lima-${LIMA_VERSION}-Linux-x86_64.tar.gz  | tar -xzf - -C ./vendor/lima-$LIMA_VERSION/manylinux_2_34_x86_64  )) &
+( test -f ./vendor/lima-$LIMA_VERSION/manylinux_2_34_aarch64/bin/limactl || ( mkdir -p ./vendor/lima-$LIMA_VERSION/manylinux_2_34_aarch64 && curl -fsL https://github.com/lima-vm/lima/releases/download/v${LIMA_VERSION}/lima-${LIMA_VERSION}-Linux-aarch64.tar.gz | tar -xzf - -C ./vendor/lima-$LIMA_VERSION/manylinux_2_34_aarch64 )) &
+( test -f ./vendor/lima-$LIMA_VERSION/macosx_12_0_x86_64/bin/limactl     || ( mkdir -p ./vendor/lima-$LIMA_VERSION/macosx_12_0_x86_64     && curl -fsL https://github.com/lima-vm/lima/releases/download/v${LIMA_VERSION}/lima-${LIMA_VERSION}-Darwin-x86_64.tar.gz | tar -xzf - -C ./vendor/lima-$LIMA_VERSION/macosx_12_0_x86_64     )) &
+( test -f ./vendor/lima-$LIMA_VERSION/macosx_12_0_arm64/bin/limactl      || ( mkdir -p ./vendor/lima-$LIMA_VERSION/macosx_12_0_arm64      && curl -fsL https://github.com/lima-vm/lima/releases/download/v${LIMA_VERSION}/lima-${LIMA_VERSION}-Darwin-arm64.tar.gz  | tar -xzf - -C ./vendor/lima-$LIMA_VERSION/macosx_12_0_arm64      )) &
+wait
+'''
+
+[tasks.build]
+description = "Build sdist, universal wheel, and platform-specific wheels with bundled limactl"
+depends = ["setup", "build:*"]
+sources = ["src/**/*", "pyproject.toml", "vendor/lima/**/*"]
+outputs = ["dist/**/*"]
+run = '''
+#!/usr/bin/env bash
+set -euxo pipefail
+
+rm -rf ./dist
+uv build -q --out-dir ./dist
+export lima_version=$(mise current lima)
+export version="$(yq -r '.project.version' pyproject.toml | tr -d '-')"
+export universal_wheel=$(realpath "./dist/locki-$version-py3-none-any.whl")
+
+tmpdir="$(mktemp -d)"
+unzip -q "$universal_wheel" -d "$tmpdir"
+find "$tmpdir" -type f -exec chmod +r {} \;
+insert_line=$(awk '/^Requires-Dist:/ {print FNR-1; exit}' "$tmpdir/locki-${version}.dist-info/METADATA" | cut -d: -f1)
+(
+  head -n $insert_line "$tmpdir/locki-${version}.dist-info/METADATA"
+  uv export --no-hashes --no-dev --format requirements-txt | sed '/^[[:space:]]*#/d; /^-e /d' | while IFS= read -r dep; do
+    if [[ -n "$dep" && "$dep" =~ ^[a-zA-Z] ]]; then
+      echo "Requires-Dist: $dep"
+    fi
+  done
+  awk -v insert_line="$insert_line" 'NR > insert_line && $0 !~ /^Requires-Dist:/' "$tmpdir/locki-${version}.dist-info/METADATA"
+) > "$tmpdir/locki-${version}.dist-info/METADATA.new"
+mv "$tmpdir/locki-${version}.dist-info/METADATA.new" "$tmpdir/locki-${version}.dist-info/METADATA"
+rm "$universal_wheel"
+uv run -m wheel pack "$tmpdir" --dest-dir ./dist >/dev/null
+rm -rf "$tmpdir"
+
+if ! uv tool run --isolated --from "$universal_wheel" -- locki --help >/dev/null; then
+  echo "Failed to install $universal_wheel"
+  exit 1
+fi
+
+build_wheel() {
+  wheel_tag="$1"
+  hostagent_arch="$2"
+  tmpdir="$(mktemp -d)"
+  unzip -q "$universal_wheel" -d "$tmpdir"
+  find "$tmpdir" -type f -exec chmod +r {} \;
+  mkdir -p "$tmpdir/locki/data/bin" "$tmpdir/locki/data/share/lima"
+  cp "./vendor/lima-$lima_version/$wheel_tag/bin/limactl" "$tmpdir/locki/data/bin/"
+  cp "./vendor/lima-$lima_version/$wheel_tag/share/lima/lima-guestagent.Linux-$hostagent_arch.gz" "$tmpdir/locki/data/share/lima/"
+  perl -pi -e "s/Root-Is-Purelib: true/Root-Is-Purelib: false/" "$tmpdir/locki-$version.dist-info/WHEEL"
+  perl -pi -e "s/Tag: .*/Tag: py3-none-$wheel_tag/" "$tmpdir/locki-$version.dist-info/WHEEL"
+  uv run -m wheel pack "$tmpdir" --dest-dir ./dist >/dev/null
+  rm -rf "$tmpdir"
+}
+build_wheel manylinux_2_34_x86_64  x86_64  &
+build_wheel manylinux_2_34_aarch64 aarch64 &
+build_wheel macosx_12_0_x86_64     x86_64  &
+build_wheel macosx_12_0_arm64      aarch64 &
+for job in $(jobs -p); do wait $job; done
+'''
+
+# test
+
+[tasks.test]
+depends = ["test:*"]
+
+[tasks."test:cli-help"]
+description = "locki --help shows shell/list/remove commands"
+run = """
+#!/bin/bash
+set -euxo pipefail
+LOCKI="{{config_root}}/.venv/bin/locki"
+out=$("$LOCKI" --help)
+echo "$out" | grep -q "shell"
+echo "$out" | grep -q "list"
+echo "$out" | grep -q "remove"
+"""
+
+[tasks."test:shell-fails-outside-git"]
+description = "locki shell fails when not in a git repo"
+raw = true
+run = """
+#!/bin/bash
+set -euxo pipefail
+LOCKI="{{config_root}}/.venv/bin/locki"
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+
+cd "$tmp"
+if "$LOCKI" shell test-branch 2>&1; then
+  echo "FAIL: expected nonzero exit" >&2
+  exit 1
+fi
+"""
+
+[tasks."test:list-empty"]
+description = "locki list reports no managed worktrees when none exist"
+raw = true
+run = """
+#!/bin/bash
+set -euxo pipefail
+LOCKI="{{config_root}}/.venv/bin/locki"
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+
+git init "$tmp"
+cd "$tmp"
+git checkout -b main
+echo hello > README.md
+git add .
+git commit -m init
+
+out=$("$LOCKI" list)
+echo "$out" | grep -qi "no locki"
+"""
+
+[tasks."test:list-shows-worktrees"]
+description = "locki list shows branches with managed worktrees"
+raw = true
+run = """
+#!/bin/bash
+set -euxo pipefail
+LOCKI="{{config_root}}/.venv/bin/locki"
+tmp=$(mktemp -d)
+BRANCH="list-test"
+WT_PATH="$HOME/.locki/worktrees/testrepo--${BRANCH}--deadbeef"
+trap 'git -C "$tmp" worktree remove --force "$WT_PATH" 2>/dev/null; git -C "$tmp" branch -D "$BRANCH" 2>/dev/null; rm -rf "$tmp" "$WT_PATH"' EXIT
+
+git init "$tmp"
+cd "$tmp"
+git checkout -b main
+echo hello > README.md
+git add .
+git commit -m init
+
+mkdir -p "$HOME/.locki/worktrees"
+git worktree add "$WT_PATH" -b "$BRANCH"
+
+out=$("$LOCKI" list)
+echo "$out" | grep -q "$BRANCH"
+"""
+
+[tasks."test:remove-nonexistent"]
+description = "locki remove on nonexistent branch succeeds gracefully"
+raw = true
+run = """
+#!/bin/bash
+set -euxo pipefail
+LOCKI="{{config_root}}/.venv/bin/locki"
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+
+git init "$tmp"
+cd "$tmp"
+git checkout -b main
+echo hello > README.md
+git add .
+git commit -m init
+
+"$LOCKI" remove nonexistent
+"""
+
+[tasks."test:remove-worktree"]
+description = "locki remove deletes worktree and branch"
+raw = true
+run = """
+#!/bin/bash
+set -euxo pipefail
+LOCKI="{{config_root}}/.venv/bin/locki"
+tmp=$(mktemp -d)
+BRANCH="to-remove"
+WT_PATH="$HOME/.locki/worktrees/testrepo--${BRANCH}--deadbeef"
+trap 'git -C "$tmp" worktree remove --force "$WT_PATH" 2>/dev/null || true; git -C "$tmp" branch -D "$BRANCH" 2>/dev/null || true; rm -rf "$tmp" "$WT_PATH"' EXIT
+
+git init "$tmp"
+cd "$tmp"
+git checkout -b main
+echo hello > README.md
+git add .
+git commit -m init
+
+mkdir -p "$HOME/.locki/worktrees"
+git worktree add "$WT_PATH" -b "$BRANCH"
+test -d "$WT_PATH"
+
+"$LOCKI" remove "$BRANCH"
+
+test ! -d "$WT_PATH"
+[ -z "$(git branch --list "$BRANCH")" ]
+"""
+
+[tasks."test:remove-uncommitted-changes"]
+description = "locki remove fails when worktree has uncommitted changes"
+raw = true
+run = """
+#!/bin/bash
+set -euxo pipefail
+LOCKI="{{config_root}}/.venv/bin/locki"
+tmp=$(mktemp -d)
+BRANCH="remove-dirty"
+WT_PATH="$HOME/.locki/worktrees/testrepo--${BRANCH}--deadbeef"
+trap 'rm -f "$WT_PATH/dirty.txt"; git -C "$tmp" worktree remove --force "$WT_PATH" 2>/dev/null; git -C "$tmp" branch -D "$BRANCH" 2>/dev/null; rm -rf "$tmp" "$WT_PATH"' EXIT
+
+git init "$tmp"
+cd "$tmp"
+git checkout -b main
+echo hello > README.md
+git add .
+git commit -m init
+
+mkdir -p "$HOME/.locki/worktrees"
+git worktree add "$WT_PATH" -b "$BRANCH"
+echo dirty > "$WT_PATH/dirty.txt"
+
+if "$LOCKI" remove "$BRANCH" 2>&1; then
+  echo "FAIL: expected nonzero exit" >&2
+  exit 1
+fi
+"""
+
+[tasks."test:remove-orphaned-commits"]
+description = "locki remove fails with orphaned commits, succeeds with --force"
+raw = true
+run = """
+#!/bin/bash
+set -euxo pipefail
+LOCKI="{{config_root}}/.venv/bin/locki"
+tmp=$(mktemp -d)
+BRANCH="remove-orphaned"
+WT_PATH="$HOME/.locki/worktrees/testrepo--${BRANCH}--deadbeef"
+trap 'git -C "$tmp" worktree remove --force "$WT_PATH" 2>/dev/null || true; git -C "$tmp" branch -D "$BRANCH" 2>/dev/null || true; rm -rf "$tmp" "$WT_PATH"' EXIT
+
+git init "$tmp"
+cd "$tmp"
+git checkout -b main
+echo hello > README.md
+git add .
+git commit -m init
+
+mkdir -p "$HOME/.locki/worktrees"
+git worktree add "$WT_PATH" -b "$BRANCH"
+echo orphaned > "$WT_PATH/orphaned.txt"
+git -C "$WT_PATH" add orphaned.txt
+git -C "$WT_PATH" -c user.email=test@test -c user.name=test commit -m "orphaned commit"
+
+if "$LOCKI" remove "$BRANCH" 2>&1; then
+  echo "FAIL: expected nonzero exit" >&2
+  exit 1
+fi
+
+"$LOCKI" remove --force "$BRANCH"
+test ! -d "$WT_PATH"
+"""

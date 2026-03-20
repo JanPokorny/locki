@@ -1,0 +1,34 @@
+[project]
+name = "locki"
+version = "0.0.1"
+description = "Lock down agents in a VM, enabling mischief without consequences"
+readme = "README.md"
+requires-python = ">=3.14,<3.15"
+dependencies = [
+    "anyio>=4.12.1",
+    "pydantic>=2.12.5",
+    "rich>=14.3.3",
+    "typer>=0.24.1",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.7",
+    "wheel>=0.46.3",
+]
+
+[project.scripts]
+locki = "locki:app"
+
+[build-system]
+requires = ["uv_build>=0.10.0,<0.11.0"]
+build-backend = "uv_build"
+
+[tool.ruff]
+line-length = 120
+target-version = "py314"
+lint.select = [
+    "E", "W", "F", "UP", "I", "B", "N", "C4", "Q", "SIM", "RUF", "TID", "ASYNC",
+]
+lint.ignore = ["E501"]
+force-exclude = true
