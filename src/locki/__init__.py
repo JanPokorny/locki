@@ -7,6 +7,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import textwrap
 import typing
 
 import typer
@@ -25,6 +26,7 @@ app = AsyncTyperWithAliases(
 LOCKI_HOME = pathlib.Path.home() / ".locki"
 LIMA_HOME = LOCKI_HOME / "lima"
 WORKTREES_HOME = LOCKI_HOME / "worktrees"
+CLAUDE_HOME = LOCKI_HOME / "claude"
 
 
 @functools.cache
@@ -65,7 +67,7 @@ async def ensure_vm() -> None:
             limactl(),
             "--tty=false",
             "create",
-            str(importlib.resources.files("locki").joinpath("locki.yaml")),
+            str(importlib.resources.files("locki").joinpath("data/locki.yaml")),
             "--mount-writable",
             "--name=locki",
         ],
@@ -86,6 +88,16 @@ async def ensure_vm() -> None:
         cwd="/",
         check=False,
     )
+
+
+def ensure_claude_data() -> None:
+    """Seed ~/.locki/claude with bundled config files if they don't already exist."""
+    CLAUDE_HOME.mkdir(parents=True, exist_ok=True)
+    data = importlib.resources.files("locki") / "data"
+    for name in ["settings.json", "CLAUDE.md", "claude.json"]:
+        dst = CLAUDE_HOME / name
+        if not dst.exists():
+            dst.write_text((data / name).read_text())
 
 
 @functools.cache
@@ -243,6 +255,7 @@ async def shell_cmd(
     with verbosity(verbose):
         git_root()  # fail fast if not in a git repo
 
+        ensure_claude_data()
         await ensure_vm()
 
         wt_path = await ensure_worktree(branch)
@@ -348,3 +361,16 @@ async def list_cmd(
 
     if not found:
         console.info("No locki-managed worktrees found.")
+
+
+@app.command("factory-reset", help="Delete the locki VM entirely.")
+async def factory_reset_cmd(
+    verbose: typing.Annotated[bool, typer.Option("-v", "--verbose", help="Show verbose output")] = False,
+):
+    with verbosity(verbose):
+        await run_command(
+            [limactl(), "delete", "-f", "locki"],
+            "Deleting VM",
+            env={"LIMA_HOME": str(LIMA_HOME)},
+            cwd="/",
+        )

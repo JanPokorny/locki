@@ -10,6 +10,9 @@ containerd:
 mounts:
   - location: "~/.locki/worktrees"
     writable: true
+  - location: "~/.locki/claude"
+    mountPoint: "/root/.claude"
+    writable: true
 
 provision:
   - mode: system
@@ -36,13 +39,12 @@ provision:
       profiles:
         - name: default
           config:
-            environment.PATH: /root/.local/bin:/opt/mise/shims:/var/cache/locki/pnpm:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+            environment.PATH: /root/.local/bin:/var/cache/locki/mise/data/shims:/var/cache/locki/pnpm:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
             environment.PNPM_HOME: /var/cache/locki/pnpm
             environment.UV_CACHE_DIR: /var/cache/locki/uv
             environment.COREPACK_ENABLE_DOWNLOAD_PROMPT: 0
-            environment.MISE_DATA_DIR: /opt/mise
-            environment.MISE_CONFIG_DIR: /opt/mise
-            environment.MISE_CACHE_DIR: /var/cache/locki/mise
+            environment.MISE_DATA_DIR: /var/cache/locki/mise/data
+            environment.MISE_CACHE_DIR: /var/cache/locki/mise/cache
             environment.MISE_INSTALL_PATH: /usr/local/bin/mise
             environment.MISE_TRUSTED_CONFIG_PATHS: /
             environment.IS_SANDBOX: 1
@@ -68,13 +70,9 @@ provision:
               path: /var/cache/locki
               source: /var/cache/locki
               type: disk
-            claude-user:
+            claude:
               path: /root/.claude
               source: /root/.claude
-              type: disk
-            claude-managed:
-              path: /etc/claude-code
-              source: /etc/claude-code
               type: disk
       EOF
   - mode: system
@@ -85,30 +83,18 @@ provision:
       incus launch images:fedora/43 locki-base-builder
       incus exec locki-base-builder -- bash <<'ENDBUILD'
         set -euxo pipefail
-        curl --retry 10 --retry-all-errors https://mirrors.fedoraproject.org
+        ln -s /root/.claude/claude.json /root/.claude.json
+        echo -e "cachedir=/var/cache/locki/dnf\\nkeepcache=1" >> /etc/dnf/dnf.conf
+        mkdir -p /etc/claude-code
+        echo '**Sandbox VM environment**: Available package managers: `mise` (preferred) and `dnf` (with RPM Fusion). If there is `mise.toml`, run `mise install`. Otherwise enable specific tool versions using e.g.: `mise use -g python@3.12.1`, `mise use -g node@22`, `mise use -g jq`, falling back to `dnf` if not available.' >/etc/claude-code/CLAUDE.md
+        curl --retry 10 --retry-all-errors https://mirrors.fedoraproject.org  # network takes a few seconds to connect
         dnf install -y \
           https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm \
           https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm
-        curl https://mise.run | sh
-        curl -fsSL https://claude.ai/install.sh | bash
+        dnf -y copr enable jdxcode/mise
+        dnf -y install mise
+        mise use -g claude@latest
       ENDBUILD
       incus stop locki-base-builder
       incus publish locki-base-builder --alias locki-base
-      incus delete --force locki-base-builder
-  - mode: data
-    path: /etc/claude-code/managed-settings.json
-    content: |
-      {
-        "skipDangerousModePermissionPrompt": true,
-        "permissions": {
-          "defaultMode": "bypassPermissions"
-        }
-      }
-  - mode: data
-    path: /etc/claude-code/CLAUDE.md
-    content: |
-      You are running inside a VM, in a managed Incus container. This is an ephemeral environment designed to keep the main machine safe from malfunctioning agents. Before delving into your task, start by setting up the environment:
-
-      Container has Mise-en-place preinstalled. If there is `mise.toml` in the repo root, run `mise install` to install tools from it. Otherwise, check files like `.tool-versions`, `.nvmrc`, `pyproject.toml`, etc. or docs like `README.md`, `CONTRIBUTING.md` to determine needed tools and versions. Enable specific tool versions using e.g.: `mise use -g python@3.12.1`, `mise use -g node@22`, `mise use -g jq`. Container has Fedora 43 with RPM Fusion enabled -- install packages not available through Mise with `dnf install -y ...`.
-
-      `git` and `gh` are not configured inside the container. Do not attempt to use git or gh directly. When the user wants to commit, push, or open a PR, instruct them to `cd` in the worktree directory (matches on host and guest) and run the commands.
+      incus delete locki-base-builder
