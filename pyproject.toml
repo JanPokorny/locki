@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.14,<3.15"
 dependencies = [
     "anyio>=4.12.1",
+    "inquirerpy>=0.3.4",
     "pydantic>=2.12.5",
     "rich>=14.3.3",
     "typer>=0.24.1",

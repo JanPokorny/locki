@@ -2,6 +2,7 @@ import functools
 import importlib.resources
 import os
 import pathlib
+import re
 import secrets
 import shlex
 import shutil
@@ -246,14 +247,60 @@ async def ensure_container(wt_id: str, wt_path: pathlib.Path, config) -> None:
     )
 
 
+def git_hooks_dir() -> pathlib.Path:
+    return git_root() / ".git" / "hooks"
+
+
+def find_unwrapped_hooks() -> list[pathlib.Path]:
+    """Find executable shell hook files in .git/hooks that haven't been wrapped by locki."""
+    hooks_dir = git_hooks_dir()
+    if not hooks_dir.is_dir():
+        return []
+    shell_shebang = re.compile(rb"^#!\s*(?:/usr)?/bin/(?:env\s+)?(?:ba)?sh\b")
+    unwrapped = []
+    for f in sorted(hooks_dir.iterdir()):
+        if f.name.endswith((".sample", ".locki-wrapped")):
+            continue
+        if not f.is_file() or not os.access(f, os.X_OK):
+            continue
+        if (hooks_dir / f"{f.name}.locki-wrapped").exists():
+            continue
+        try:
+            with open(f, "rb") as fh:
+                if not shell_shebang.match(fh.readline(128)):
+                    continue
+        except OSError:
+            continue
+        unwrapped.append(f)
+    return unwrapped
+
+
 @app.command("shell", help="Open a shell in the per-branch container (creates branch/worktree/container if needed).")
 async def shell_cmd(
     branch: typing.Annotated[str, typer.Argument(help="Branch name to work on")],
-    command: typing.Annotated[str | None, typer.Option("-c", help="Command to run instead of an interactive shell")] = None,
+    command: typing.Annotated[
+        str | None, typer.Option("-c", help="Command to run instead of an interactive shell")
+    ] = None,
     verbose: typing.Annotated[bool, typer.Option("-v", "--verbose", help="Show verbose output")] = False,
 ):
     with verbosity(verbose):
         git_root()  # fail fast if not in a git repo
+
+        do_not_wrap = git_root() / ".git" / "locki" / "do-not-wrap-hooks"
+        if command is None and sys.stdin.isatty() and not do_not_wrap.exists():
+            unwrapped = find_unwrapped_hooks()
+            if unwrapped:
+                from InquirerPy import inquirer
+
+                hook_names = ", ".join(h.name for h in unwrapped)
+                if inquirer.confirm(
+                    message=f"Found unwrapped git hooks: {hook_names}. Wrap them for Locki?",
+                    default=True,
+                ).execute():
+                    await wrap_git_hooks_cmd()
+                else:
+                    do_not_wrap.parent.mkdir(parents=True, exist_ok=True)
+                    do_not_wrap.touch()
 
         ensure_claude_data()
         await ensure_vm()
@@ -292,8 +339,9 @@ async def shell_cmd(
                     *(f"--env={env}=${env}" for env in forwarded_env),
                     "--",
                     "bash",
-                    "--login"
-                ] + (["-c", shlex.quote(command)] if command else [])
+                    "--login",
+                ]
+                + (["-c", shlex.quote(command)] if command else [])
             ),
         ],
     )
@@ -321,12 +369,19 @@ async def remove_cmd(
             console.info(f"No locki-managed worktree found for '{branch}', nothing to do.")
             return
 
-        if not force and (await run_command(
-            ["git", "-C", str(wt_path), "status", "--porcelain"],
-            "Checking for uncommitted changes",
-            check=False,
-        )).stdout.strip():
-            console.error(f"Worktree for {branch} in {wt_path} has uncommitted changes. Commit or stash them, or use --force.")
+        if (
+            not force
+            and (
+                await run_command(
+                    ["git", "-C", str(wt_path), "status", "--porcelain"],
+                    "Checking for uncommitted changes",
+                    check=False,
+                )
+            ).stdout.strip()
+        ):
+            console.error(
+                f"Worktree for {branch} in {wt_path} has uncommitted changes. Commit or stash them, or use --force."
+            )
             sys.exit(1)
 
         wt_id = wt_path.relative_to(WORKTREES_HOME).parts[0]
@@ -370,6 +425,45 @@ async def list_cmd(
 
     if not found:
         console.info("No locki-managed worktrees found.")
+
+
+@app.command("wrap-git-hooks", help="Wrap git hooks to run inside the locki sandbox for managed worktrees.")
+async def wrap_git_hooks_cmd(
+    undo: typing.Annotated[bool, typer.Option("--undo", help="Undo the hook wrapping")] = False,
+):
+    git_root()  # fail fast if not in a git repo
+
+    hooks_dir = git_hooks_dir()
+
+    if undo:
+        if not hooks_dir.is_dir():
+            console.info("No locki-wrapped hooks found.")
+            return
+        hooks = [
+            hooks_dir / f.name.removesuffix(".locki-wrapped")
+            for f in sorted(hooks_dir.iterdir())
+            if f.name.endswith(".locki-wrapped") and (hooks_dir / f.name.removesuffix(".locki-wrapped")).exists()
+        ]
+        if not hooks:
+            console.info("No locki-wrapped hooks found.")
+            return
+        for hook in hooks:
+            hook.unlink()
+            (hook.parent / f"{hook.name}.locki-wrapped").rename(hook)
+            console.print(f"Unwrapped {hook.name}")
+        console.info(f"Restored {len(hooks)} hook(s) to their original state.")
+    else:
+        hooks = find_unwrapped_hooks()
+        if not hooks:
+            console.info("No hooks to wrap (all hooks are already wrapped or none exist).")
+            return
+        wrapper_src = importlib.resources.files("locki") / "data" / "hook-wrapper.sh"
+        for hook in hooks:
+            hook.rename(hook.parent / f"{hook.name}.locki-wrapped")
+            shutil.copy2(wrapper_src, hook)
+            hook.chmod(0o755)
+            console.print(f"Wrapped {hook.name}")
+        console.info(f"Wrapped {len(hooks)} hook(s). Use 'locki wrap-git-hooks --undo' to reverse.")
 
 
 @app.command("factory-reset", help="Delete the locki VM entirely.")
