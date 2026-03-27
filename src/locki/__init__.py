@@ -1,3 +1,5 @@
+import contextlib
+import fcntl
 import functools
 import importlib.resources
 import os
@@ -58,36 +60,51 @@ async def run_in_vm(
     )
 
 
+@contextlib.asynccontextmanager
+async def _vm_lock():
+    """Acquire an exclusive file lock so only one process creates/starts the VM at a time."""
+    LOCKI_HOME.mkdir(exist_ok=True)
+    lock_path = LOCKI_HOME / "vm.lock"
+    fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+
+
 async def ensure_vm() -> None:
     LOCKI_HOME.mkdir(exist_ok=True)
     LIMA_HOME.mkdir(exist_ok=True, parents=True)
     WORKTREES_HOME.mkdir(parents=True, exist_ok=True)
-    await run_command(
-        [
-            limactl(),
-            "--tty=false",
-            "create",
-            str(importlib.resources.files("locki").joinpath("data/locki.yaml")),
-            "--mount-writable",
-            "--name=locki",
-        ],
-        "Preparing VM",
-        env={"LIMA_HOME": str(LIMA_HOME)},
-        cwd="/",
-        check=False,
-    )
-    await run_command(
-        [
-            limactl(),
-            "--tty=false",
-            "start",
-            "locki",
-        ],
-        "Starting VM",
-        env={"LIMA_HOME": str(LIMA_HOME)},
-        cwd="/",
-        check=False,
-    )
+    async with _vm_lock():
+        await run_command(
+            [
+                limactl(),
+                "--tty=false",
+                "create",
+                str(importlib.resources.files("locki").joinpath("data/locki.yaml")),
+                "--mount-writable",
+                "--name=locki",
+            ],
+            "Preparing VM",
+            env={"LIMA_HOME": str(LIMA_HOME)},
+            cwd="/",
+            check=False,
+        )
+        await run_command(
+            [
+                limactl(),
+                "--tty=false",
+                "start",
+                "locki",
+            ],
+            "Starting VM",
+            env={"LIMA_HOME": str(LIMA_HOME)},
+            cwd="/",
+            check=False,
+        )
 
 
 def ensure_claude_data() -> None:
