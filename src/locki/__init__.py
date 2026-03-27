@@ -7,7 +7,6 @@ import shlex
 import shutil
 import subprocess
 import sys
-import textwrap
 import typing
 
 import typer
@@ -250,6 +249,7 @@ async def ensure_container(wt_id: str, wt_path: pathlib.Path, config) -> None:
 @app.command("shell", help="Open a shell in the per-branch container (creates branch/worktree/container if needed).")
 async def shell_cmd(
     branch: typing.Annotated[str, typer.Argument(help="Branch name to work on")],
+    command: typing.Annotated[str | None, typer.Option("-c", help="Command to run instead of an interactive shell")] = None,
     verbose: typing.Annotated[bool, typer.Option("-v", "--verbose", help="Show verbose output")] = False,
 ):
     with verbosity(verbose):
@@ -292,11 +292,20 @@ async def shell_cmd(
                     *(f"--env={env}=${env}" for env in forwarded_env),
                     "--",
                     "bash",
-                    "--login",
-                ]
+                    "--login"
+                ] + (["-c", shlex.quote(command)] if command else [])
             ),
         ],
     )
+
+
+@app.command("claude")
+async def claude_cmd(
+    branch: typing.Annotated[str, typer.Argument(help="Branch name to work on")],
+    verbose: typing.Annotated[bool, typer.Option("-v", "--verbose", help="Show verbose output")] = False,
+):
+    """Run Claude in the sandbox."""
+    await shell_cmd(branch=branch, command="claude", verbose=verbose)
 
 
 @app.command("remove", help="Remove a branch's worktree and container.")
