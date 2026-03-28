@@ -42,6 +42,9 @@ provision:
             environment.PATH: /root/.local/bin:/var/cache/locki/mise/data/shims:/var/cache/locki/pnpm:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
             environment.PNPM_HOME: /var/cache/locki/pnpm
             environment.UV_CACHE_DIR: /var/cache/locki/uv
+            environment.PIP_CACHE_DIR: /var/cache/locki/pip
+            environment.NPM_CONFIG_CACHE: /var/cache/locki/npm
+            environment.YARN_CACHE_FOLDER: /var/cache/locki/yarn
             environment.COREPACK_ENABLE_DOWNLOAD_PROMPT: 0
             environment.MISE_DATA_DIR: /var/cache/locki/mise/data
             environment.MISE_CACHE_DIR: /var/cache/locki/mise/cache
