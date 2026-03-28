@@ -45,6 +45,14 @@ provision:
             environment.PIP_CACHE_DIR: /var/cache/locki/pip
             environment.NPM_CONFIG_CACHE: /var/cache/locki/npm
             environment.YARN_CACHE_FOLDER: /var/cache/locki/yarn
+            environment.GOMODCACHE: /var/cache/locki/go/mod
+            environment.GOCACHE: /var/cache/locki/go/build
+            environment.CARGO_HOME: /var/cache/locki/cargo
+            environment.GRADLE_USER_HOME: /var/cache/locki/gradle
+            environment.MAVEN_OPTS: -Dmaven.repo.local=/var/cache/locki/maven
+            environment.BUNDLE_PATH: /var/cache/locki/bundle
+            environment.COMPOSER_CACHE_DIR: /var/cache/locki/composer
+            environment.NUGET_PACKAGES: /var/cache/locki/nuget
             environment.COREPACK_ENABLE_DOWNLOAD_PROMPT: 0
             environment.MISE_DATA_DIR: /var/cache/locki/mise/data
             environment.MISE_CACHE_DIR: /var/cache/locki/mise/cache
