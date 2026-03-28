@@ -2,5 +2,11 @@
   "skipDangerousModePermissionPrompt": true,
   "permissions": {
     "defaultMode": "bypassPermissions"
+  },
+  "mcpServers": {
+    "locki": {
+      "type": "http",
+      "url": "http://host.lima.internal:7890/mcp"
+    }
   }
 }

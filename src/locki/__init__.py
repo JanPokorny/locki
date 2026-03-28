@@ -8,8 +8,10 @@ import re
 import secrets
 import shlex
 import shutil
+import socket
 import subprocess
 import sys
+import time
 import typing
 
 import typer
@@ -29,6 +31,7 @@ LOCKI_HOME = pathlib.Path.home() / ".locki"
 LIMA_HOME = LOCKI_HOME / "lima"
 WORKTREES_HOME = LOCKI_HOME / "worktrees"
 CLAUDE_HOME = LOCKI_HOME / "claude"
+MCP_PORT = 7890
 
 
 @functools.cache
@@ -115,6 +118,36 @@ def ensure_claude_data() -> None:
         dst = CLAUDE_HOME / name
         if not dst.exists():
             dst.write_text((data / name).read_text())
+
+
+def ensure_mcp_server() -> None:
+    """Start the locki MCP server as a host daemon if not already running."""
+    pid_file = LOCKI_HOME / "mcp.pid"
+
+    if pid_file.exists():
+        try:
+            os.kill(int(pid_file.read_text().strip()), 0)
+            return  # already running
+        except (ProcessLookupError, ValueError, OSError):
+            pid_file.unlink(missing_ok=True)
+
+    log_path = LOCKI_HOME / "mcp.log"
+    with open(log_path, "a") as log:
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "locki.mcp_server"],
+            stdout=log,
+            stderr=log,
+            start_new_session=True,
+        )
+    pid_file.write_text(str(proc.pid))
+
+    # Wait up to 5 s for the server to accept connections
+    for _ in range(10):
+        try:
+            with socket.create_connection(("localhost", MCP_PORT), timeout=0.5):
+                return
+        except OSError:
+            time.sleep(0.5)
 
 
 @functools.cache
@@ -263,6 +296,21 @@ async def ensure_container(wt_id: str, wt_path: pathlib.Path, config) -> None:
         "Starting container",
     )
 
+    # Inject host.lima.internal so containers can reach the MCP server on the host.
+    # Lima sets this hostname in the VM's /etc/hosts; containers don't inherit it.
+    host_ip_result = await run_in_vm(
+        ["bash", "-c", "getent hosts host.lima.internal | awk '{print $1}' | head -1"],
+        "Resolving host IP",
+        check=False,
+    )
+    host_ip = host_ip_result.stdout.decode().strip()
+    if host_ip:
+        await run_in_vm(
+            ["incus", "exec", wt_id, "--",
+             "bash", "-c", f"echo '{host_ip} host.lima.internal' >> /etc/hosts"],
+            "Configuring host access in container",
+        )
+
 
 def git_hooks_dir() -> pathlib.Path:
     return git_root() / ".git" / "hooks"
@@ -319,6 +367,7 @@ async def shell_cmd(
                     do_not_wrap.parent.mkdir(parents=True, exist_ok=True)
                     do_not_wrap.touch()
 
+        ensure_mcp_server()
         ensure_claude_data()
         await ensure_vm()
 
