@@ -2,14 +2,13 @@
 """Stops idle Incus containers that have no active user sessions."""
 import json
 import logging
-import os
 import signal
 import subprocess
 import sys
 import time
 
-IDLE_TIMEOUT = int(os.environ.get("LOCKI_IDLE_TIMEOUT", "600"))  # seconds, default 10 min
-CHECK_INTERVAL = int(os.environ.get("LOCKI_CHECK_INTERVAL", "60"))  # seconds
+IDLE_TIMEOUT = 600  # seconds
+CHECK_INTERVAL = 60  # seconds
 
 logging.basicConfig(
     level=logging.INFO,
