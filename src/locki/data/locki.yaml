@@ -107,6 +107,144 @@ provision:
     script: |
       #!/bin/bash
       set -euxo pipefail
+      if systemctl is-enabled locki-idle-daemon 2>/dev/null; then exit 0; fi
+
+      cat > /usr/local/bin/locki-idle-daemon << 'PYEOF'
+      #!/usr/bin/env python3
+      """Stops idle Incus containers that have no active user sessions."""
+      import json
+      import logging
+      import os
+      import signal
+      import subprocess
+      import sys
+      import time
+
+      IDLE_TIMEOUT = int(os.environ.get("LOCKI_IDLE_TIMEOUT", "600"))
+      CHECK_INTERVAL = int(os.environ.get("LOCKI_CHECK_INTERVAL", "60"))
+
+      logging.basicConfig(
+          level=logging.INFO,
+          format="%(asctime)s %(levelname)s %(message)s",
+          stream=sys.stdout,
+          force=True,
+      )
+      log = logging.getLogger(__name__)
+
+
+      def running_containers() -> list[str]:
+          r = subprocess.run(
+              ["incus", "list", "--format=csv", "--columns=n,s"],
+              capture_output=True, text=True,
+          )
+          names = []
+          for line in r.stdout.splitlines():
+              parts = line.split(",", 1)
+              if len(parts) == 2 and parts[1].strip() == "RUNNING":
+                  names.append(parts[0].strip())
+          return names
+
+
+      def containers_with_active_sessions() -> set[str]:
+          """Return names of containers that have active exec operations."""
+          r = subprocess.run(
+              ["incus", "operation", "list", "--format=json"],
+              capture_output=True, text=True,
+          )
+          if r.returncode != 0 or not r.stdout.strip():
+              return set()
+          try:
+              ops = json.loads(r.stdout)
+          except json.JSONDecodeError:
+              return set()
+          active: set[str] = set()
+          for op in ops:
+              if op.get("status") != "Running":
+                  continue
+              resources = op.get("resources") or {}
+              for key in ("containers", "instances"):
+                  for path in resources.get(key) or []:
+                      active.add(path.rsplit("/", 1)[-1])
+          return active
+
+
+      def stop_container(name: str) -> None:
+          subprocess.run(["incus", "stop", name], capture_output=True)
+
+
+      def main() -> None:
+          last_active: dict[str, float] = {}
+
+          def _exit(signum, frame):
+              log.info("Received signal %d, exiting.", signum)
+              sys.exit(0)
+
+          signal.signal(signal.SIGTERM, _exit)
+          signal.signal(signal.SIGINT, _exit)
+
+          log.info(
+              "locki-idle-daemon started (idle_timeout=%ds check_interval=%ds)",
+              IDLE_TIMEOUT, CHECK_INTERVAL,
+          )
+
+          while True:
+              try:
+                  running = set(running_containers())
+                  active = containers_with_active_sessions()
+                  now = time.monotonic()
+
+                  for name in running:
+                      if name in active:
+                          last_active[name] = now
+                      elif name not in last_active:
+                          last_active[name] = now
+                      else:
+                          idle_for = now - last_active[name]
+                          if idle_for >= IDLE_TIMEOUT:
+                              log.info("Stopping idle container %r (idle %.0fs).", name, idle_for)
+                              stop_container(name)
+                              last_active.pop(name, None)
+
+                  for name in list(last_active):
+                      if name not in running:
+                          last_active.pop(name)
+
+              except Exception as exc:
+                  log.error("Unexpected error: %s", exc)
+
+              time.sleep(CHECK_INTERVAL)
+
+
+      if __name__ == "__main__":
+          main()
+      PYEOF
+      chmod +x /usr/local/bin/locki-idle-daemon
+
+      cat > /etc/systemd/system/locki-idle-daemon.service << 'SVCEOF'
+      [Unit]
+      Description=Locki Incus Idle Daemon
+      After=incus.service
+      Requires=incus.service
+
+      [Service]
+      Type=simple
+      ExecStart=/usr/local/bin/locki-idle-daemon
+      Restart=on-failure
+      RestartSec=10s
+      StandardOutput=journal
+      StandardError=journal
+
+      [Install]
+      WantedBy=multi-user.target
+      SVCEOF
+
+      systemctl daemon-reload
+      systemctl enable --now locki-idle-daemon
+
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -euxo pipefail
       if incus image list --format csv | grep -q locki-base; then exit 0; fi
       incus launch images:fedora/43 locki-base-builder
       incus exec locki-base-builder -- bash <<'ENDBUILD'
