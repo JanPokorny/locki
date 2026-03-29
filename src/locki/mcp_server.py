@@ -2,7 +2,9 @@
 
 Single tool: run_host_command(worktree_path, exe, args)
 - exe is restricted to "git" or "gh"
-- args are checked against an allowlist of subcommand prefixes
+- args are validated against an explicit allowlist: each rule specifies
+  a required subcommand prefix and the exact set of flags permitted beyond it
+- non-flag positional args (paths, refs, commit hashes) are always allowed
 - path-redirecting flags are blocked so agents cannot escape their worktree
 - the command runs with cwd=worktree_path on the host (where credentials live)
 
@@ -15,60 +17,178 @@ from __future__ import annotations
 
 import json
 import pathlib
+import re
 import subprocess
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import NamedTuple
 
 LOCKI_HOME = pathlib.Path.home() / ".locki"
 WORKTREES_HOME = LOCKI_HOME / "worktrees"
 MCP_PORT = 7890
 
-# Allowed first arg(s) per executable. A prefix of length N means the first
-# N elements of args must match. Anything beyond the prefix is passed through.
-_GIT_ALLOWED: frozenset[tuple[str, ...]] = frozenset([
-    # read-only
-    ("branch",),
-    ("diff",),
-    ("fetch",),
-    ("log",),
-    ("show",),
-    ("stash", "list"),
-    ("stash", "show"),
-    ("status",),
-    # own-worktree writes
-    ("add",),
-    ("checkout",),      # e.g. git checkout other-branch -- path/to/file
-    ("commit",),
-    ("push",),
-    ("restore",),
-    ("stash", "apply"),
-    ("stash", "drop"),
-    ("stash", "pop"),
-    ("stash", "push"),
-    ("tag",),
-])
 
-_GH_ALLOWED: frozenset[tuple[str, ...]] = frozenset([
-    ("issue", "comment"),
-    ("issue", "create"),
-    ("issue", "list"),
-    ("issue", "view"),
-    ("pr", "comment"),
-    ("pr", "create"),
-    ("pr", "diff"),
-    ("pr", "list"),
-    ("pr", "review"),
-    ("pr", "status"),
-    ("pr", "view"),
-    ("repo", "view"),
-    ("run", "list"),
-    ("run", "view"),
-    ("workflow", "list"),
-    ("workflow", "view"),
-])
+class _Rule(NamedTuple):
+    """One entry in an allowlist.
 
-# Flags that could redirect git to a different directory or repo — always blocked.
+    prefix      — args must start with exactly these strings.
+    allowed_flags — flags (args starting with '-') permitted beyond the prefix.
+                    Non-flag args (paths, refs, messages) are always allowed.
+    """
+
+    prefix: tuple[str, ...]
+    allowed_flags: frozenset[str] = frozenset()
+
+
+_GIT_RULES: tuple[_Rule, ...] = (
+    # ── read-only ────────────────────────────────────────────────────────────
+    _Rule(("branch",),      frozenset(["-a", "--all", "-r", "--remotes",
+                                       "-v", "--verbose", "-l", "--list",
+                                       "--sort", "--contains"])),
+    _Rule(("diff",),        frozenset(["--staged", "--cached",
+                                       "--stat", "--name-only", "--name-status",
+                                       "-p", "--patch", "-U", "--unified",
+                                       "--diff-filter"])),
+    _Rule(("fetch",),       frozenset(["--all", "--prune", "-p",
+                                       "--tags", "-t", "--dry-run", "-n"])),
+    _Rule(("log",),         frozenset(["--oneline", "--graph", "--decorate",
+                                       "--all", "--follow",
+                                       "-n", "--format", "--pretty",
+                                       "--since", "--until", "--after", "--before",
+                                       "--author", "--grep",
+                                       "--no-merges", "--merges",
+                                       "--stat", "--name-only",
+                                       "-p", "--patch"])),
+    _Rule(("show",),        frozenset(["--stat", "--name-only", "--name-status",
+                                       "--format", "--pretty",
+                                       "-p", "--patch", "--no-patch"])),
+    _Rule(("stash", "list"),  frozenset()),
+    _Rule(("stash", "show"),  frozenset(["-p", "--patch", "--stat", "--name-only"])),
+    _Rule(("status",),      frozenset(["-s", "--short", "-b", "--branch",
+                                       "--porcelain",
+                                       "-u", "--untracked-files"])),
+    _Rule(("tag",),         frozenset(["-l", "--list", "-n",
+                                       "--sort", "--contains",
+                                       "--merged", "--no-merged"])),
+    # ── own-worktree writes ───────────────────────────────────────────────────
+    _Rule(("add",),         frozenset(["-A", "--all",
+                                       "-p", "--patch",
+                                       "-u", "--update",
+                                       "-n", "--dry-run"])),
+    _Rule(("checkout",),    frozenset(["--", "-b", "-B"])),
+    _Rule(("commit",),      frozenset(["-m", "--message",
+                                       "--amend", "--no-edit",
+                                       "-a", "--all",
+                                       "--allow-empty",
+                                       "--no-verify"])),
+    _Rule(("push",),        frozenset(["-u", "--set-upstream", "--tags"])),
+    _Rule(("restore",),     frozenset(["--staged", "--worktree",
+                                       "-s", "--source", "--"])),
+    _Rule(("stash", "apply"),  frozenset(["--index"])),
+    _Rule(("stash", "drop"),   frozenset()),
+    _Rule(("stash", "pop"),    frozenset(["--index"])),
+    _Rule(("stash", "push"),   frozenset(["-u", "--include-untracked",
+                                           "-m", "--message",
+                                           "-p", "--patch"])),
+)
+
+_GH_RULES: tuple[_Rule, ...] = (
+    # ── issues ───────────────────────────────────────────────────────────────
+    _Rule(("issue", "comment"),  frozenset(["-b", "--body", "-F", "--body-file"])),
+    _Rule(("issue", "create"),   frozenset(["-t", "--title",
+                                            "-b", "--body", "-F", "--body-file",
+                                            "-l", "--label",
+                                            "-a", "--assignee",
+                                            "-m", "--milestone",
+                                            "-p", "--project",
+                                            "--web"])),
+    _Rule(("issue", "list"),     frozenset(["-a", "--assignee", "-A", "--author",
+                                            "-l", "--label",
+                                            "-L", "--limit",
+                                            "-m", "--milestone",
+                                            "-s", "--state",
+                                            "--web", "--json", "--jq"])),
+    _Rule(("issue", "view"),     frozenset(["-c", "--comments",
+                                            "--json", "--jq",
+                                            "-w", "--web"])),
+    # ── pull requests ─────────────────────────────────────────────────────────
+    _Rule(("pr", "comment"),     frozenset(["-b", "--body", "-F", "--body-file",
+                                            "--edit-last", "--reply-to"])),
+    _Rule(("pr", "create"),      frozenset(["-t", "--title",
+                                            "-b", "--body", "-F", "--body-file",
+                                            "-B", "--base", "-H", "--head",
+                                            "-d", "--draft",
+                                            "-l", "--label",
+                                            "-a", "--assignee",
+                                            "-m", "--milestone",
+                                            "-p", "--project",
+                                            "-r", "--reviewer",
+                                            "-f", "--fill", "--fill-verbose",
+                                            "--web"])),
+    _Rule(("pr", "diff"),        frozenset(["--patch", "--name-only", "--color"])),
+    _Rule(("pr", "list"),        frozenset(["-a", "--assignee", "-A", "--author",
+                                            "-B", "--base", "-d", "--draft",
+                                            "-H", "--head",
+                                            "-l", "--label",
+                                            "-L", "--limit",
+                                            "-s", "--state",
+                                            "--json", "--jq",
+                                            "-w", "--web"])),
+    _Rule(("pr", "review"),      frozenset(["-a", "--approve",
+                                            "-c", "--comment",
+                                            "-r", "--request-changes",
+                                            "-b", "--body", "-F", "--body-file"])),
+    _Rule(("pr", "status"),      frozenset(["--json", "--jq"])),
+    _Rule(("pr", "view"),        frozenset(["-c", "--comments",
+                                            "--json", "--jq",
+                                            "-w", "--web"])),
+    # ── repo / CI ─────────────────────────────────────────────────────────────
+    _Rule(("repo", "view"),      frozenset(["-b", "--branch",
+                                            "--json", "--jq",
+                                            "-w", "--web"])),
+    _Rule(("run", "list"),       frozenset(["-b", "--branch", "-c", "--commit",
+                                            "-e", "--event",
+                                            "-L", "--limit",
+                                            "-s", "--status",
+                                            "-u", "--user",
+                                            "-w", "--workflow",
+                                            "--json", "--jq"])),
+    _Rule(("run", "view"),       frozenset(["--exit-status",
+                                            "-j", "--job",
+                                            "--log", "--log-failed",
+                                            "-v", "--verbose",
+                                            "-w", "--web",
+                                            "--json", "--jq"])),
+    _Rule(("workflow", "list"),  frozenset(["-a", "--all",
+                                            "-L", "--limit",
+                                            "-r", "--ref",
+                                            "--json", "--jq"])),
+    _Rule(("workflow", "view"),  frozenset(["-r", "--ref",
+                                            "-w", "--web",
+                                            "--yaml",
+                                            "--json", "--jq"])),
+)
+
+# Flags that could redirect git/gh to a different directory or repo — always blocked.
 _GIT_BLOCKED_FLAGS: frozenset[str] = frozenset(["-C", "--git-dir", "--work-tree"])
 _GH_BLOCKED_FLAGS: frozenset[str] = frozenset(["--repo", "-R"])
+
+# Matches combined short-flag+value like -n5 or -U3; we check just the flag part.
+_SHORT_FLAG_WITH_VALUE = re.compile(r"^(-[a-zA-Z])\d+$")
+
+
+def _flag_name(arg: str) -> str:
+    """Normalise an arg to just the flag name for allowlist lookup.
+
+    --format=pretty  →  --format
+    -n5              →  -n
+    --patch          →  --patch
+    """
+    if "=" in arg:
+        return arg.split("=", 1)[0]
+    m = _SHORT_FLAG_WITH_VALUE.match(arg)
+    if m:
+        return m.group(1)
+    return arg
 
 
 def _validate_worktree(worktree_path: str) -> pathlib.Path:
@@ -81,30 +201,46 @@ def _validate_worktree(worktree_path: str) -> pathlib.Path:
 
 
 def _check_allowed(exe: str, args: list[str]) -> None:
-    """Raise ValueError if (exe, args) is not permitted."""
+    """Raise ValueError if (exe, args) is not on the allowlist."""
     if not args:
         raise ValueError("args must not be empty")
 
     if exe == "git":
         for arg in args:
-            if arg in _GIT_BLOCKED_FLAGS:
-                raise ValueError(f"Flag {arg!r} is not allowed (would redirect to a different directory)")
-        if args[0] == "push" and ("--force" in args or "-f" in args):
+            if _flag_name(arg) in _GIT_BLOCKED_FLAGS:
+                raise ValueError(
+                    f"Flag {arg!r} is not allowed (would redirect to a different directory)"
+                )
+        if args[0] == "push" and any(_flag_name(a) in ("--force", "-f") for a in args):
             raise ValueError("git push --force is not allowed")
-        allowed = _GIT_ALLOWED
+        rules = _GIT_RULES
 
     elif exe == "gh":
         for arg in args:
-            if arg in _GH_BLOCKED_FLAGS:
-                raise ValueError(f"Flag {arg!r} is not allowed (would target a different repo)")
-        allowed = _GH_ALLOWED
+            if _flag_name(arg) in _GH_BLOCKED_FLAGS:
+                raise ValueError(
+                    f"Flag {arg!r} is not allowed (would target a different repo)"
+                )
+        rules = _GH_RULES
 
     else:
         raise ValueError(f"Executable {exe!r} is not allowed; use 'git' or 'gh'")
 
-    for prefix in allowed:
-        if tuple(args[: len(prefix)]) == prefix:
-            return
+    for rule in rules:
+        n = len(rule.prefix)
+        if tuple(args[:n]) != rule.prefix:
+            continue
+        # Prefix matched — now check remaining args.
+        for arg in args[n:]:
+            if not arg.startswith("-"):
+                continue  # positional arg (path, ref, message …) — always ok
+            flag = _flag_name(arg)
+            if flag not in rule.allowed_flags:
+                raise ValueError(
+                    f"Flag {arg!r} is not allowed for"
+                    f" '{exe} {' '.join(rule.prefix)}'"
+                )
+        return  # all good
 
     raise ValueError(
         f"'{exe} {' '.join(args[:3])}' is not in the allowed command list"
