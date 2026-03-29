@@ -94,6 +94,17 @@ provision:
         dnf -y copr enable jdxcode/mise
         dnf -y install mise
         mise use -g claude@latest
+        cat > /usr/local/bin/locki-stub << 'STUBEOF'
+#!/bin/sh
+cmd=$(basename "$0")
+echo "$cmd: not available inside the locki sandbox." >&2
+echo "Use the 'locki' MCP tool instead:" >&2
+echo "  run_host_command(worktree_path=\"\$PWD\", exe=\"$cmd\", args=[...])" >&2
+exit 1
+STUBEOF
+        chmod 755 /usr/local/bin/locki-stub
+        ln -sf locki-stub /usr/local/bin/git
+        ln -sf locki-stub /usr/local/bin/gh
       ENDBUILD
       incus stop locki-base-builder
       incus publish locki-base-builder --alias locki-base
