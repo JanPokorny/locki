@@ -1,10 +1,14 @@
-"""MCP server exposing limited host operations to locki sandboxed agents.
+"""MCP server exposing allowed host commands to locki sandboxed agents.
 
-Implements the MCP streamable HTTP transport (2024-11-05) using stdlib only.
-Runs on the host so it has access to git credentials, SSH agent, and gh CLI.
+Single tool: run_host_command(worktree_path, exe, args)
+- exe is restricted to "git" or "gh"
+- args are checked against an allowlist of subcommand prefixes
+- path-redirecting flags are blocked so agents cannot escape their worktree
+- the command runs with cwd=worktree_path on the host (where credentials live)
 
-Agents authenticate implicitly: every tool call includes the worktree_path,
-which contains a random hex segment unknown to other containers.
+Agents authenticate implicitly: worktree_path contains a random hex segment
+that other containers don't know, so they cannot forge calls on each other's
+worktrees.
 """
 
 from __future__ import annotations
@@ -18,55 +22,53 @@ LOCKI_HOME = pathlib.Path.home() / ".locki"
 WORKTREES_HOME = LOCKI_HOME / "worktrees"
 MCP_PORT = 7890
 
-_TOOLS = [
-    {
-        "name": "git_commit",
-        "description": "Stage all changes and create a git commit in a locki worktree.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "worktree_path": {
-                    "type": "string",
-                    "description": "Absolute path to the locki worktree (your current working directory).",
-                },
-                "message": {"type": "string", "description": "Commit message."},
-            },
-            "required": ["worktree_path", "message"],
-        },
-    },
-    {
-        "name": "git_push",
-        "description": "Push the current branch to a remote.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "worktree_path": {
-                    "type": "string",
-                    "description": "Absolute path to the locki worktree.",
-                },
-                "remote": {"type": "string", "description": "Remote name (default: origin)."},
-            },
-            "required": ["worktree_path"],
-        },
-    },
-    {
-        "name": "gh_pr_create",
-        "description": "Create a GitHub pull request for the current branch of a locki worktree.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "worktree_path": {
-                    "type": "string",
-                    "description": "Absolute path to the locki worktree.",
-                },
-                "title": {"type": "string", "description": "PR title."},
-                "body": {"type": "string", "description": "PR description."},
-                "base": {"type": "string", "description": "Base branch (default: main)."},
-            },
-            "required": ["worktree_path", "title"],
-        },
-    },
-]
+# Allowed first arg(s) per executable. A prefix of length N means the first
+# N elements of args must match. Anything beyond the prefix is passed through.
+_GIT_ALLOWED: frozenset[tuple[str, ...]] = frozenset([
+    # read-only
+    ("branch",),
+    ("diff",),
+    ("fetch",),
+    ("log",),
+    ("show",),
+    ("stash", "list"),
+    ("stash", "show"),
+    ("status",),
+    # own-worktree writes
+    ("add",),
+    ("checkout",),      # e.g. git checkout other-branch -- path/to/file
+    ("commit",),
+    ("push",),
+    ("restore",),
+    ("stash", "apply"),
+    ("stash", "drop"),
+    ("stash", "pop"),
+    ("stash", "push"),
+    ("tag",),
+])
+
+_GH_ALLOWED: frozenset[tuple[str, ...]] = frozenset([
+    ("issue", "comment"),
+    ("issue", "create"),
+    ("issue", "list"),
+    ("issue", "view"),
+    ("pr", "comment"),
+    ("pr", "create"),
+    ("pr", "diff"),
+    ("pr", "list"),
+    ("pr", "review"),
+    ("pr", "status"),
+    ("pr", "view"),
+    ("repo", "view"),
+    ("run", "list"),
+    ("run", "view"),
+    ("workflow", "list"),
+    ("workflow", "view"),
+])
+
+# Flags that could redirect git to a different directory or repo — always blocked.
+_GIT_BLOCKED_FLAGS: frozenset[str] = frozenset(["-C", "--git-dir", "--work-tree"])
+_GH_BLOCKED_FLAGS: frozenset[str] = frozenset(["--repo", "-R"])
 
 
 def _validate_worktree(worktree_path: str) -> pathlib.Path:
@@ -78,52 +80,75 @@ def _validate_worktree(worktree_path: str) -> pathlib.Path:
     return wt
 
 
-def _call_tool(name: str, arguments: dict) -> str:
-    if name == "git_commit":
-        wt = _validate_worktree(arguments["worktree_path"])
-        subprocess.run(["git", "-C", str(wt), "add", "-A"], check=True, capture_output=True)
-        result = subprocess.run(
-            ["git", "-C", str(wt), "commit", "-m", arguments["message"]],
-            capture_output=True,
-            text=True,
-        )
-        output = (result.stdout + result.stderr).strip()
-        if result.returncode != 0:
-            raise RuntimeError(output)
-        return output
+def _check_allowed(exe: str, args: list[str]) -> None:
+    """Raise ValueError if (exe, args) is not permitted."""
+    if not args:
+        raise ValueError("args must not be empty")
 
-    if name == "git_push":
-        wt = _validate_worktree(arguments["worktree_path"])
-        remote = arguments.get("remote", "origin")
-        branch = subprocess.check_output(
-            ["git", "-C", str(wt), "rev-parse", "--abbrev-ref", "HEAD"],
-            text=True,
-        ).strip()
-        result = subprocess.run(
-            ["git", "-C", str(wt), "push", "-u", remote, branch],
-            capture_output=True,
-            text=True,
-        )
-        output = (result.stdout + result.stderr).strip()
-        if result.returncode != 0:
-            raise RuntimeError(output)
-        return output
+    if exe == "git":
+        for arg in args:
+            if arg in _GIT_BLOCKED_FLAGS:
+                raise ValueError(f"Flag {arg!r} is not allowed (would redirect to a different directory)")
+        if args[0] == "push" and ("--force" in args or "-f" in args):
+            raise ValueError("git push --force is not allowed")
+        allowed = _GIT_ALLOWED
 
-    if name == "gh_pr_create":
-        wt = _validate_worktree(arguments["worktree_path"])
-        cmd = [
-            "gh", "pr", "create",
-            "--title", arguments["title"],
-            "--body", arguments.get("body", ""),
-            "--base", arguments.get("base", "main"),
-        ]
-        result = subprocess.run(cmd, capture_output=True, text=True, cwd=str(wt))
-        output = (result.stdout + result.stderr).strip()
-        if result.returncode != 0:
-            raise RuntimeError(output)
-        return output
+    elif exe == "gh":
+        for arg in args:
+            if arg in _GH_BLOCKED_FLAGS:
+                raise ValueError(f"Flag {arg!r} is not allowed (would target a different repo)")
+        allowed = _GH_ALLOWED
 
-    raise ValueError(f"Unknown tool: {name!r}")
+    else:
+        raise ValueError(f"Executable {exe!r} is not allowed; use 'git' or 'gh'")
+
+    for prefix in allowed:
+        if tuple(args[: len(prefix)]) == prefix:
+            return
+
+    raise ValueError(
+        f"'{exe} {' '.join(args[:3])}' is not in the allowed command list"
+    )
+
+
+_TOOL = {
+    "name": "run_host_command",
+    "description": (
+        "Run an allowed git or gh command on the host, where credentials and SSH keys live. "
+        "The command executes with cwd set to worktree_path. "
+        "Use this for committing, pushing, opening PRs, reading diffs/logs, checking CI, etc."
+    ),
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "worktree_path": {
+                "type": "string",
+                "description": "Absolute path to your locki worktree (your current working directory).",
+            },
+            "exe": {
+                "type": "string",
+                "enum": ["git", "gh"],
+                "description": "Executable to run.",
+            },
+            "args": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Arguments passed to the executable.",
+            },
+        },
+        "required": ["worktree_path", "exe", "args"],
+    },
+}
+
+
+def _run_host_command(worktree_path: str, exe: str, args: list[str]) -> str:
+    wt = _validate_worktree(worktree_path)
+    _check_allowed(exe, args)
+    result = subprocess.run([exe, *args], capture_output=True, text=True, cwd=str(wt))
+    output = (result.stdout + result.stderr).strip()
+    if result.returncode != 0:
+        raise RuntimeError(output)
+    return output
 
 
 def _handle_jsonrpc(request: dict) -> dict | None:
@@ -131,9 +156,8 @@ def _handle_jsonrpc(request: dict) -> dict | None:
     method = request.get("method")
     req_id = request.get("id")
 
-    # Notifications have no id and expect no response
     if req_id is None:
-        return None
+        return None  # notification — no response expected
 
     if method == "initialize":
         return {
@@ -150,14 +174,19 @@ def _handle_jsonrpc(request: dict) -> dict | None:
         return {
             "jsonrpc": "2.0",
             "id": req_id,
-            "result": {"tools": _TOOLS},
+            "result": {"tools": [_TOOL]},
         }
 
     if method == "tools/call":
-        tool_name = request["params"]["name"]
-        arguments = request["params"].get("arguments", {})
+        if request["params"]["name"] != "run_host_command":
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "error": {"code": -32601, "message": "Unknown tool"},
+            }
+        a = request["params"].get("arguments", {})
         try:
-            result = _call_tool(tool_name, arguments)
+            result = _run_host_command(a["worktree_path"], a["exe"], a["args"])
             return {
                 "jsonrpc": "2.0",
                 "id": req_id,

@@ -1,15 +1,21 @@
 You are running in a sandbox VM. This is an ephemeral environment designed to keep the main machine safe from malfunctioning agents. The folder is a fresh worktree: before delving into your task, start by setting up the environment. Check project metadata (`mise.toml`, `.tool-versions`, `.nvmrc`, `pyproject.toml`, etc.), CI definitions (`.github/workflows/*.yaml`, etc.) or docs (`README.md`, `CONTRIBUTING.md`, `*.md`, `docs/*`, etc.) to determine needed tools and their versions, and setup commands.
 
-Do not use `git` or `gh` directly — they are not configured inside the sandbox. Instead, use the `locki` MCP server, which runs on the host and has access to all credentials. Your current working directory is your worktree path; pass it to every tool call.
+Do not use `git` or `gh` directly — they are not configured inside the sandbox. Instead, use the `locki` MCP server tool **`run_host_command`**, which runs allowed commands on the host where credentials and SSH keys live.
 
-Available MCP tools (server name: `locki`):
+**Tool:** `run_host_command(worktree_path, exe, args)`
+- `worktree_path`: your current working directory (`os.getcwd()` or `$PWD`)
+- `exe`: `"git"` or `"gh"`
+- `args`: list of arguments
 
-- **`git_commit(worktree_path, message)`** — stages all changes and commits
-- **`git_push(worktree_path, remote="origin")`** — pushes the current branch
-- **`gh_pr_create(worktree_path, title, body="", base="main")`** — opens a GitHub PR
+**Allowed git subcommands:** `add`, `branch`, `checkout`, `commit`, `diff`, `fetch`, `log`, `push` (no `--force`), `restore`, `show`, `stash`, `status`, `tag`
 
-Example flow once your changes are ready:
+**Allowed gh subcommands:** `pr create/view/list/diff/comment/review/status`, `issue create/view/list/comment`, `repo view`, `run view/list`, `workflow view/list`
 
-1. `git_commit(worktree_path=os.getcwd(), message="feat: add a feature")`
-2. `git_push(worktree_path=os.getcwd())`
-3. `gh_pr_create(worktree_path=os.getcwd(), title="feat: add a feature", body="...")`
+**Example flow:**
+
+```
+run_host_command(worktree_path="/path/to/worktree", exe="git", args=["add", "-A"])
+run_host_command(worktree_path="/path/to/worktree", exe="git", args=["commit", "-m", "feat: add a feature"])
+run_host_command(worktree_path="/path/to/worktree", exe="git", args=["push"])
+run_host_command(worktree_path="/path/to/worktree", exe="gh",  args=["pr", "create", "--title", "feat: add a feature", "--body", "..."])
+```
