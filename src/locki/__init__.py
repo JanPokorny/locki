@@ -311,6 +311,19 @@ async def ensure_container(wt_id: str, wt_path: pathlib.Path, config) -> None:
             "Configuring host access in container",
         )
 
+    # Install stub binaries that intercept bare `git` / `gh` calls and redirect
+    # the agent to the MCP tool instead.
+    stub = (importlib.resources.files("locki") / "data" / "sandbox-stub.sh").read_bytes()
+    await run_in_vm(
+        ["incus", "exec", wt_id, "--", "bash", "-c",
+         "cat > /usr/local/bin/locki-stub"
+         " && chmod 755 /usr/local/bin/locki-stub"
+         " && ln -sf locki-stub /usr/local/bin/git"
+         " && ln -sf locki-stub /usr/local/bin/gh"],
+        "Installing git/gh sandbox stubs",
+        input=stub,
+    )
+
 
 def git_hooks_dir() -> pathlib.Path:
     return git_root() / ".git" / "hooks"
