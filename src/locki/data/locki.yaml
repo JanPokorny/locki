@@ -85,7 +85,7 @@ provision:
         set -euxo pipefail
         ln -s /root/.claude/claude.json /root/.claude.json
         echo -e "cachedir=/var/cache/locki/dnf\\nkeepcache=1" >> /etc/dnf/dnf.conf
-        mkdir -p /etc/claude-code/managed-settings.d
+        mkdir -p /etc/claude-code
         echo '**Sandbox VM environment**: Available package managers: `mise` (preferred) and `dnf` (with RPM Fusion). If there is `mise.toml`, run `mise install`. Otherwise enable specific tool versions using e.g.: `mise use -g python@3.12.1`, `mise use -g node@22`, `mise use -g jq`, falling back to `dnf` if not available.' >/etc/claude-code/CLAUDE.md
         cat > /etc/claude-code/managed-mcp.json << 'MCPEOF'
 {
@@ -97,9 +97,10 @@ provision:
   }
 }
 MCPEOF
-        cat > /etc/claude-code/managed-settings.d/locki.json << 'SETTINGSEOF'
+        cat > /etc/claude-code/managed-settings.json << 'SETTINGSEOF'
 {
   "skipDangerousModePermissionPrompt": true,
+  "allowManagedMcpServersOnly": false,
   "permissions": {
     "defaultMode": "bypassPermissions"
   }
