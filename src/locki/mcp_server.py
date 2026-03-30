@@ -6,7 +6,7 @@ Commands are validated against a small, explicitly enumerated allowlist.
 Each rule specifies exact positional args and the permitted set of long flags.
 Short flags and any unlisted flag are rejected outright.
 
-Agents authenticate implicitly: worktree_path contains a random hex segment
+Agents authenticate implicitly: worktree_path contains a random base36 token
 unknown to other containers.
 """
 
@@ -19,13 +19,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 LOCKI_HOME = pathlib.Path.home() / ".locki"
 WORKTREES_HOME = LOCKI_HOME / "worktrees"
+WORKTREES_META = LOCKI_HOME / "worktrees-meta"
 MCP_PORT = 7890
 
 
 # ── allowlist DSL ─────────────────────────────────────────────────────────────
 
-# Validators: called with str | None (None = flag absent, "" = _requiredean --flag).
-_required = _required            # --flag=<non-empty value>
+# Validators: called with str | None (None = flag absent, "" = boolean --flag).
+_required = bool               # --flag=<non-empty value>
 _flag     = lambda s: s == ""  # --flag  (no value)
 
 
@@ -36,7 +37,7 @@ def _cmd(*spec_args, **spec_flags):
     spec_flags — flag matchers (hyphens → underscores); each is called with the
                  flag's value (str) or None if absent and must return True to pass.
     """
-    def match(positionals: list[str], flags: dict[str, str]) -> _required:
+    def match(positionals: list[str], flags: dict[str, str]) -> bool:
         if len(positionals) != len(spec_args):
             return False
         for val, spec in zip(positionals, spec_args):
@@ -53,9 +54,9 @@ def _cmd(*spec_args, **spec_flags):
     return match
 
 
-def _val_ok(val: str | None, spec) -> _required:
+def _val_ok(val: str | None, spec) -> bool:
     if spec is ...:           return True
-    if callable(spec):        return _required(spec(val))
+    if callable(spec):        return bool(spec(val))
     if isinstance(spec, set): return val in spec
     if isinstance(spec, str): return val == spec
     return True
@@ -123,11 +124,23 @@ def _parse(args: list[str]) -> tuple[list[str], dict[str, str]]:
 # ── worktree / execution ──────────────────────────────────────────────────────
 
 def _validate_worktree(worktree_path: str) -> pathlib.Path:
-    wt = pathlib.Path(worktree_path)
-    if not wt.is_relative_to(WORKTREES_HOME):
+    wt = pathlib.Path(worktree_path).resolve()
+    if not wt.is_relative_to(WORKTREES_HOME.resolve()):
         raise ValueError(f"Not a locki worktree: {worktree_path!r}")
     if not wt.is_dir():
         raise ValueError(f"Worktree does not exist: {worktree_path!r}")
+
+    # Verify .git file hasn't been tampered with (prevents git hook injection).
+    wt_id = wt.relative_to(WORKTREES_HOME).parts[0]
+    meta_git = WORKTREES_META / wt_id / ".git"
+    if not meta_git.exists():
+        raise ValueError(f"No worktree metadata found for {wt_id!r}; re-create the worktree.")
+    dot_git = wt / ".git"
+    if not dot_git.is_file():
+        raise ValueError(f"Worktree .git is not a file — possible tampering detected.")
+    if dot_git.read_text().strip() != meta_git.read_text().strip():
+        raise ValueError(f"Worktree .git content mismatch — possible tampering detected.")
+
     return wt
 
 

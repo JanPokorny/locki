@@ -9,6 +9,7 @@ import secrets
 import shlex
 import shutil
 import socket
+import string
 import subprocess
 import sys
 import time
@@ -30,8 +31,15 @@ app = AsyncTyperWithAliases(
 LOCKI_HOME = pathlib.Path.home() / ".locki"
 LIMA_HOME = LOCKI_HOME / "lima"
 WORKTREES_HOME = LOCKI_HOME / "worktrees"
+WORKTREES_META = LOCKI_HOME / "worktrees-meta"
 CLAUDE_HOME = LOCKI_HOME / "claude"
 MCP_PORT = 7890
+
+_BASE36 = string.ascii_lowercase + string.digits
+
+
+def _token_base36(n: int) -> str:
+    return "".join(secrets.choice(_BASE36) for _ in range(n))
 
 
 @functools.cache
@@ -152,25 +160,18 @@ def ensure_mcp_server() -> None:
 
 @functools.cache
 def git_root() -> pathlib.Path:
-    current = pathlib.Path.cwd()
-    while True:
-        dot_git = current / ".git"
-        if dot_git.is_dir():
-            return current
-        if dot_git.is_file():
-            content = dot_git.read_text().strip()
-            if content.startswith("gitdir:"):
-                wt_gitdir = pathlib.Path(content.split(":", 1)[1].strip())
-                if not wt_gitdir.is_absolute():
-                    wt_gitdir = (current / wt_gitdir).resolve()
-                main_git_dir = (wt_gitdir / ".." / "..").resolve()
-                if main_git_dir.name == ".git":
-                    return main_git_dir.parent
-            return current
-        if current.parent == current:
-            console.error("Not inside a git repository.")
-            sys.exit(1)
-        current = current.parent
+    cwd = pathlib.Path.cwd().resolve()
+    if cwd.is_relative_to(WORKTREES_HOME.resolve()):
+        console.error("locki commands must be run from the main repo checkout, not inside a locki worktree.")
+        sys.exit(1)
+    result = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        console.error("Not inside a git repository.")
+        sys.exit(1)
+    return pathlib.Path(result.stdout.strip())
 
 
 async def find_worktree_for_branch(branch: str) -> pathlib.Path | None:
@@ -206,7 +207,7 @@ async def ensure_worktree(branch: str) -> pathlib.Path:
 
     repo_name = git_root().name.replace("/", "-").replace(".", "-").lower()
     safe_branch = branch.replace("/", "-").replace(".", "-").lower()
-    wt_id = f"{repo_name}--{safe_branch}--{secrets.token_hex(4)}"
+    wt_id = f"{repo_name}--{safe_branch}--{_token_base36(8)}"
     wt_path = WORKTREES_HOME / wt_id
     wt_path.mkdir(parents=True, exist_ok=True)
 
@@ -225,6 +226,11 @@ async def ensure_worktree(branch: str) -> pathlib.Path:
         ["git", "-C", str(git_root()), "worktree", "add", str(wt_path), branch],
         f"Creating worktree for '{branch}'",
     )
+
+    # Record the canonical .git pointer outside the VM-visible mount for tamper detection.
+    meta_dir = WORKTREES_META / wt_id
+    meta_dir.mkdir(parents=True, exist_ok=True)
+    (meta_dir / ".git").write_text((wt_path / ".git").read_text())
 
     return wt_path
 
@@ -464,6 +470,8 @@ async def remove_cmd(
             "Removing worktree",
             check=False,
         )
+
+        shutil.rmtree(WORKTREES_META / wt_id, ignore_errors=True)
 
 
 @app.command("list", help="List branches with locki-managed worktrees.")
