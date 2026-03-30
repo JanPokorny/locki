@@ -22,83 +22,6 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 
-def all_containers() -> list[str]:
-    r = subprocess.run(
-        ["incus", "list", "--format=csv", "--columns=n"],
-        capture_output=True,
-        text=True,
-    )
-    return [line.strip() for line in r.stdout.splitlines() if line.strip()]
-
-
-def running_containers() -> list[str]:
-    r = subprocess.run(
-        ["incus", "list", "--format=csv", "--columns=n,s"],
-        capture_output=True,
-        text=True,
-    )
-    names = []
-    for line in r.stdout.splitlines():
-        parts = line.split(",", 1)
-        if len(parts) == 2 and parts[1].strip() == "RUNNING":
-            names.append(parts[0].strip())
-    return names
-
-
-def containers_with_active_sessions() -> set[str]:
-    """Return names of containers that have active exec operations."""
-    r = subprocess.run(
-        ["incus", "operation", "list", "--format=json"],
-        capture_output=True,
-        text=True,
-    )
-    if r.returncode != 0 or not r.stdout.strip():
-        return set()
-    try:
-        ops = json.loads(r.stdout)
-    except json.JSONDecodeError:
-        return set()
-    active: set[str] = set()
-    for op in ops:
-        if op.get("status") != "Running":
-            continue
-        resources = op.get("resources") or {}
-        for key in ("containers", "instances"):
-            for path in resources.get(key) or []:
-                active.add(path.rsplit("/", 1)[-1])
-    return active
-
-
-def worktree_source(name: str) -> str | None:
-    """Return the source path of the worktree disk device, or None if absent."""
-    r = subprocess.run(
-        ["incus", "config", "device", "get", name, "worktree", "source"],
-        capture_output=True,
-        text=True,
-    )
-    return r.stdout.strip() if r.returncode == 0 and r.stdout.strip() else None
-
-
-def stop_container(name: str) -> None:
-    subprocess.run(["incus", "stop", name], capture_output=True)
-
-
-def delete_container(name: str) -> None:
-    subprocess.run(["incus", "delete", "--force", name], capture_output=True)
-
-
-def remove_orphaned_containers(last_active: dict[str, float]) -> None:
-    """Delete containers whose worktree directory no longer exists."""
-    for name in all_containers():
-        source = worktree_source(name)
-        if source is None:
-            continue  # no worktree device — not a locki container
-        if not pathlib.Path(source).exists():
-            log.info("Deleting orphaned container %r (worktree %s is gone).", name, source)
-            delete_container(name)
-            last_active.pop(name, None)
-
-
 def main() -> None:
     last_active: dict[str, float] = {}
 
@@ -117,10 +40,55 @@ def main() -> None:
 
     while True:
         try:
-            remove_orphaned_containers(last_active)
+            # Remove containers whose worktree directory no longer exists
+            for name in [
+                line.strip()
+                for line in subprocess.run(
+                    ["incus", "list", "--format=csv", "--columns=n"],
+                    capture_output=True, text=True,
+                ).stdout.splitlines()
+                if line.strip()
+            ]:
+                r = subprocess.run(
+                    ["incus", "config", "device", "get", name, "worktree", "source"],
+                    capture_output=True, text=True,
+                )
+                source = r.stdout.strip() if r.returncode == 0 and r.stdout.strip() else None
+                if source is None:
+                    continue  # no worktree device — not a locki container
+                if not pathlib.Path(source).exists():
+                    log.info("Deleting orphaned container %r (worktree %s is gone).", name, source)
+                    subprocess.run(["incus", "delete", "--force", name], capture_output=True)
+                    last_active.pop(name, None)
 
-            running = set(running_containers())
-            active = containers_with_active_sessions()
+            # Collect running containers
+            running: set[str] = set()
+            for line in subprocess.run(
+                ["incus", "list", "--format=csv", "--columns=n,s"],
+                capture_output=True, text=True,
+            ).stdout.splitlines():
+                parts = line.split(",", 1)
+                if len(parts) == 2 and parts[1].strip() == "RUNNING":
+                    running.add(parts[0].strip())
+
+            # Collect containers with active exec sessions
+            active: set[str] = set()
+            r = subprocess.run(
+                ["incus", "operation", "list", "--format=json"],
+                capture_output=True, text=True,
+            )
+            if r.returncode == 0 and r.stdout.strip():
+                try:
+                    for op in json.loads(r.stdout):
+                        if op.get("status") != "Running":
+                            continue
+                        resources = op.get("resources") or {}
+                        for key in ("containers", "instances"):
+                            for path in resources.get(key) or []:
+                                active.add(path.rsplit("/", 1)[-1])
+                except json.JSONDecodeError:
+                    pass
+
             now = time.monotonic()
 
             for name in running:
@@ -132,7 +100,7 @@ def main() -> None:
                     idle_for = now - last_active[name]
                     if idle_for >= IDLE_TIMEOUT:
                         log.info("Stopping idle container %r (idle %.0fs).", name, idle_for)
-                        stop_container(name)
+                        subprocess.run(["incus", "stop", name], capture_output=True)
                         last_active.pop(name, None)
 
             # Prune tracking for containers that are no longer running
