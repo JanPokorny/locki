@@ -389,29 +389,32 @@ async def ensure_container(wt_id: str, wt_path: pathlib.Path, config) -> None:
         "Starting container",
     )
 
-    # Write managed Claude Code config files into the container.
-    sandbox_md = (importlib.resources.files("locki") / "data" / "sandbox.md").read_text()
+    stub = (importlib.resources.files("locki") / "data" / "stub.sh").read_text()
     container_files = {
-        "/etc/claude-code/CLAUDE.md": (
-            "@/etc/claude-code/CLAUDE.d/os.md\n"
-            "@/etc/claude-code/CLAUDE.d/sandbox.md\n"
-        ),
-        "/etc/claude-code/CLAUDE.d/sandbox.md": sandbox_md,
+        "/etc/claude-code/CLAUDE.md": "\n\n" + (importlib.resources.files("locki") / "data" / "CLAUDE.md").read_text(),
         "/etc/claude-code/managed-mcp.json": json.dumps({
             "mcpServers": {"locki": {"type": "http", "url": "http://host.lima.internal:7890/mcp"}},
-        }, indent=2) + "\n",
+        }),
         "/etc/claude-code/managed-settings.json": json.dumps({
             "skipDangerousModePermissionPrompt": True,
             "allowManagedMcpServersOnly": False,
             "permissions": {"defaultMode": "bypassPermissions"},
-        }, indent=2) + "\n",
+        }),
+        "/opt/locki/bin/git": stub,
+        "/opt/locki/bin/gh": stub,
     }
     for path, content in container_files.items():
         await run_in_vm(
-            ["incus", "exec", wt_id, "--", "bash", "-c", f"mkdir -p $(dirname {path}) && cat > {path}"],
+            ["incus", "exec", wt_id, "--", "bash", "-c", f"mkdir -p $(dirname {path}) && cat >>{path}"],
             f"Writing {pathlib.PurePosixPath(path).name}",
             input=content.encode(),
         )
+
+    await run_in_vm(
+        ["incus", "exec", wt_id, "--", "bash", "-c", "for bin in /opt/locki/bin/*; do chmod +x $bin; done"],
+        "Setting up executables",
+        input=content.encode(),
+    )
 
     # Inject host.lima.internal so containers can reach the MCP server on the host.
     # Lima sets this hostname in the VM's /etc/hosts; containers don't inherit it.
@@ -477,7 +480,8 @@ async def shell_cmd(
                     *(f"--env={env}=${env}" for env in forwarded_env),
                     "--",
                     "bash",
-                    "--login",
+                    "--rcfile",
+                    shlex.quote("<(mise activate bash)"),
                 ]
                 + (["-c", shlex.quote(command)] if command else [])
             ),
@@ -491,7 +495,7 @@ async def claude_cmd(
     verbose: typing.Annotated[bool, typer.Option("-v", "--verbose", help="Show verbose output")] = False,
 ):
     """Run Claude in the sandbox."""
-    await shell_cmd(branch=branch, command="claude", verbose=verbose)
+    await shell_cmd(branch=branch, command="mise use -g claude@latest && exec claude", verbose=verbose)
 
 
 @app.command("remove", help="Remove a branch's worktree and container.")

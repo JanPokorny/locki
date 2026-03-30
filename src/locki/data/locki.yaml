@@ -39,7 +39,7 @@ provision:
       profiles:
         - name: default
           config:
-            environment.PATH: /root/.local/bin:/var/cache/locki/mise/data/shims:/var/cache/locki/pnpm:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+            environment.PATH: /opt/locki/bin:/root/.local/bin:/var/cache/locki/mise/data/shims:/var/cache/locki/pnpm:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
             environment.PNPM_HOME: /var/cache/locki/pnpm
             environment.UV_CACHE_DIR: /var/cache/locki/uv
             environment.PIP_CACHE_DIR: /var/cache/locki/pip
@@ -109,33 +109,33 @@ provision:
       set -euxo pipefail
       if incus image list --format csv | grep -q locki-base; then exit 0; fi
       incus launch images:fedora/43 locki-base-builder
-      incus exec locki-base-builder -- bash <<'ENDBUILD'
-        set -euxo pipefail
-        ln -s /root/.claude/claude.json /root/.claude.json
-        echo -e "cachedir=/var/cache/locki/dnf\\nkeepcache=1" >> /etc/dnf/dnf.conf
-        mkdir -p /etc/claude-code/CLAUDE.d
-        cat > /etc/claude-code/CLAUDE.d/os.md << 'OSEOF'
-      **Sandbox VM environment**: Available package managers: `mise` (preferred) and `dnf` (with RPM Fusion). If there is `mise.toml`, run `mise install`. Otherwise enable specific tool versions using e.g.: `mise use -g python@3.12.1`, `mise use -g node@22`, `mise use -g jq`, falling back to `dnf` if not available.
-      OSEOF
-        curl --retry 10 --retry-all-errors https://mirrors.fedoraproject.org  # network takes a few seconds to connect
-        dnf install -y \
-          https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm \
-          https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm
-        dnf -y copr enable jdxcode/mise
-        dnf -y install mise
-        mise use -g claude@latest
-        cat > /usr/local/bin/locki-stub << 'STUBEOF'
-      #!/bin/sh
-      cmd=$(basename "$0")
-      echo "$cmd: not available inside the locki sandbox." >&2
-      echo "Use the 'locki' MCP tool instead:" >&2
-      echo "  run_host_command(worktree_path=\"\$PWD\", exe=\"$cmd\", args=[...])" >&2
-      exit 1
-      STUBEOF
+      incus exec locki-base-builder -- bash <<-'EOFEOF'
+      	set -euxo pipefail
+      	ln -s /root/.claude/claude.json /root/.claude.json
+      	echo -e "cachedir=/var/cache/locki/dnf\\nkeepcache=1" >> /etc/dnf/dnf.conf
+      	mkdir -p /etc/claude-code/
+      	cat >/etc/claude-code/CLAUDE.md <<-'EOF'
+      		**Sandbox VM environment**: Available package managers: `mise` (preferred) and `dnf` (with RPM Fusion). If there is `mise.toml`, run `mise install`. Otherwise enable specific tool versions using e.g.: `mise use -g python@3.12.1`, `mise use -g node@22`, `mise use -g jq`, falling back to `dnf` if not available.
+      	EOF
+      		cat >/usr/local/bin/locki-stub <<-'EOF'
+      		#!/bin/sh
+      		cmd=$(basename "$0")
+      		echo "$cmd: not available inside the locki sandbox." >&2
+      		echo "Use the 'locki' MCP tool instead:" >&2
+      		echo "  run_host_command(worktree_path=\"\$PWD\", exe=\"$cmd\", args=[...])" >&2
+      		exit 1
+      	EOF
         chmod 755 /usr/local/bin/locki-stub
         ln -sf locki-stub /usr/local/bin/git
         ln -sf locki-stub /usr/local/bin/gh
-      ENDBUILD
+      	curl --retry 10 --retry-all-errors https://mirrors.fedoraproject.org  # network takes a few seconds to connect
+      	dnf install -y \
+      	  https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm \
+      	  https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm
+      	dnf -y copr enable jdxcode/mise
+      	dnf -y install mise
+      	mise install claude@latest
+      EOFEOF
       incus stop locki-base-builder
       incus publish locki-base-builder --alias locki-base
       incus delete locki-base-builder
