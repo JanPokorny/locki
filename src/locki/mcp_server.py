@@ -25,10 +25,8 @@ MCP_PORT = 7890
 # ── allowlist DSL ─────────────────────────────────────────────────────────────
 
 # Validators: called with str | None (None = flag absent, "" = boolean --flag).
-_flag     = lambda s: s == ""                        # --flag  (no value)
-_nonempty = lambda s: bool(s)                        # --flag=<non-empty>
-_opt      = lambda v: lambda s: s is None or v(s)   # optional, validated when present
-_is_id    = str.isdigit                              # positional numeric ID
+_flag = lambda s: s == ""                       # --flag  (no value)
+_opt  = lambda v: lambda s: s is None or v(s)  # optional, validated when present
 
 
 def _cmd(*spec_args, **spec_flags):
@@ -69,7 +67,7 @@ _RULES: dict[str, list] = {
         _cmd("diff"),
         _cmd("diff",   staged=_flag),
         _cmd("add",    all=_flag),
-        _cmd("commit", message=_nonempty),
+        _cmd("commit", message=bool),
         _cmd("push"),
         _cmd("fetch"),
         _cmd("log"),
@@ -77,18 +75,18 @@ _RULES: dict[str, list] = {
         _cmd("show"),
     ],
     "gh": [
-        _cmd("pr",    "create", title=_nonempty, body=_opt(_nonempty), base=_opt(_nonempty)),
+        _cmd("pr",    "create", title=bool, body=_opt(bool), base=_opt(bool)),
         _cmd("pr",    "view"),
-        _cmd("pr",    "view",   _is_id),
+        _cmd("pr",    "view",   str.isdigit),
         _cmd("pr",    "list"),
         _cmd("pr",    "diff"),
         _cmd("pr",    "status"),
         _cmd("run",   "list"),
         _cmd("run",   "view"),
-        _cmd("run",   "view",   _is_id),
-        _cmd("issue", "create", title=_nonempty, body=_opt(_nonempty)),
+        _cmd("run",   "view",   str.isdigit),
+        _cmd("issue", "create", title=bool, body=_opt(bool)),
         _cmd("issue", "view"),
-        _cmd("issue", "view",   _is_id),
+        _cmd("issue", "view",   str.isdigit),
         _cmd("issue", "list"),
     ],
 }
