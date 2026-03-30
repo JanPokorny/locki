@@ -24,53 +24,39 @@ MCP_PORT = 7890
 
 # ── allowlist DSL ─────────────────────────────────────────────────────────────
 
-class _Opt:
-    """Marks a flag as optional. validator is applied to the value when present."""
-    __slots__ = ("validator",)
-
-    def __init__(self, validator=None):
-        self.validator = validator
-
-
-_FLAG     = object()              # required boolean flag: --flag (no value)
-_nonempty = lambda s: bool(s)     # required non-empty string value
-_is_id    = str.isdigit           # numeric ID (PR / run number)
+# Validators: called with str | None (None = flag absent, "" = boolean --flag).
+_flag     = lambda s: s == ""                        # --flag  (no value)
+_nonempty = lambda s: bool(s)                        # --flag=<non-empty>
+_opt      = lambda v: lambda s: s is None or v(s)   # optional, validated when present
+_is_id    = str.isdigit                              # positional numeric ID
 
 
 def _cmd(*spec_args, **spec_flags):
     """Build a predicate for one allowed command pattern.
 
     spec_args  — positional matchers: str exact, set membership, callable predicate.
-    spec_flags — flag matchers (hyphens → underscores in names):
-                   _FLAG        required boolean --flag (no value)
-                   str/set/fn   required --flag=value, value must satisfy spec
-                   _Opt(spec)   optional; value validated by spec when present
+    spec_flags — flag matchers (hyphens → underscores); each is called with the
+                 flag's value (str) or None if absent and must return True to pass.
     """
-    def match(positionals: list[str], flags: dict[str, str | None]) -> bool:
+    def match(positionals: list[str], flags: dict[str, str]) -> bool:
         if len(positionals) != len(spec_args):
             return False
         for val, spec in zip(positionals, spec_args):
-            if isinstance(spec, str)      and val != spec:    return False
-            if isinstance(spec, set)      and val not in spec: return False
-            if callable(spec)             and not spec(val):   return False
+            if isinstance(spec, str)  and val != spec:    return False
+            if isinstance(spec, set)  and val not in spec: return False
+            if callable(spec)         and not spec(val):   return False
         for key in flags:
             if key not in spec_flags:
                 return False  # unlisted flag — reject
         for key, spec in spec_flags.items():
-            present, val = key in flags, flags.get(key)
-            if isinstance(spec, _Opt):
-                if present and spec.validator is not None and not _val_ok(val, spec.validator):
-                    return False
-            elif spec is _FLAG:
-                if not present or val is not None:             return False
-            else:  # required value flag
-                if not present or val is None or not _val_ok(val, spec): return False
+            if not _val_ok(flags.get(key), spec):
+                return False
         return True
     return match
 
 
 def _val_ok(val: str | None, spec) -> bool:
-    if callable(spec):       return bool(spec(val))
+    if callable(spec):        return bool(spec(val))
     if isinstance(spec, set): return val in spec
     if isinstance(spec, str): return val == spec
     return True
@@ -81,17 +67,17 @@ _RULES: dict[str, list] = {
     "git": [
         _cmd("status"),
         _cmd("diff"),
-        _cmd("diff",   staged=_FLAG),
-        _cmd("add",    all=_FLAG),
+        _cmd("diff",   staged=_flag),
+        _cmd("add",    all=_flag),
         _cmd("commit", message=_nonempty),
         _cmd("push"),
         _cmd("fetch"),
         _cmd("log"),
-        _cmd("log",    oneline=_FLAG),
+        _cmd("log",    oneline=_flag),
         _cmd("show"),
     ],
     "gh": [
-        _cmd("pr",    "create", title=_nonempty, body=_Opt(_nonempty), base=_Opt(_nonempty)),
+        _cmd("pr",    "create", title=_nonempty, body=_opt(_nonempty), base=_opt(_nonempty)),
         _cmd("pr",    "view"),
         _cmd("pr",    "view",   _is_id),
         _cmd("pr",    "list"),
@@ -100,7 +86,7 @@ _RULES: dict[str, list] = {
         _cmd("run",   "list"),
         _cmd("run",   "view"),
         _cmd("run",   "view",   _is_id),
-        _cmd("issue", "create", title=_nonempty, body=_Opt(_nonempty)),
+        _cmd("issue", "create", title=_nonempty, body=_opt(_nonempty)),
         _cmd("issue", "view"),
         _cmd("issue", "view",   _is_id),
         _cmd("issue", "list"),
@@ -110,21 +96,21 @@ _RULES: dict[str, list] = {
 
 # ── parsing ───────────────────────────────────────────────────────────────────
 
-def _parse(args: list[str]) -> tuple[list[str], dict[str, str | None]]:
+def _parse(args: list[str]) -> tuple[list[str], dict[str, str]]:
     """Split args into positionals and long flags.
 
     --flag=value  →  flags["flag"] = "value"
-    --flag        →  flags["flag"] = None
+    --flag        →  flags["flag"] = ""       (boolean flag, empty-string sentinel)
     -x            →  ValueError  (short flags not accepted)
 
     Hyphens in flag names are normalised to underscores.
     """
     positionals: list[str] = []
-    flags: dict[str, str | None] = {}
+    flags: dict[str, str] = {}
     for arg in args:
         if arg.startswith("--"):
-            key, sep, value = arg[2:].partition("=")
-            flags[key.replace("-", "_")] = value if sep else None
+            key, _, value = arg[2:].partition("=")
+            flags[key.replace("-", "_")] = value
         elif arg.startswith("-"):
             raise ValueError(
                 f"Short flags are not allowed: {arg!r}. "
