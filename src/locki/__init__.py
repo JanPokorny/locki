@@ -2,6 +2,7 @@ import contextlib
 import fcntl
 import functools
 import importlib.resources
+import json
 import os
 import pathlib
 import re
@@ -116,7 +117,7 @@ def ensure_claude_data() -> None:
     """Seed ~/.locki/claude with bundled config files if they don't already exist."""
     CLAUDE_HOME.mkdir(parents=True, exist_ok=True)
     data = importlib.resources.files("locki") / "data"
-    for name in ["CLAUDE.md", "claude.json"]:
+    for name in ["claude.json"]:
         dst = CLAUDE_HOME / name
         if not dst.exists():
             dst.write_text((data / name).read_text())
@@ -295,6 +296,30 @@ async def ensure_container(wt_id: str, wt_path: pathlib.Path, config) -> None:
         ["incus", "start", wt_id],
         "Starting container",
     )
+
+    # Write managed Claude Code config files into the container.
+    sandbox_md = (importlib.resources.files("locki") / "data" / "sandbox.md").read_text()
+    container_files = {
+        "/etc/claude-code/CLAUDE.md": (
+            "@/etc/claude-code/CLAUDE.d/os.md\n"
+            "@/etc/claude-code/CLAUDE.d/sandbox.md\n"
+        ),
+        "/etc/claude-code/CLAUDE.d/sandbox.md": sandbox_md,
+        "/etc/claude-code/managed-mcp.json": json.dumps({
+            "mcpServers": {"locki": {"type": "http", "url": "http://host.lima.internal:7890/mcp"}},
+        }, indent=2) + "\n",
+        "/etc/claude-code/managed-settings.json": json.dumps({
+            "skipDangerousModePermissionPrompt": True,
+            "allowManagedMcpServersOnly": False,
+            "permissions": {"defaultMode": "bypassPermissions"},
+        }, indent=2) + "\n",
+    }
+    for path, content in container_files.items():
+        await run_in_vm(
+            ["incus", "exec", wt_id, "--", "bash", "-c", f"mkdir -p $(dirname {path}) && cat > {path}"],
+            f"Writing {pathlib.PurePosixPath(path).name}",
+            input=content.encode(),
+        )
 
     # Inject host.lima.internal so containers can reach the MCP server on the host.
     # Lima sets this hostname in the VM's /etc/hosts; containers don't inherit it.

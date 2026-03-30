@@ -168,7 +168,22 @@ _TOOL = {
     "description": (
         "Run an allowed git or gh command on the host, where credentials and SSH keys live. "
         "Executes with cwd=worktree_path. "
-        "Only long flags are accepted (--flag or --flag=value); short flags (-x) are not."
+        "Only long flags are accepted (--flag or --flag=value); short flags (-x) are not.\n\n"
+        "git and gh are not available directly inside the sandbox — use this tool instead.\n\n"
+        "Allowed commands:\n"
+        "  git status\n"
+        "  git diff  /  git diff --staged\n"
+        "  git add --all\n"
+        "  git commit --message=<msg>\n"
+        "  git push\n"
+        "  git fetch\n"
+        "  git log  /  git log --oneline\n"
+        "  git show\n\n"
+        "  gh pr create --title=<title> [--body=<body>] [--base=<base>]\n"
+        "  gh pr view [<id>]  /  gh pr list  /  gh pr diff  /  gh pr status\n"
+        "  gh run view [<id>]  /  gh run list\n"
+        "  gh issue create --title=<title> [--body=<body>]\n"
+        "  gh issue view [<id>]  /  gh issue list"
     ),
     "inputSchema": {
         "type": "object",
