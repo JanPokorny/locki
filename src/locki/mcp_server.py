@@ -26,8 +26,7 @@ MCP_PORT = 7890
 # ── allowlist DSL ─────────────────────────────────────────────────────────────
 
 # Validators: called with str | None (None = flag absent, "" = boolean --flag).
-_required = bool               # --flag=<non-empty value>
-_flag     = lambda s: s == ""  # --flag  (no value)
+_required = bool  # --flag=<non-empty value>
 
 
 def _cmd(*spec_args, **spec_flags):
@@ -36,7 +35,9 @@ def _cmd(*spec_args, **spec_flags):
     spec_args  — positional matchers: str exact, set membership, callable predicate.
     spec_flags — flag matchers (hyphens → underscores); each is called with the
                  flag's value (str) or None if absent and must return True to pass.
+    --help is always permitted.
     """
+    spec_flags = {"help": ..., **spec_flags}
     def match(positionals: list[str], flags: dict[str, str]) -> bool:
         if len(positionals) != len(spec_args):
             return False
@@ -66,14 +67,12 @@ def _val_ok(val: str | None, spec) -> bool:
 _RULES: dict[str, list] = {
     "git": [
         _cmd("status"),
-        _cmd("diff"),
-        _cmd("diff",   staged=_flag),
-        _cmd("add",    all=_flag),
+        _cmd("diff",   staged=...),
+        _cmd("add",    all=...),
         _cmd("commit", message=_required),
         _cmd("push"),
         _cmd("fetch"),
-        _cmd("log"),
-        _cmd("log",    oneline=_flag),
+        _cmd("log",    oneline=...),
         _cmd("show"),
     ],
     "gh": [
@@ -100,7 +99,7 @@ def _parse(args: list[str]) -> tuple[list[str], dict[str, str]]:
     """Split args into positionals and long flags.
 
     --flag=value  →  flags["flag"] = "value"
-    --flag        →  flags["flag"] = ""       (_requiredean flag, empty-string sentinel)
+    --flag        →  flags["flag"] = ""       (boolean flag, empty-string sentinel)
     -x            →  ValueError  (short flags not accepted)
 
     Hyphens in flag names are normalised to underscores.
