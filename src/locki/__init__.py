@@ -15,12 +15,13 @@ import sys
 import time
 import typing
 
+import anyio.to_thread
 import typer
 
 from locki.async_typer import AsyncTyperWithAliases
 from locki.config import load_config
 from locki.console import console
-from locki.utils import run_command, verbosity
+from locki.utils import run_command, status, verbosity
 
 app = AsyncTyperWithAliases(
     name="locki",
@@ -99,7 +100,11 @@ async def _vm_lock():
     lock_path = LOCKI_HOME / "vm.lock"
     fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR)
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            with status("Waiting for another locki process"):
+                await anyio.to_thread.run_sync(lambda: fcntl.flock(fd, fcntl.LOCK_EX))
         yield
     finally:
         fcntl.flock(fd, fcntl.LOCK_UN)
@@ -137,7 +142,7 @@ async def ensure_vm() -> None:
             cwd="/",
             check=False,
         )
-    await _ensure_idle_daemon()
+        await _ensure_idle_daemon()
 
 
 async def _ensure_idle_daemon() -> None:
