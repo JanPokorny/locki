@@ -227,8 +227,20 @@ def ensure_mcp_server() -> None:
 def git_root() -> pathlib.Path:
     cwd = pathlib.Path.cwd().resolve()
     if cwd.is_relative_to(WORKTREES_HOME.resolve()):
-        console.error("locki commands must be run from the main repo checkout, not inside a locki worktree.")
-        sys.exit(1)
+        wt_path = WORKTREES_HOME / cwd.relative_to(WORKTREES_HOME).parts[0]
+        meta_git = WORKTREES_META / wt_path.name / ".git"
+        if not meta_git.exists():
+            console.error(f"No worktree metadata found for '{wt_path.name}'.")
+            sys.exit(1)
+        (wt_path / ".git").write_text(meta_git.read_text())
+        result = subprocess.run(
+            ["git", "-C", str(wt_path), "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            console.error("Could not determine main repo from worktree metadata.")
+            sys.exit(1)
+        return pathlib.Path(result.stdout.strip()).parent
     result = subprocess.run(
         ["git", "rev-parse", "--show-toplevel"],
         capture_output=True, text=True,
@@ -237,6 +249,14 @@ def git_root() -> pathlib.Path:
         console.error("Not inside a git repository.")
         sys.exit(1)
     return pathlib.Path(result.stdout.strip())
+
+
+def current_worktree() -> pathlib.Path | None:
+    """If cwd is inside a locki-managed worktree, return its path."""
+    cwd = pathlib.Path.cwd().resolve()
+    if not cwd.is_relative_to(WORKTREES_HOME.resolve()):
+        return None
+    return WORKTREES_HOME / cwd.relative_to(WORKTREES_HOME).parts[0]
 
 
 async def find_worktree_for_branch(branch: str) -> pathlib.Path | None:
@@ -296,7 +316,7 @@ async def ensure_worktree(branch: str) -> pathlib.Path:
     meta_dir = WORKTREES_META / wt_id
     meta_dir.mkdir(parents=True, exist_ok=True)
     (meta_dir / ".git").write_text((wt_path / ".git").read_text())
-    
+
     await run_command(
         ["git", "-C", str(git_root()), "config", "extensions.worktreeConfig", "true"],
         "Enabling per-worktree git config",
@@ -435,7 +455,7 @@ async def ensure_container(wt_id: str, wt_path: pathlib.Path, config) -> None:
 
 @app.command("shell", help="Open a shell in the per-branch container (creates branch/worktree/container if needed).")
 async def shell_cmd(
-    branch: typing.Annotated[str, typer.Argument(help="Branch name to work on")],
+    branch: typing.Annotated[str | None, typer.Argument(help="Branch name to work on (optional if inside a worktree)")] = None,
     command: typing.Annotated[
         str | None, typer.Option("-c", help="Command to run instead of an interactive shell")
     ] = None,
@@ -446,7 +466,13 @@ async def shell_cmd(
         ensure_claude_data()
         await ensure_vm()
 
-        wt_path = await ensure_worktree(branch)
+        if branch:
+            wt_path = await ensure_worktree(branch)
+        else:
+            wt_path = current_worktree()
+            if wt_path is None:
+                console.error("No branch specified and not inside a locki worktree.")
+                sys.exit(1)
         wt_id = wt_path.relative_to(WORKTREES_HOME).parts[0]
 
         config = load_config(git_root())
@@ -491,7 +517,7 @@ async def shell_cmd(
 
 @app.command("claude")
 async def claude_cmd(
-    branch: typing.Annotated[str, typer.Argument(help="Branch name to work on")],
+    branch: typing.Annotated[str | None, typer.Argument(help="Branch name to work on (optional if inside a worktree)")] = None,
     verbose: typing.Annotated[bool, typer.Option("-v", "--verbose", help="Show verbose output")] = False,
 ):
     """Run Claude in the sandbox."""
@@ -500,12 +526,18 @@ async def claude_cmd(
 
 @app.command("remove", help="Remove a branch's worktree and container.")
 async def remove_cmd(
-    branch: typing.Annotated[str, typer.Argument(help="Branch name to remove")],
+    branch: typing.Annotated[str | None, typer.Argument(help="Branch name to remove (optional if inside a worktree)")] = None,
     force: typing.Annotated[bool, typer.Option("--force", "-f", help="Skip safety checks")] = False,
     verbose: typing.Annotated[bool, typer.Option("-v", "--verbose", help="Show verbose output")] = False,
 ):
     with verbosity(verbose):
-        wt_path = await find_worktree_for_branch(branch)
+        if branch:
+            wt_path = await find_worktree_for_branch(branch)
+        else:
+            wt_path = current_worktree()
+            if wt_path is None:
+                console.error("No branch specified and not inside a locki worktree.")
+                sys.exit(1)
 
         if wt_path is None:
             console.info(f"No locki-managed worktree found for '{branch}', nothing to do.")
