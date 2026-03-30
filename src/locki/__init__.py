@@ -113,14 +113,22 @@ async def ensure_vm() -> None:
         )
 
 
+def _deep_merge(base: dict, override: dict) -> dict:
+    result = base.copy()
+    for key, val in override.items():
+        if isinstance(val, dict) and isinstance(result.get(key), dict):
+            result[key] = _deep_merge(result[key], val)
+        else:
+            result[key] = val
+    return result
+
+
 def ensure_claude_data() -> None:
-    """Seed ~/.locki/claude with bundled config files if they don't already exist."""
     CLAUDE_HOME.mkdir(parents=True, exist_ok=True)
-    data = importlib.resources.files("locki") / "data"
-    for name in ["claude.json"]:
-        dst = CLAUDE_HOME / name
-        if not dst.exists():
-            dst.write_text((data / name).read_text())
+    claude_json = CLAUDE_HOME / "claude.json"
+    existing = json.loads(claude_json.read_text()) if claude_json.exists() else {}
+    merged = _deep_merge(existing, {"projects": {"/": {"hasTrustDialogAccepted": True}}})
+    claude_json.write_text(json.dumps(merged, indent=2) + "\n")
 
 
 def ensure_mcp_server() -> None:
