@@ -131,9 +131,10 @@ async def _ensure_idle_daemon() -> None:
         )
         await run_in_vm(["mv", f"/tmp/{name}", dest], f"Installing {name}")
 
-    await run_in_vm(["chmod", "755", "/usr/local/bin/locki-idle-daemon"], "Setting daemon permissions")
-    await run_in_vm(["systemctl", "daemon-reload"], "Reloading systemd")
-    await run_in_vm(["systemctl", "enable", "--now", "locki-idle-daemon"], "Enabling idle daemon")
+    await run_in_vm(
+        ["bash", "-c", "chmod 755 /usr/local/bin/locki-idle-daemon && systemctl daemon-reload && systemctl enable --now locki-idle-daemon"],
+        "Enabling idle daemon",
+    )
 
 
 def ensure_claude_data() -> None:
