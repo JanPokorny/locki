@@ -1,195 +1,141 @@
 """MCP server exposing allowed host commands to locki sandboxed agents.
 
 Single tool: run_host_command(worktree_path, exe, args)
-- exe is restricted to "git" or "gh"
-- args are validated against an explicit allowlist: each rule specifies
-  a required subcommand prefix and the exact set of flags permitted beyond it
-- non-flag positional args (paths, refs, commit hashes) are always allowed
-- path-redirecting flags are blocked so agents cannot escape their worktree
-- the command runs with cwd=worktree_path on the host (where credentials live)
+
+Commands are validated against a small, explicitly enumerated allowlist.
+Each rule specifies exact positional args and the permitted set of long flags.
+Short flags and any unlisted flag are rejected outright.
 
 Agents authenticate implicitly: worktree_path contains a random hex segment
-that other containers don't know, so they cannot forge calls on each other's
-worktrees.
+unknown to other containers.
 """
 
 from __future__ import annotations
 
 import json
 import pathlib
-import re
 import subprocess
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import NamedTuple
 
 LOCKI_HOME = pathlib.Path.home() / ".locki"
 WORKTREES_HOME = LOCKI_HOME / "worktrees"
 MCP_PORT = 7890
 
 
-class _Rule(NamedTuple):
-    """One entry in an allowlist.
+# ── allowlist DSL ─────────────────────────────────────────────────────────────
 
-    prefix      — args must start with exactly these strings.
-    allowed_flags — flags (args starting with '-') permitted beyond the prefix.
-                    Non-flag args (paths, refs, messages) are always allowed.
+class _Opt:
+    """Marks a flag as optional. validator is applied to the value when present."""
+    __slots__ = ("validator",)
+
+    def __init__(self, validator=None):
+        self.validator = validator
+
+
+_FLAG     = object()              # required boolean flag: --flag (no value)
+_nonempty = lambda s: bool(s)     # required non-empty string value
+_is_id    = str.isdigit           # numeric ID (PR / run number)
+
+
+def _cmd(*spec_args, **spec_flags):
+    """Build a predicate for one allowed command pattern.
+
+    spec_args  — positional matchers: str exact, set membership, callable predicate.
+    spec_flags — flag matchers (hyphens → underscores in names):
+                   _FLAG        required boolean --flag (no value)
+                   str/set/fn   required --flag=value, value must satisfy spec
+                   _Opt(spec)   optional; value validated by spec when present
     """
-
-    prefix: tuple[str, ...]
-    allowed_flags: frozenset[str] = frozenset()
-
-
-_GIT_RULES: tuple[_Rule, ...] = (
-    # ── read-only ────────────────────────────────────────────────────────────
-    _Rule(("branch",),      frozenset(["-a", "--all", "-r", "--remotes",
-                                       "-v", "--verbose", "-l", "--list",
-                                       "--sort", "--contains"])),
-    _Rule(("diff",),        frozenset(["--staged", "--cached",
-                                       "--stat", "--name-only", "--name-status",
-                                       "-p", "--patch", "-U", "--unified",
-                                       "--diff-filter"])),
-    _Rule(("fetch",),       frozenset(["--all", "--prune", "-p",
-                                       "--tags", "-t", "--dry-run", "-n"])),
-    _Rule(("log",),         frozenset(["--oneline", "--graph", "--decorate",
-                                       "--all", "--follow",
-                                       "-n", "--format", "--pretty",
-                                       "--since", "--until", "--after", "--before",
-                                       "--author", "--grep",
-                                       "--no-merges", "--merges",
-                                       "--stat", "--name-only",
-                                       "-p", "--patch"])),
-    _Rule(("show",),        frozenset(["--stat", "--name-only", "--name-status",
-                                       "--format", "--pretty",
-                                       "-p", "--patch", "--no-patch"])),
-    _Rule(("stash", "list"),  frozenset()),
-    _Rule(("stash", "show"),  frozenset(["-p", "--patch", "--stat", "--name-only"])),
-    _Rule(("status",),      frozenset(["-s", "--short", "-b", "--branch",
-                                       "--porcelain",
-                                       "-u", "--untracked-files"])),
-    _Rule(("tag",),         frozenset(["-l", "--list", "-n",
-                                       "--sort", "--contains",
-                                       "--merged", "--no-merged"])),
-    # ── own-worktree writes ───────────────────────────────────────────────────
-    _Rule(("add",),         frozenset(["-A", "--all",
-                                       "-p", "--patch",
-                                       "-u", "--update",
-                                       "-n", "--dry-run"])),
-    _Rule(("checkout",),    frozenset(["--", "-b", "-B"])),
-    _Rule(("commit",),      frozenset(["-m", "--message",
-                                       "--amend", "--no-edit",
-                                       "-a", "--all",
-                                       "--allow-empty",
-                                       "--no-verify"])),
-    _Rule(("push",),        frozenset(["-u", "--set-upstream", "--tags"])),
-    _Rule(("restore",),     frozenset(["--staged", "--worktree",
-                                       "-s", "--source", "--"])),
-    _Rule(("stash", "apply"),  frozenset(["--index"])),
-    _Rule(("stash", "drop"),   frozenset()),
-    _Rule(("stash", "pop"),    frozenset(["--index"])),
-    _Rule(("stash", "push"),   frozenset(["-u", "--include-untracked",
-                                           "-m", "--message",
-                                           "-p", "--patch"])),
-)
-
-_GH_RULES: tuple[_Rule, ...] = (
-    # ── issues ───────────────────────────────────────────────────────────────
-    _Rule(("issue", "comment"),  frozenset(["-b", "--body", "-F", "--body-file"])),
-    _Rule(("issue", "create"),   frozenset(["-t", "--title",
-                                            "-b", "--body", "-F", "--body-file",
-                                            "-l", "--label",
-                                            "-a", "--assignee",
-                                            "-m", "--milestone",
-                                            "-p", "--project",
-                                            "--web"])),
-    _Rule(("issue", "list"),     frozenset(["-a", "--assignee", "-A", "--author",
-                                            "-l", "--label",
-                                            "-L", "--limit",
-                                            "-m", "--milestone",
-                                            "-s", "--state",
-                                            "--web", "--json", "--jq"])),
-    _Rule(("issue", "view"),     frozenset(["-c", "--comments",
-                                            "--json", "--jq",
-                                            "-w", "--web"])),
-    # ── pull requests ─────────────────────────────────────────────────────────
-    _Rule(("pr", "comment"),     frozenset(["-b", "--body", "-F", "--body-file",
-                                            "--edit-last", "--reply-to"])),
-    _Rule(("pr", "create"),      frozenset(["-t", "--title",
-                                            "-b", "--body", "-F", "--body-file",
-                                            "-B", "--base", "-H", "--head",
-                                            "-d", "--draft",
-                                            "-l", "--label",
-                                            "-a", "--assignee",
-                                            "-m", "--milestone",
-                                            "-p", "--project",
-                                            "-r", "--reviewer",
-                                            "-f", "--fill", "--fill-verbose",
-                                            "--web"])),
-    _Rule(("pr", "diff"),        frozenset(["--patch", "--name-only", "--color"])),
-    _Rule(("pr", "list"),        frozenset(["-a", "--assignee", "-A", "--author",
-                                            "-B", "--base", "-d", "--draft",
-                                            "-H", "--head",
-                                            "-l", "--label",
-                                            "-L", "--limit",
-                                            "-s", "--state",
-                                            "--json", "--jq",
-                                            "-w", "--web"])),
-    _Rule(("pr", "review"),      frozenset(["-a", "--approve",
-                                            "-c", "--comment",
-                                            "-r", "--request-changes",
-                                            "-b", "--body", "-F", "--body-file"])),
-    _Rule(("pr", "status"),      frozenset(["--json", "--jq"])),
-    _Rule(("pr", "view"),        frozenset(["-c", "--comments",
-                                            "--json", "--jq",
-                                            "-w", "--web"])),
-    # ── repo / CI ─────────────────────────────────────────────────────────────
-    _Rule(("repo", "view"),      frozenset(["-b", "--branch",
-                                            "--json", "--jq",
-                                            "-w", "--web"])),
-    _Rule(("run", "list"),       frozenset(["-b", "--branch", "-c", "--commit",
-                                            "-e", "--event",
-                                            "-L", "--limit",
-                                            "-s", "--status",
-                                            "-u", "--user",
-                                            "-w", "--workflow",
-                                            "--json", "--jq"])),
-    _Rule(("run", "view"),       frozenset(["--exit-status",
-                                            "-j", "--job",
-                                            "--log", "--log-failed",
-                                            "-v", "--verbose",
-                                            "-w", "--web",
-                                            "--json", "--jq"])),
-    _Rule(("workflow", "list"),  frozenset(["-a", "--all",
-                                            "-L", "--limit",
-                                            "-r", "--ref",
-                                            "--json", "--jq"])),
-    _Rule(("workflow", "view"),  frozenset(["-r", "--ref",
-                                            "-w", "--web",
-                                            "--yaml",
-                                            "--json", "--jq"])),
-)
-
-# Flags that could redirect git/gh to a different directory or repo — always blocked.
-_GIT_BLOCKED_FLAGS: frozenset[str] = frozenset(["-C", "--git-dir", "--work-tree"])
-_GH_BLOCKED_FLAGS: frozenset[str] = frozenset(["--repo", "-R"])
-
-# Matches combined short-flag+value like -n5 or -U3; we check just the flag part.
-_SHORT_FLAG_WITH_VALUE = re.compile(r"^(-[a-zA-Z])\d+$")
+    def match(positionals: list[str], flags: dict[str, str | None]) -> bool:
+        if len(positionals) != len(spec_args):
+            return False
+        for val, spec in zip(positionals, spec_args):
+            if isinstance(spec, str)      and val != spec:    return False
+            if isinstance(spec, set)      and val not in spec: return False
+            if callable(spec)             and not spec(val):   return False
+        for key in flags:
+            if key not in spec_flags:
+                return False  # unlisted flag — reject
+        for key, spec in spec_flags.items():
+            present, val = key in flags, flags.get(key)
+            if isinstance(spec, _Opt):
+                if present and spec.validator is not None and not _val_ok(val, spec.validator):
+                    return False
+            elif spec is _FLAG:
+                if not present or val is not None:             return False
+            else:  # required value flag
+                if not present or val is None or not _val_ok(val, spec): return False
+        return True
+    return match
 
 
-def _flag_name(arg: str) -> str:
-    """Normalise an arg to just the flag name for allowlist lookup.
+def _val_ok(val: str | None, spec) -> bool:
+    if callable(spec):       return bool(spec(val))
+    if isinstance(spec, set): return val in spec
+    if isinstance(spec, str): return val == spec
+    return True
 
-    --format=pretty  →  --format
-    -n5              →  -n
-    --patch          →  --patch
+
+# Allowlist — add a _cmd(...) line to permit a new operation.
+_RULES: dict[str, list] = {
+    "git": [
+        _cmd("status"),
+        _cmd("diff"),
+        _cmd("diff",   staged=_FLAG),
+        _cmd("add",    all=_FLAG),
+        _cmd("commit", message=_nonempty),
+        _cmd("push"),
+        _cmd("fetch"),
+        _cmd("log"),
+        _cmd("log",    oneline=_FLAG),
+        _cmd("show"),
+    ],
+    "gh": [
+        _cmd("pr",    "create", title=_nonempty, body=_Opt(_nonempty), base=_Opt(_nonempty)),
+        _cmd("pr",    "view"),
+        _cmd("pr",    "view",   _is_id),
+        _cmd("pr",    "list"),
+        _cmd("pr",    "diff"),
+        _cmd("pr",    "status"),
+        _cmd("run",   "list"),
+        _cmd("run",   "view"),
+        _cmd("run",   "view",   _is_id),
+        _cmd("issue", "create", title=_nonempty, body=_Opt(_nonempty)),
+        _cmd("issue", "view"),
+        _cmd("issue", "view",   _is_id),
+        _cmd("issue", "list"),
+    ],
+}
+
+
+# ── parsing ───────────────────────────────────────────────────────────────────
+
+def _parse(args: list[str]) -> tuple[list[str], dict[str, str | None]]:
+    """Split args into positionals and long flags.
+
+    --flag=value  →  flags["flag"] = "value"
+    --flag        →  flags["flag"] = None
+    -x            →  ValueError  (short flags not accepted)
+
+    Hyphens in flag names are normalised to underscores.
     """
-    if "=" in arg:
-        return arg.split("=", 1)[0]
-    m = _SHORT_FLAG_WITH_VALUE.match(arg)
-    if m:
-        return m.group(1)
-    return arg
+    positionals: list[str] = []
+    flags: dict[str, str | None] = {}
+    for arg in args:
+        if arg.startswith("--"):
+            key, sep, value = arg[2:].partition("=")
+            flags[key.replace("-", "_")] = value if sep else None
+        elif arg.startswith("-"):
+            raise ValueError(
+                f"Short flags are not allowed: {arg!r}. "
+                "Use the long form (--flag or --flag=value)."
+            )
+        else:
+            positionals.append(arg)
+    return positionals, flags
 
+
+# ── worktree / execution ──────────────────────────────────────────────────────
 
 def _validate_worktree(worktree_path: str) -> pathlib.Path:
     wt = pathlib.Path(worktree_path)
@@ -200,101 +146,31 @@ def _validate_worktree(worktree_path: str) -> pathlib.Path:
     return wt
 
 
-def _check_push_refspec(args: list[str], wt: pathlib.Path) -> None:
-    """Reject any git push refspec that targets a branch other than the current one.
+def _run_host_command(worktree_path: str, exe: str, args: list[str]) -> str:
+    wt = _validate_worktree(worktree_path)
 
-    git push                         — ok (uses tracking branch)
-    git push origin                  — ok (uses tracking branch)
-    git push origin my-branch        — ok only if my-branch == current branch
-    git push origin HEAD             — ok (HEAD always refers to current branch)
-    git push origin HEAD:other       — blocked (explicit foreign dst)
-    git push origin :branch          — blocked (remote delete)
-    git push origin +branch          — blocked (force-push via refspec)
-    """
-    # Collect positional args (non-flags) after the "push" subcommand
-    positionals = [a for a in args[1:] if not a.startswith("-")]
-
-    # First positional is the remote, remaining are refspecs
-    refspecs = positionals[1:]
-    if not refspecs:
-        return  # no explicit refspec — git uses the tracking config, safe
-
-    current = subprocess.check_output(
-        ["git", "-C", str(wt), "rev-parse", "--abbrev-ref", "HEAD"],
-        text=True,
-        stderr=subprocess.DEVNULL,
-    ).strip()
-
-    for refspec in refspecs:
-        if refspec.startswith("+"):
-            raise ValueError(
-                f"Force-push refspec {refspec!r} is not allowed"
-            )
-        if ":" in refspec:
-            raise ValueError(
-                f"Explicit src:dst refspec {refspec!r} is not allowed; "
-                "omit the refspec and let git use the tracking branch"
-            )
-        if refspec not in (current, "HEAD"):
-            raise ValueError(
-                f"Cannot push to {refspec!r}; "
-                f"this worktree is on branch {current!r}"
-            )
-
-
-def _check_allowed(exe: str, args: list[str]) -> None:
-    """Raise ValueError if (exe, args) is not on the allowlist."""
-    if not args:
-        raise ValueError("args must not be empty")
-
-    if exe == "git":
-        for arg in args:
-            if _flag_name(arg) in _GIT_BLOCKED_FLAGS:
-                raise ValueError(
-                    f"Flag {arg!r} is not allowed (would redirect to a different directory)"
-                )
-        if args[0] == "push" and any(_flag_name(a) in ("--force", "-f") for a in args):
-            raise ValueError("git push --force is not allowed")
-        rules = _GIT_RULES
-
-    elif exe == "gh":
-        for arg in args:
-            if _flag_name(arg) in _GH_BLOCKED_FLAGS:
-                raise ValueError(
-                    f"Flag {arg!r} is not allowed (would target a different repo)"
-                )
-        rules = _GH_RULES
-
-    else:
+    if exe not in _RULES:
         raise ValueError(f"Executable {exe!r} is not allowed; use 'git' or 'gh'")
 
-    for rule in rules:
-        n = len(rule.prefix)
-        if tuple(args[:n]) != rule.prefix:
-            continue
-        # Prefix matched — now check remaining args.
-        for arg in args[n:]:
-            if not arg.startswith("-"):
-                continue  # positional arg (path, ref, message …) — always ok
-            flag = _flag_name(arg)
-            if flag not in rule.allowed_flags:
-                raise ValueError(
-                    f"Flag {arg!r} is not allowed for"
-                    f" '{exe} {' '.join(rule.prefix)}'"
-                )
-        return  # all good
+    positionals, flags = _parse(args)
+    if not any(rule(positionals, flags) for rule in _RULES[exe]):
+        raise ValueError(f"Command not allowed: {exe} {' '.join(args)!r}")
 
-    raise ValueError(
-        f"'{exe} {' '.join(args[:3])}' is not in the allowed command list"
-    )
+    result = subprocess.run([exe, *args], capture_output=True, text=True, cwd=str(wt))
+    output = (result.stdout + result.stderr).strip()
+    if result.returncode != 0:
+        raise RuntimeError(output)
+    return output
 
+
+# ── MCP protocol ──────────────────────────────────────────────────────────────
 
 _TOOL = {
     "name": "run_host_command",
     "description": (
         "Run an allowed git or gh command on the host, where credentials and SSH keys live. "
-        "The command executes with cwd set to worktree_path. "
-        "Use this for committing, pushing, opening PRs, reading diffs/logs, checking CI, etc."
+        "Executes with cwd=worktree_path. "
+        "Only long flags are accepted (--flag or --flag=value); short flags (-x) are not."
     ),
     "inputSchema": {
         "type": "object",
@@ -303,105 +179,60 @@ _TOOL = {
                 "type": "string",
                 "description": "Absolute path to your locki worktree (your current working directory).",
             },
-            "exe": {
-                "type": "string",
-                "enum": ["git", "gh"],
-                "description": "Executable to run.",
-            },
-            "args": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "Arguments passed to the executable.",
-            },
+            "exe":  {"type": "string", "enum": ["git", "gh"]},
+            "args": {"type": "array", "items": {"type": "string"},
+                     "description": "Arguments passed to the executable."},
         },
         "required": ["worktree_path", "exe", "args"],
     },
 }
 
 
-def _run_host_command(worktree_path: str, exe: str, args: list[str]) -> str:
-    wt = _validate_worktree(worktree_path)
-    _check_allowed(exe, args)
-    if exe == "git" and args[:1] == ["push"]:
-        _check_push_refspec(args, wt)
-    result = subprocess.run([exe, *args], capture_output=True, text=True, cwd=str(wt))
-    output = (result.stdout + result.stderr).strip()
-    if result.returncode != 0:
-        raise RuntimeError(output)
-    return output
-
-
 def _handle_jsonrpc(request: dict) -> dict | None:
-    """Process one JSON-RPC request and return the response, or None for notifications."""
     method = request.get("method")
     req_id = request.get("id")
-
     if req_id is None:
-        return None  # notification — no response expected
+        return None  # notification
 
     if method == "initialize":
-        return {
-            "jsonrpc": "2.0",
-            "id": req_id,
-            "result": {
-                "protocolVersion": "2024-11-05",
-                "capabilities": {"tools": {}},
-                "serverInfo": {"name": "locki", "version": "1.0.0"},
-            },
-        }
+        return {"jsonrpc": "2.0", "id": req_id, "result": {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {"tools": {}},
+            "serverInfo": {"name": "locki", "version": "1.0.0"},
+        }}
 
     if method == "tools/list":
-        return {
-            "jsonrpc": "2.0",
-            "id": req_id,
-            "result": {"tools": [_TOOL]},
-        }
+        return {"jsonrpc": "2.0", "id": req_id, "result": {"tools": [_TOOL]}}
 
     if method == "tools/call":
         if request["params"]["name"] != "run_host_command":
-            return {
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "error": {"code": -32601, "message": "Unknown tool"},
-            }
+            return {"jsonrpc": "2.0", "id": req_id,
+                    "error": {"code": -32601, "message": "Unknown tool"}}
         a = request["params"].get("arguments", {})
         try:
-            result = _run_host_command(a["worktree_path"], a["exe"], a["args"])
-            return {
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "result": {"content": [{"type": "text", "text": result}], "isError": False},
-            }
+            text = _run_host_command(a["worktree_path"], a["exe"], a["args"])
+            return {"jsonrpc": "2.0", "id": req_id,
+                    "result": {"content": [{"type": "text", "text": text}], "isError": False}}
         except Exception as exc:
-            return {
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "result": {"content": [{"type": "text", "text": str(exc)}], "isError": True},
-            }
+            return {"jsonrpc": "2.0", "id": req_id,
+                    "result": {"content": [{"type": "text", "text": str(exc)}], "isError": True}}
 
-    return {
-        "jsonrpc": "2.0",
-        "id": req_id,
-        "error": {"code": -32601, "message": f"Method not found: {method}"},
-    }
+    return {"jsonrpc": "2.0", "id": req_id,
+            "error": {"code": -32601, "message": f"Method not found: {method}"}}
 
 
 class _MCPHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         length = int(self.headers.get("Content-Length", 0))
         body = json.loads(self.rfile.read(length))
-
         if isinstance(body, list):
             responses = [r for req in body if (r := _handle_jsonrpc(req)) is not None]
             data = json.dumps(responses).encode()
         else:
             response = _handle_jsonrpc(body)
             if response is None:
-                self.send_response(202)
-                self.end_headers()
-                return
+                self.send_response(202); self.end_headers(); return
             data = json.dumps(response).encode()
-
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(data)))
@@ -409,13 +240,12 @@ class _MCPHandler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def log_message(self, *args):
-        pass  # suppress per-request logs; errors still go to stderr
+        pass
 
 
 def main():
     LOCKI_HOME.mkdir(parents=True, exist_ok=True)
-    server = ThreadingHTTPServer(("0.0.0.0", MCP_PORT), _MCPHandler)
-    server.serve_forever()
+    ThreadingHTTPServer(("0.0.0.0", MCP_PORT), _MCPHandler).serve_forever()
 
 
 if __name__ == "__main__":
