@@ -67,13 +67,18 @@ def _val_ok(val: str | None, spec) -> bool:
 _RULES: dict[str, list] = {
     "git": [
         _cmd("status"),
-        _cmd("diff",   staged=...),
+        _cmd("diff",            staged=...),
+        _cmd("diff",  str,      staged=...),
+        _cmd("diff",  str, str, staged=...),
         _cmd("add",    all=...),
         _cmd("commit", message=_required),
         _cmd("push"),
         _cmd("fetch"),
-        _cmd("log",    oneline=...),
+        _cmd("log",             oneline=...),
+        _cmd("log",   str,      oneline=...),
         _cmd("show"),
+        _cmd("show",  str),
+        _cmd("restore", str,    staged=..., source=...),
     ],
     "gh": [
         _cmd("pr",    "create", title=_required, body=..., base=...),
@@ -171,13 +176,14 @@ _TOOL = {
         "git and gh are not available directly inside the sandbox — use this tool instead.\n\n"
         "Allowed commands:\n"
         "  git status\n"
-        "  git diff [--staged]\n"
+        "  git diff [--staged] [<ref> [<ref>]]\n"
         "  git add --all\n"
         "  git commit --message=<msg>\n"
         "  git push\n"
         "  git fetch\n"
-        "  git log [--oneline]\n"
-        "  git show\n\n"
+        "  git log [--oneline] [<ref>]\n"
+        "  git show [<ref>]\n"
+        "  git restore [--staged] [--source=<ref>] <file>\n\n"
         "  gh pr create --title=<title> [--body=<body>] [--base=<base>]\n"
         "  gh pr view [<id>]  /  gh pr list  /  gh pr diff  /  gh pr status\n"
         "  gh run view [<id>]  /  gh run list\n"
