@@ -200,6 +200,48 @@ def _validate_worktree(worktree_path: str) -> pathlib.Path:
     return wt
 
 
+def _check_push_refspec(args: list[str], wt: pathlib.Path) -> None:
+    """Reject any git push refspec that targets a branch other than the current one.
+
+    git push                         — ok (uses tracking branch)
+    git push origin                  — ok (uses tracking branch)
+    git push origin my-branch        — ok only if my-branch == current branch
+    git push origin HEAD             — ok (HEAD always refers to current branch)
+    git push origin HEAD:other       — blocked (explicit foreign dst)
+    git push origin :branch          — blocked (remote delete)
+    git push origin +branch          — blocked (force-push via refspec)
+    """
+    # Collect positional args (non-flags) after the "push" subcommand
+    positionals = [a for a in args[1:] if not a.startswith("-")]
+
+    # First positional is the remote, remaining are refspecs
+    refspecs = positionals[1:]
+    if not refspecs:
+        return  # no explicit refspec — git uses the tracking config, safe
+
+    current = subprocess.check_output(
+        ["git", "-C", str(wt), "rev-parse", "--abbrev-ref", "HEAD"],
+        text=True,
+        stderr=subprocess.DEVNULL,
+    ).strip()
+
+    for refspec in refspecs:
+        if refspec.startswith("+"):
+            raise ValueError(
+                f"Force-push refspec {refspec!r} is not allowed"
+            )
+        if ":" in refspec:
+            raise ValueError(
+                f"Explicit src:dst refspec {refspec!r} is not allowed; "
+                "omit the refspec and let git use the tracking branch"
+            )
+        if refspec not in (current, "HEAD"):
+            raise ValueError(
+                f"Cannot push to {refspec!r}; "
+                f"this worktree is on branch {current!r}"
+            )
+
+
 def _check_allowed(exe: str, args: list[str]) -> None:
     """Raise ValueError if (exe, args) is not on the allowlist."""
     if not args:
@@ -280,6 +322,8 @@ _TOOL = {
 def _run_host_command(worktree_path: str, exe: str, args: list[str]) -> str:
     wt = _validate_worktree(worktree_path)
     _check_allowed(exe, args)
+    if exe == "git" and args[:1] == ["push"]:
+        _check_push_refspec(args, wt)
     result = subprocess.run([exe, *args], capture_output=True, text=True, cwd=str(wt))
     output = (result.stdout + result.stderr).strip()
     if result.returncode != 0:
