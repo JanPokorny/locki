@@ -131,6 +131,45 @@ async def ensure_vm() -> None:
             cwd="/",
             check=False,
         )
+    await _ensure_idle_daemon()
+
+
+async def _ensure_idle_daemon() -> None:
+    """Copy the idle daemon script and service file into the VM and enable it (idempotent)."""
+    result = await run_in_vm(
+        ["systemctl", "is-enabled", "locki-idle-daemon"],
+        "Checking idle daemon",
+        check=False,
+    )
+    if result.returncode == 0:
+        return
+
+    data = importlib.resources.files("locki") / "data"
+    await run_command(
+        [limactl(), "copy", str(data / "locki-idle-daemon.py"), "locki:/tmp/locki-idle-daemon.py"],
+        "Copying locki-idle-daemon.py into VM",
+        env={"LIMA_HOME": str(LIMA_HOME)},
+        cwd="/",
+    )
+    await run_command(
+        [limactl(), "copy", str(data / "locki-idle-daemon.service"), "locki:/tmp/locki-idle-daemon.service"],
+        "Copying locki-idle-daemon.service into VM",
+        env={"LIMA_HOME": str(LIMA_HOME)},
+        cwd="/",
+    )
+    await run_in_vm(
+        [
+            "bash", "-c",
+            " && ".join([
+                "mv /tmp/locki-idle-daemon.py /usr/local/bin/locki-idle-daemon",
+                "mv /tmp/locki-idle-daemon.service /etc/systemd/system/locki-idle-daemon.service",
+                "chmod 755 /usr/local/bin/locki-idle-daemon",
+                "systemctl daemon-reload",
+                "systemctl enable --now locki-idle-daemon",
+            ]),
+        ],
+        "Installing and enabling idle daemon",
+    )
 
 
 def ensure_claude_data() -> None:

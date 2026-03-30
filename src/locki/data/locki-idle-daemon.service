@@ -1,0 +1,16 @@
+[Unit]
+Description=Locki Incus Idle Daemon
+Documentation=https://github.com/janpokorny/locki
+After=incus.service
+Requires=incus.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/locki-idle-daemon
+Restart=on-failure
+RestartSec=10s
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
