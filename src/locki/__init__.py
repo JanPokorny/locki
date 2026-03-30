@@ -35,12 +35,6 @@ WORKTREES_META = LOCKI_HOME / "worktrees-meta"
 CLAUDE_HOME = LOCKI_HOME / "claude"
 MCP_PORT = 7890
 
-_BASE36 = string.ascii_lowercase + string.digits
-
-
-def _token_base36(n: int) -> str:
-    return "".join(secrets.choice(_BASE36) for _ in range(n))
-
 
 @functools.cache
 def limactl() -> str:
@@ -207,7 +201,7 @@ async def ensure_worktree(branch: str) -> pathlib.Path:
 
     repo_name = git_root().name.replace("/", "-").replace(".", "-").lower()
     safe_branch = branch.replace("/", "-").replace(".", "-").lower()
-    wt_id = f"{repo_name}--{safe_branch}--{_token_base36(8)}"
+    wt_id = f"{repo_name}--{safe_branch}--{''.join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(8))}"
     wt_path = WORKTREES_HOME / wt_id
     wt_path.mkdir(parents=True, exist_ok=True)
 
