@@ -24,8 +24,9 @@ MCP_PORT = 7890
 
 # ── allowlist DSL ─────────────────────────────────────────────────────────────
 
-# Validators: called with str | None (None = flag absent, "" = boolean --flag).
-_flag = lambda s: s == ""  # --flag  (no value)
+# Validators: called with str | None (None = flag absent, "" = _requiredean --flag).
+_required = _required            # --flag=<non-empty value>
+_flag     = lambda s: s == ""  # --flag  (no value)
 
 
 def _cmd(*spec_args, **spec_flags):
@@ -35,7 +36,7 @@ def _cmd(*spec_args, **spec_flags):
     spec_flags — flag matchers (hyphens → underscores); each is called with the
                  flag's value (str) or None if absent and must return True to pass.
     """
-    def match(positionals: list[str], flags: dict[str, str]) -> bool:
+    def match(positionals: list[str], flags: dict[str, str]) -> _required:
         if len(positionals) != len(spec_args):
             return False
         for val, spec in zip(positionals, spec_args):
@@ -52,9 +53,9 @@ def _cmd(*spec_args, **spec_flags):
     return match
 
 
-def _val_ok(val: str | None, spec) -> bool:
+def _val_ok(val: str | None, spec) -> _required:
     if spec is ...:           return True
-    if callable(spec):        return bool(spec(val))
+    if callable(spec):        return _required(spec(val))
     if isinstance(spec, set): return val in spec
     if isinstance(spec, str): return val == spec
     return True
@@ -67,7 +68,7 @@ _RULES: dict[str, list] = {
         _cmd("diff"),
         _cmd("diff",   staged=_flag),
         _cmd("add",    all=_flag),
-        _cmd("commit", message=bool),
+        _cmd("commit", message=_required),
         _cmd("push"),
         _cmd("fetch"),
         _cmd("log"),
@@ -75,7 +76,7 @@ _RULES: dict[str, list] = {
         _cmd("show"),
     ],
     "gh": [
-        _cmd("pr",    "create", title=bool, body=..., base=...),
+        _cmd("pr",    "create", title=_required, body=..., base=...),
         _cmd("pr",    "view"),
         _cmd("pr",    "view",   str.isdigit),
         _cmd("pr",    "list"),
@@ -84,7 +85,7 @@ _RULES: dict[str, list] = {
         _cmd("run",   "list"),
         _cmd("run",   "view"),
         _cmd("run",   "view",   str.isdigit),
-        _cmd("issue", "create", title=bool, body=...),
+        _cmd("issue", "create", title=_required, body=...),
         _cmd("issue", "view"),
         _cmd("issue", "view",   str.isdigit),
         _cmd("issue", "list"),
@@ -98,7 +99,7 @@ def _parse(args: list[str]) -> tuple[list[str], dict[str, str]]:
     """Split args into positionals and long flags.
 
     --flag=value  →  flags["flag"] = "value"
-    --flag        →  flags["flag"] = ""       (boolean flag, empty-string sentinel)
+    --flag        →  flags["flag"] = ""       (_requiredean flag, empty-string sentinel)
     -x            →  ValueError  (short flags not accepted)
 
     Hyphens in flag names are normalised to underscores.
