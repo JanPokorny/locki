@@ -116,7 +116,7 @@ def ensure_claude_data() -> None:
     """Seed ~/.locki/claude with bundled config files if they don't already exist."""
     CLAUDE_HOME.mkdir(parents=True, exist_ok=True)
     data = importlib.resources.files("locki") / "data"
-    for name in ["settings.json", "CLAUDE.md", "claude.json"]:
+    for name in ["CLAUDE.md", "claude.json"]:
         dst = CLAUDE_HOME / name
         if not dst.exists():
             dst.write_text((data / name).read_text())
