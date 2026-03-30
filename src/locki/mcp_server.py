@@ -25,8 +25,7 @@ MCP_PORT = 7890
 # ── allowlist DSL ─────────────────────────────────────────────────────────────
 
 # Validators: called with str | None (None = flag absent, "" = boolean --flag).
-_flag = lambda s: s == ""                       # --flag  (no value)
-_opt  = lambda v: lambda s: s is None or v(s)  # optional, validated when present
+_flag = lambda s: s == ""  # --flag  (no value)
 
 
 def _cmd(*spec_args, **spec_flags):
@@ -54,6 +53,7 @@ def _cmd(*spec_args, **spec_flags):
 
 
 def _val_ok(val: str | None, spec) -> bool:
+    if spec is ...:           return True
     if callable(spec):        return bool(spec(val))
     if isinstance(spec, set): return val in spec
     if isinstance(spec, str): return val == spec
@@ -75,7 +75,7 @@ _RULES: dict[str, list] = {
         _cmd("show"),
     ],
     "gh": [
-        _cmd("pr",    "create", title=bool, body=_opt(bool), base=_opt(bool)),
+        _cmd("pr",    "create", title=bool, body=..., base=...),
         _cmd("pr",    "view"),
         _cmd("pr",    "view",   str.isdigit),
         _cmd("pr",    "list"),
@@ -84,7 +84,7 @@ _RULES: dict[str, list] = {
         _cmd("run",   "list"),
         _cmd("run",   "view"),
         _cmd("run",   "view",   str.isdigit),
-        _cmd("issue", "create", title=bool, body=_opt(bool)),
+        _cmd("issue", "create", title=bool, body=...),
         _cmd("issue", "view"),
         _cmd("issue", "view",   str.isdigit),
         _cmd("issue", "list"),
