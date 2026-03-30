@@ -2,13 +2,17 @@ import contextlib
 import fcntl
 import functools
 import importlib.resources
+import json
 import os
 import pathlib
 import secrets
 import shlex
 import shutil
+import socket
+import string
 import subprocess
 import sys
+import time
 import typing
 
 import typer
@@ -27,7 +31,9 @@ app = AsyncTyperWithAliases(
 LOCKI_HOME = pathlib.Path.home() / ".locki"
 LIMA_HOME = LOCKI_HOME / "lima"
 WORKTREES_HOME = LOCKI_HOME / "worktrees"
+WORKTREES_META = LOCKI_HOME / "worktrees-meta"
 CLAUDE_HOME = LOCKI_HOME / "claude"
+MCP_PORT = 7890
 HOOKS_HOME = LOCKI_HOME / "hooks"
 
 GIT_HOOKS = [
@@ -173,36 +179,59 @@ async def _ensure_idle_daemon() -> None:
 
 
 def ensure_claude_data() -> None:
-    """Seed ~/.locki/claude with bundled config files if they don't already exist."""
     CLAUDE_HOME.mkdir(parents=True, exist_ok=True)
-    data = importlib.resources.files("locki") / "data"
-    for name in ["settings.json", "CLAUDE.md", "claude.json"]:
-        dst = CLAUDE_HOME / name
-        if not dst.exists():
-            dst.write_text((data / name).read_text())
+    claude_json = CLAUDE_HOME / "claude.json"
+    existing = json.loads(claude_json.read_text()) if claude_json.exists() else {}
+    existing["projects"] = existing.get("projects", {})
+    existing["projects"]["/"] = existing.get("projects", {}).get("/", {})
+    existing["projects"]["/"]["hasTrustDialogAccepted"] = True
+    claude_json.write_text(json.dumps(existing, indent=2) + "\n")
+
+
+def ensure_mcp_server() -> None:
+    """Start the locki MCP server as a host daemon if not already running."""
+    pid_file = LOCKI_HOME / "mcp.pid"
+
+    if pid_file.exists():
+        try:
+            os.kill(int(pid_file.read_text().strip()), 0)
+            return  # already running
+        except (ProcessLookupError, ValueError, OSError):
+            pid_file.unlink(missing_ok=True)
+
+    log_path = LOCKI_HOME / "mcp.log"
+    with open(log_path, "a") as log:
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "locki.mcp_server"],
+            stdout=log,
+            stderr=log,
+            start_new_session=True,
+        )
+    pid_file.write_text(str(proc.pid))
+
+    # Wait up to 5 s for the server to accept connections
+    for _ in range(10):
+        try:
+            with socket.create_connection(("localhost", MCP_PORT), timeout=0.5):
+                return
+        except OSError:
+            time.sleep(0.5)
 
 
 @functools.cache
 def git_root() -> pathlib.Path:
-    current = pathlib.Path.cwd()
-    while True:
-        dot_git = current / ".git"
-        if dot_git.is_dir():
-            return current
-        if dot_git.is_file():
-            content = dot_git.read_text().strip()
-            if content.startswith("gitdir:"):
-                wt_gitdir = pathlib.Path(content.split(":", 1)[1].strip())
-                if not wt_gitdir.is_absolute():
-                    wt_gitdir = (current / wt_gitdir).resolve()
-                main_git_dir = (wt_gitdir / ".." / "..").resolve()
-                if main_git_dir.name == ".git":
-                    return main_git_dir.parent
-            return current
-        if current.parent == current:
-            console.error("Not inside a git repository.")
-            sys.exit(1)
-        current = current.parent
+    cwd = pathlib.Path.cwd().resolve()
+    if cwd.is_relative_to(WORKTREES_HOME.resolve()):
+        console.error("locki commands must be run from the main repo checkout, not inside a locki worktree.")
+        sys.exit(1)
+    result = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        console.error("Not inside a git repository.")
+        sys.exit(1)
+    return pathlib.Path(result.stdout.strip())
 
 
 async def find_worktree_for_branch(branch: str) -> pathlib.Path | None:
@@ -238,7 +267,7 @@ async def ensure_worktree(branch: str) -> pathlib.Path:
 
     repo_name = git_root().name.replace("/", "-").replace(".", "-").lower()
     safe_branch = branch.replace("/", "-").replace(".", "-").lower()
-    wt_id = f"{repo_name}--{safe_branch}--{secrets.token_hex(4)}"
+    wt_id = f"{repo_name}--{safe_branch}--{''.join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(8))}"
     wt_path = WORKTREES_HOME / wt_id
     wt_path.mkdir(parents=True, exist_ok=True)
 
@@ -258,6 +287,11 @@ async def ensure_worktree(branch: str) -> pathlib.Path:
         f"Creating worktree for '{branch}'",
     )
 
+    # Record the canonical .git pointer outside the VM-visible mount for tamper detection.
+    meta_dir = WORKTREES_META / wt_id
+    meta_dir.mkdir(parents=True, exist_ok=True)
+    (meta_dir / ".git").write_text((wt_path / ".git").read_text())
+    
     await run_command(
         ["git", "-C", str(git_root()), "config", "extensions.worktreeConfig", "true"],
         "Enabling per-worktree git config",
@@ -349,6 +383,46 @@ async def ensure_container(wt_id: str, wt_path: pathlib.Path, config) -> None:
         ["incus", "start", wt_id],
         "Starting container",
     )
+
+    # Write managed Claude Code config files into the container.
+    sandbox_md = (importlib.resources.files("locki") / "data" / "sandbox.md").read_text()
+    container_files = {
+        "/etc/claude-code/CLAUDE.md": (
+            "@/etc/claude-code/CLAUDE.d/os.md\n"
+            "@/etc/claude-code/CLAUDE.d/sandbox.md\n"
+        ),
+        "/etc/claude-code/CLAUDE.d/sandbox.md": sandbox_md,
+        "/etc/claude-code/managed-mcp.json": json.dumps({
+            "mcpServers": {"locki": {"type": "http", "url": "http://host.lima.internal:7890/mcp"}},
+        }, indent=2) + "\n",
+        "/etc/claude-code/managed-settings.json": json.dumps({
+            "skipDangerousModePermissionPrompt": True,
+            "allowManagedMcpServersOnly": False,
+            "permissions": {"defaultMode": "bypassPermissions"},
+        }, indent=2) + "\n",
+    }
+    for path, content in container_files.items():
+        await run_in_vm(
+            ["incus", "exec", wt_id, "--", "bash", "-c", f"mkdir -p $(dirname {path}) && cat > {path}"],
+            f"Writing {pathlib.PurePosixPath(path).name}",
+            input=content.encode(),
+        )
+
+    # Inject host.lima.internal so containers can reach the MCP server on the host.
+    # Lima sets this hostname in the VM's /etc/hosts; containers don't inherit it.
+    host_ip_result = await run_in_vm(
+        ["bash", "-c", "getent hosts host.lima.internal | awk '{print $1}' | head -1"],
+        "Resolving host IP",
+        check=False,
+    )
+    host_ip = host_ip_result.stdout.decode().strip()
+    if host_ip:
+        await run_in_vm(
+            ["incus", "exec", wt_id, "--",
+             "bash", "-c", f"echo '{host_ip} host.lima.internal' >> /etc/hosts"],
+            "Configuring host access in container",
+        )
+
 
 
 @app.command("shell", help="Open a shell in the per-branch container (creates branch/worktree/container if needed).")
@@ -456,6 +530,8 @@ async def remove_cmd(
             "Removing worktree",
             check=False,
         )
+
+        shutil.rmtree(WORKTREES_META / wt_id, ignore_errors=True)
 
 
 @app.command("list", help="List branches with locki-managed worktrees.")
