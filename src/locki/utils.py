@@ -15,12 +15,12 @@ from anyio.abc import ByteReceiveStream, TaskGroup
 from rich.console import Capture
 from rich.text import Text
 
-from locki.console import console, err_console
+from locki.console import console
 
 
 async def _receive_stream(stream: ByteReceiveStream, buffer: BytesIO):
     async for chunk in stream:
-        err_console.print(Text.from_ansi(chunk.decode(errors="replace")), style="dim")
+        console.print(Text.from_ansi(chunk.decode(errors="replace")), style="dim")
         buffer.write(chunk)
 
 
@@ -49,7 +49,7 @@ async def run_command(
     env = env or {}
     try:
         with status(message):
-            err_console.print(f"Command: {command}", style="dim")
+            console.print(f"Command: {command}", style="dim")
             start_time = time.time()
             async with await anyio.open_process(
                 command,
@@ -88,9 +88,9 @@ async def run_command(
         sys.exit(1)
     except subprocess.CalledProcessError as e:
         console.print(f"{message} [[red]ERROR[/red]]")
-        err_console.print(f"[red]Exit code: {e.returncode}[/red]")
+        console.print(f"[red]Exit code: {e.returncode}[/red]")
         if e.stderr:
-            err_console.print(f"[red]Stderr: {e.stderr.decode(errors='replace').strip()}[/red]")
+            console.print(f"[red]Stderr: {e.stderr.decode(errors='replace').strip()}[/red]")
         raise
 
 
@@ -105,11 +105,11 @@ def status(message: str):
         console.print(f"{message}...")
         yield
     elif SHOW_SUCCESS_STATUS.get():
-        err_console.print(f"\n[bold]{message}[/bold]")
+        console.print(f"\n[bold]{message}[/bold]")
         with console.status(f"{message}...", spinner="dots"):
             yield
     else:
-        err_console.print(f"\n[bold]{message}[/bold]")
+        console.print(f"\n[bold]{message}[/bold]")
         yield
 
 
@@ -124,13 +124,13 @@ def verbosity(verbose: bool, show_success_status: bool = True):
     token_status = SHOW_SUCCESS_STATUS.set(show_success_status)
     capture: Capture | None = None
     try:
-        with err_console.capture() if not verbose else contextlib.nullcontext() as capture:
+        with console.capture() if not verbose else contextlib.nullcontext() as capture:
             yield
     except Exception:
         if not verbose and capture and (logs := capture.get().strip()):
-            err_console.print("\n[yellow]--- Captured logs ---[/yellow]\n")
-            err_console.print(Text.from_ansi(logs, style="dim"))
-            err_console.print("\n[red]------- Error -------[/red]\n")
+            console.print("\n[yellow]--- Captured logs ---[/yellow]\n")
+            console.print(Text.from_ansi(logs, style="dim"))
+            console.print("\n[red]------- Error -------[/red]\n")
         raise
     finally:
         VERBOSE.reset(token_verbose)

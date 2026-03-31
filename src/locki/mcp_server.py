@@ -48,10 +48,7 @@ def _cmd(*spec_args, **spec_flags):
         for key in flags:
             if key not in spec_flags:
                 return False  # unlisted flag — reject
-        for key, spec in spec_flags.items():
-            if not _val_ok(flags.get(key), spec):
-                return False
-        return True
+        return all(_val_ok(flags.get(key), spec) for key, spec in spec_flags.items())
     return match
 
 

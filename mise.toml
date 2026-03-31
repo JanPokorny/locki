@@ -40,6 +40,11 @@ run = "uv run ruff check --quiet --fix"
 [tasks."fix:ruff-format"]
 run = "uv run ruff format --quiet"
 
+# test
+
+[tasks.test]
+run = "./test/e2e.sh"
+
 # build
 
 [tasks."build:download-binaries"]

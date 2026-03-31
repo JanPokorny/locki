@@ -6,7 +6,7 @@ import sys
 import typer
 from typer.core import TyperGroup
 
-from locki.console import err_console
+from locki.console import console
 
 
 class AsyncTyper(typer.Typer):
@@ -26,7 +26,7 @@ class AsyncTyper(typer.Typer):
                         return f(*args, **kwargs)
                 except* Exception as eg:
                     for exc in eg.exceptions:
-                        err_console.error(f"{type(exc).__name__}: {exc}")
+                        console.error(f"{type(exc).__name__}: {exc}")
                     sys.exit(1)
                 finally:
                     if sys.stdout.isatty():

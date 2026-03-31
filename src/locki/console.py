@@ -18,5 +18,4 @@ class ExtendedConsole(Console):
         self.print(f":memo: INFO: {message}")
 
 
-err_console = ExtendedConsole(stderr=True)
-console = ExtendedConsole()
+console = ExtendedConsole(stderr=True)
