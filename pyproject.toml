@@ -1,6 +1,6 @@
 [project]
 name = "locki"
-version = "0.0.1"
+version = "0.0.2"
 description = "Lock down agents in a VM, enabling mischief without consequences"
 readme = "README.md"
 requires-python = ">=3.14,<3.15"
