@@ -1,12 +1,13 @@
 import asyncio
 import functools
 import inspect
+import logging
 import sys
 
 import typer
 from typer.core import TyperGroup
 
-from locki.console import console
+logger = logging.getLogger(__name__)
 
 
 class AsyncTyper(typer.Typer):
@@ -26,7 +27,7 @@ class AsyncTyper(typer.Typer):
                         return f(*args, **kwargs)
                 except* Exception as eg:
                     for exc in eg.exceptions:
-                        console.error(f"{type(exc).__name__}: {exc}")
+                        logger.error("%s: %s", type(exc).__name__, exc)
                     sys.exit(1)
                 finally:
                     if sys.stdout.isatty():

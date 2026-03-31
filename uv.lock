@@ -83,7 +83,6 @@ dependencies = [
     { name = "anyio" },
     { name = "inquirerpy" },
     { name = "pydantic" },
-    { name = "rich" },
     { name = "typer" },
 ]
 
@@ -98,7 +97,6 @@ requires-dist = [
     { name = "anyio", specifier = ">=4.12.1" },
     { name = "inquirerpy", specifier = ">=0.3.4" },
     { name = "pydantic", specifier = ">=2.12.5" },
-    { name = "rich", specifier = ">=14.3.3" },
     { name = "typer", specifier = ">=0.24.1" },
 ]
 
