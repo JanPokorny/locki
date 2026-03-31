@@ -2,6 +2,7 @@ import logging
 import os
 import subprocess
 import sys
+import time
 from io import BytesIO
 from pathlib import Path
 
@@ -9,6 +10,7 @@ import anyio
 import anyio.abc
 from anyio import create_task_group
 from anyio.abc import ByteReceiveStream
+from halo import Halo
 
 LOG_DIR = Path.home() / ".locki" / "logs"
 
@@ -27,7 +29,7 @@ def setup_logging():
     root.setLevel(logging.DEBUG)
 
     stderr_handler = logging.StreamHandler(sys.stderr)
-    stderr_handler.setLevel(logging.INFO)
+    stderr_handler.setLevel(logging.WARNING)
     stderr_handler.setFormatter(_StderrFormatter())
     root.addHandler(stderr_handler)
 
@@ -46,8 +48,9 @@ async def run_command(
     check: bool = True,
     input: bytes | None = None,
 ) -> subprocess.CompletedProcess[bytes]:
-    logger.info("  %s...", message)
     logger.debug("Command: %s", command)
+    spinner = Halo(text=message, spinner="dots", stream=sys.stderr)
+    spinner.start()
 
     async def recv(stream: ByteReceiveStream, buf: BytesIO):
         async for chunk in stream:
@@ -55,6 +58,7 @@ async def run_command(
             buf.write(chunk)
 
     try:
+        start_time = time.time()
         async with await anyio.open_process(
             command,
             stdin=subprocess.PIPE if input else subprocess.DEVNULL,
@@ -76,12 +80,19 @@ async def run_command(
                 raise subprocess.CalledProcessError(
                     proc.returncode or 0, command, stdout_buf.getvalue(), stderr_buf.getvalue()
                 )
+
+            elapsed = int(time.time() - start_time)
+            duration = (
+                "" if elapsed < 5 else f" ({elapsed}s)" if elapsed < 60 else f" ({elapsed // 60}m{elapsed % 60}s)"
+            )
+            spinner.succeed(f"{message}{duration}")
             return subprocess.CompletedProcess(
                 command, proc.returncode or 0, stdout_buf.getvalue(), stderr_buf.getvalue()
             )
     except FileNotFoundError:
+        spinner.fail(message)
         logger.error("%s is not installed. Please install it first.", command[0])
         sys.exit(1)
-    except subprocess.CalledProcessError as e:
-        logger.error("%s failed (exit %d, see %s)", message, e.returncode, LOG_DIR / "latest.log")
+    except subprocess.CalledProcessError:
+        spinner.fail(f"{message} (see {LOG_DIR / 'latest.log'})")
         raise

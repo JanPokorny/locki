@@ -19,6 +19,7 @@ import typing
 
 import anyio.to_thread
 import typer
+from halo import Halo
 
 from locki.async_typer import AsyncTyperWithAliases
 from locki.config import load_config
@@ -106,8 +107,8 @@ async def _vm_lock():
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
-            logger.info("  Waiting for another locki process...")
-            await anyio.to_thread.run_sync(lambda: fcntl.flock(fd, fcntl.LOCK_EX))
+            with Halo(text="Waiting for another locki process", spinner="dots", stream=sys.stderr):
+                await anyio.to_thread.run_sync(lambda: fcntl.flock(fd, fcntl.LOCK_EX))
         yield
     finally:
         fcntl.flock(fd, fcntl.LOCK_UN)
