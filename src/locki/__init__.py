@@ -35,7 +35,6 @@ WORKTREES_HOME = LOCKI_HOME / "worktrees"
 WORKTREES_META = LOCKI_HOME / "worktrees-meta"
 CLAUDE_HOME = LOCKI_HOME / "claude"
 MCP_PORT = 7890
-HOOKS_HOME = LOCKI_HOME / "hooks"
 
 GIT_HOOKS = [
     "applypatch-msg",
@@ -322,22 +321,23 @@ async def ensure_worktree(branch: str) -> pathlib.Path:
         "Enabling per-worktree git config",
     )
 
-    ensure_hooks_dir()
+    hooks_dir = WORKTREES_META / wt_id / "hooks"
+    ensure_hooks_dir(hooks_dir)
 
     await run_command(
-        ["git", "-C", str(wt_path), "config", "--worktree", "core.hooksPath", str(HOOKS_HOME)],
+        ["git", "-C", str(wt_path), "config", "--worktree", "core.hooksPath", str(hooks_dir)],
         "Configuring per-worktree hooks",
     )
 
     return wt_path
 
 
-def ensure_hooks_dir() -> None:
-    """Populate ~/.locki/hooks/ with generic hook scripts for all standard git hooks."""
-    HOOKS_HOME.mkdir(parents=True, exist_ok=True)
+def ensure_hooks_dir(hooks_dir: pathlib.Path) -> None:
+    """Populate a hooks directory with generic hook scripts for all standard git hooks."""
+    hooks_dir.mkdir(parents=True, exist_ok=True)
     hook_script = (importlib.resources.files("locki") / "data" / "locki-hook.sh").read_bytes()
     for name in GIT_HOOKS:
-        hook_path = HOOKS_HOME / name
+        hook_path = hooks_dir / name
         hook_path.write_bytes(hook_script)
         hook_path.chmod(0o755)
 
@@ -436,6 +436,11 @@ async def ensure_container(wt_id: str, wt_path: pathlib.Path, config) -> None:
         input=content.encode(),
     )
 
+    await run_in_vm(
+        ["incus", "exec", wt_id, "--", "ln", "-sf", "/root/.claude/claude.json", "/root/.claude.json"],
+        "Setting up .claude.json",
+    )
+
     # Inject host.lima.internal so containers can reach the MCP server on the host.
     # Lima sets this hostname in the VM's /etc/hosts; containers don't inherit it.
     host_ip_result = await run_in_vm(
@@ -453,8 +458,13 @@ async def ensure_container(wt_id: str, wt_path: pathlib.Path, config) -> None:
 
 
 
-@app.command("shell", help="Open a shell in the per-branch container (creates branch/worktree/container if needed).")
+@app.command(
+    "shell",
+    help="Open a shell in the per-branch container (creates branch/worktree/container if needed).",
+    context_settings={"allow_extra_args": True, "allow_interspersed_args": False},
+)
 async def shell_cmd(
+    ctx: typer.Context | None = None,
     branch: typing.Annotated[str | None, typer.Argument(help="Branch name to work on (optional if inside a worktree)")] = None,
     command: typing.Annotated[
         str | None, typer.Option("-c", help="Command to run instead of an interactive shell")
@@ -510,6 +520,7 @@ async def shell_cmd(
                     shlex.quote("<(mise activate bash)"),
                 ]
                 + (["-c", shlex.quote(command)] if command else [])
+                + (["--", *(shlex.quote(a) for a in ctx.args)] if ctx and ctx.args else [])
             ),
         ],
     )
@@ -521,13 +532,14 @@ async def claude_cmd(
     verbose: typing.Annotated[bool, typer.Option("-v", "--verbose", help="Show verbose output")] = False,
 ):
     """Run Claude in the sandbox."""
-    await shell_cmd(branch=branch, command="mise use -g claude@latest && exec claude", verbose=verbose)
+    await shell_cmd(branch=branch, command="mise use --cd / -g claude@latest && exec claude", verbose=verbose)
 
 
 @app.command("remove", help="Remove a branch's worktree and container.")
 async def remove_cmd(
     branch: typing.Annotated[str | None, typer.Argument(help="Branch name to remove (optional if inside a worktree)")] = None,
     force: typing.Annotated[bool, typer.Option("--force", "-f", help="Skip safety checks")] = False,
+    delete_branch: typing.Annotated[bool, typer.Option("--branch", "-b", help="Also delete the branch")] = False,
     verbose: typing.Annotated[bool, typer.Option("-v", "--verbose", help="Show verbose output")] = False,
 ):
     with verbosity(verbose):
@@ -558,6 +570,14 @@ async def remove_cmd(
             )
             sys.exit(1)
 
+        if delete_branch and not branch:
+            result = await run_command(
+                ["git", "-C", str(wt_path), "rev-parse", "--abbrev-ref", "HEAD"],
+                "Resolving branch name",
+                check=False,
+            )
+            branch = result.stdout.decode().strip() if result.returncode == 0 else None
+
         wt_id = wt_path.relative_to(WORKTREES_HOME).parts[0]
 
         await run_in_vm(
@@ -566,13 +586,20 @@ async def remove_cmd(
             check=False,
         )
 
+        shutil.rmtree(wt_path, ignore_errors=True)
+        shutil.rmtree(WORKTREES_META / wt_id, ignore_errors=True)
         await run_command(
-            ["git", "-C", str(git_root()), "worktree", "remove", "--force", str(wt_path)],
+            ["git", "-C", str(git_root()), "worktree", "prune"],
             "Removing worktree",
             check=False,
         )
 
-        shutil.rmtree(WORKTREES_META / wt_id, ignore_errors=True)
+        if delete_branch:
+            await run_command(
+                ["git", "-C", str(git_root()), "branch", "-D", branch],
+                f"Deleting branch {branch}",
+                check=False,
+            )
 
 
 @app.command("list", help="List branches with locki-managed worktrees.")

@@ -111,7 +111,6 @@ provision:
       incus launch images:fedora/43 locki-base-builder
       incus exec locki-base-builder -- bash <<-'EOFEOF'
       	set -euxo pipefail
-      	ln -s /root/.claude/claude.json /root/.claude.json
       	echo -e "cachedir=/var/cache/locki/fedora-43/dnf\\nkeepcache=1" >> /etc/dnf/dnf.conf
       	mkdir -p /etc/claude-code/
       	cat >/etc/claude-code/CLAUDE.md <<-'EOF'
@@ -125,9 +124,6 @@ provision:
       		echo "  run_host_command(worktree_path=\"\$PWD\", exe=\"$cmd\", args=[...])" >&2
       		exit 1
       	EOF
-        chmod 755 /usr/local/bin/locki-stub
-        ln -sf locki-stub /usr/local/bin/git
-        ln -sf locki-stub /usr/local/bin/gh
       	curl --retry 10 --retry-all-errors https://mirrors.fedoraproject.org  # network takes a few seconds to connect
       	dnf install -y \
       	  https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm \
