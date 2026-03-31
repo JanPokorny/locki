@@ -1,7 +1,7 @@
-<center>
+<p align="center">
     <h1>🔒🐍 Locki</h1>
     AI sandboxing for real-world projects
-</center>
+</p>
 
 &nbsp;
 
