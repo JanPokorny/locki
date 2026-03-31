@@ -111,7 +111,7 @@ async def _vm_lock():
         os.close(fd)
 
 
-def ensure_mcp_server() -> None:
+def ensure_mcp_server() -> None:  # TODO: Non-functional at the moment
     """Start the locki MCP server as a host daemon if not already running."""
     pid_file = LOCKI_HOME / "mcp.pid"
 
