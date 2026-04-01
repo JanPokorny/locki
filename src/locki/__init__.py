@@ -99,8 +99,20 @@ def prepare_claude_state() -> None:
     claude_json.write_text(json.dumps(existing, indent=2) + "\n")
 
 
+def build_node_tool_setup(extra_setup: str | None = None) -> str:
+    setup = textwrap.dedent(
+        """\
+        mise use -g node@24
+        mise exec node@24 -- npm -v >/dev/null
+        """
+    )
+    if not extra_setup:
+        return setup
+    return f"{setup}{extra_setup}\n"
+
+
 def build_claude_launch_argv(_: pathlib.Path, extra_args: list[str]) -> list[str]:
-    return ["mise", "exec", "node@24", "npm:@anthropic-ai/claude-code@latest", "--", "claude", *extra_args]
+    return ["mise", "exec", "npm:@anthropic-ai/claude-code@latest", "--", "claude", *extra_args]
 
 
 def build_codex_launch_argv(wt_path: pathlib.Path, extra_args: list[str]) -> list[str]:
@@ -109,7 +121,6 @@ def build_codex_launch_argv(wt_path: pathlib.Path, extra_args: list[str]) -> lis
         "CODEX_HOME=/root/.codex",
         "mise",
         "exec",
-        "node@24",
         "npm:@openai/codex@latest",
         "--",
         "codex",
@@ -145,7 +156,11 @@ def build_codex_container_files(_: pathlib.Path) -> dict[str, str]:
 
 
 def build_claude_container_setup() -> str | None:
-    return "ln -sf /root/.claude/claude.json /root/.claude.json"
+    return build_node_tool_setup("ln -sf /root/.claude/claude.json /root/.claude.json")
+
+
+def build_codex_container_setup() -> str | None:
+    return build_node_tool_setup()
 
 
 PROVIDERS = {
@@ -164,6 +179,7 @@ PROVIDERS = {
         guest_state_dir=pathlib.PurePosixPath("/root/.codex"),
         launch_argv_builder=build_codex_launch_argv,
         container_file_builder=build_codex_container_files,
+        container_setup_builder=build_codex_container_setup,
     ),
 }
 
