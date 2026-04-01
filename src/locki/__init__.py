@@ -488,7 +488,7 @@ async def claude_cmd(
 ):
     """Run Claude in the sandbox."""
     await shell_cmd(
-        ctx=ctx, branch=branch, command='mise use --cd / -g nodejs@24 npm:@anthropic-ai/claude-code@latest && exec claude "$@"'
+        ctx=ctx, branch=branch, command='exec mise exec nodejs@24 npm:@anthropic-ai/claude-code@latest -- claude "$@"'
     )
 
 

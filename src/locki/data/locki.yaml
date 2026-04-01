@@ -116,8 +116,6 @@ provision:
       	  https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm
       	dnf -y copr enable jdxcode/mise
       	dnf -y install mise
-        mise use -g nodejs@24
-      	mise install npm:@anthropic-ai/claude-code@latest
       '
       incus stop locki-base-builder
       incus publish locki-base-builder --alias locki-base
