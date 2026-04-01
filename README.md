@@ -26,6 +26,7 @@ Locki is a CLI tool for Linux and macOS that allows running multiple AI agents i
     - `uv tool install locki`
     - `pipx install locki`
     - `mise use -g pipx:locki`
+    - Host VM prerequisites are still required. On Ubuntu/Debian install QEMU with `sudo apt install qemu-system-x86 qemu-utils` (or the broader `qemu-system qemu-utils`). On macOS install it with `brew install qemu`.
 2. `cd` to your Git repository and run one of:
     - `locki codex my-first-sandbox`
     - `locki claude my-first-sandbox`

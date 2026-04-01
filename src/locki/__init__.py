@@ -180,6 +180,19 @@ def limactl() -> str:
     sys.exit(1)
 
 
+def ensure_qemu_img() -> None:
+    if shutil.which("qemu-img"):
+        return
+    logger.error("qemu-img is not installed on the host. Lima requires it to create and start the VM.")
+    if sys.platform.startswith("linux"):
+        logger.error("On Ubuntu/Debian, install it with: sudo apt install qemu-utils")
+    elif sys.platform == "darwin":
+        logger.error("On macOS, install it with: brew install qemu")
+    else:
+        logger.error("Please install qemu-img for your platform.")
+    sys.exit(1)
+
+
 async def run_in_vm(
     command: list[str],
     message: str,
@@ -312,6 +325,7 @@ def ensure_locki_dirs() -> None:
 
 async def ensure_vm_started() -> None:
     ensure_locki_dirs()
+    ensure_qemu_img()
     async with _vm_lock():
         await run_command(
             [
@@ -332,7 +346,6 @@ async def ensure_vm_started() -> None:
             "Starting VM",
             env={"LIMA_HOME": str(LIMA_HOME)},
             cwd="/",
-            check=False,
         )
 
 
@@ -403,7 +416,13 @@ async def ensure_disk_device(wt_id: str, device_name: str, source: str, path: st
         check=False,
     )
     if current_source.returncode == 0 and current_source.stdout.decode().strip() == source:
-        return
+        mounted = await run_in_vm(
+            ["incus", "exec", wt_id, "--", "mountpoint", "-q", path],
+            f"Verifying {device_name} mount",
+            check=False,
+        )
+        if mounted.returncode == 0:
+            return
 
     if current_source.returncode == 0:
         await run_in_vm(
@@ -450,8 +469,13 @@ async def ensure_container(wt_path: pathlib.Path) -> str:
         if local_path.is_file():
             await run_in_vm(["incus", "image", "delete", image_ref], "Cleaning up imported image", check=False)
 
-    await ensure_disk_device(wt_id, "worktree", str(wt_path), str(wt_path), "Mounting worktree into container")
     await run_in_vm(["incus", "start", wt_id], "Starting container", check=False)
+    wt_parent = str(pathlib.PurePosixPath(str(wt_path)).parent)
+    await run_in_vm(
+        ["incus", "exec", wt_id, "--", "mkdir", "-p", wt_parent],
+        "Preparing worktree mount path",
+    )
+    await ensure_disk_device(wt_id, "worktree", str(wt_path), str(wt_path), "Mounting worktree into container")
     return wt_id
 
 
