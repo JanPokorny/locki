@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 import locki
+from locki.config import LockiConfig
 
 
 def test_provider_registry_contains_claude_and_codex():
@@ -54,6 +55,14 @@ def test_provider_container_files_include_managed_assets():
     assert "/etc/claude-code/CLAUDE.md" in claude_files
     assert '"defaultMode": "bypassPermissions"' in claude_files["/etc/claude-code/managed-settings.json"]
     assert codex_files == {"/etc/codex/LOCKI.md": locki.data_text("CODEX.md")}
+
+
+def test_incus_image_arch_aliases(monkeypatch):
+    monkeypatch.setattr("locki.config.platform.machine", lambda: "x86_64")
+    assert LockiConfig().get_incus_image() == "locki-base"
+
+    monkeypatch.setattr("locki.config.platform.machine", lambda: "aarch64")
+    assert LockiConfig().get_incus_image() == "locki-base"
 
 
 @pytest.mark.anyio

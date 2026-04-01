@@ -8,6 +8,11 @@ import pydantic
 
 logger = logging.getLogger(__name__)
 
+ARCH_ALIASES: dict[str, str] = {
+    "x86_64": "amd64",
+    "aarch64": "arm64",
+}
+
 DEFAULT_INCUS_IMAGES: dict[str, str] = {
     "arm64": "locki-base",
     "amd64": "locki-base",
@@ -18,7 +23,7 @@ class LockiConfig(pydantic.BaseModel):
     incus_image: dict[str, str] = pydantic.Field(default_factory=lambda: dict(DEFAULT_INCUS_IMAGES))
 
     def get_incus_image(self) -> str:
-        arch = platform.machine()
+        arch = ARCH_ALIASES.get(platform.machine(), platform.machine())
         if arch not in self.incus_image:
             logger.error(
                 "No incus_image configured for architecture '%s'. Available: %s",
