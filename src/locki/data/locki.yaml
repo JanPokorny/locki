@@ -13,6 +13,9 @@ mounts:
   - location: "~/.locki/claude"
     mountPoint: "/root/.claude"
     writable: true
+  - location: "~/.locki/codex"
+    mountPoint: "/root/.codex"
+    writable: true
 
 provision:
   - mode: system
@@ -101,6 +104,10 @@ provision:
             claude:
               path: /root/.claude
               source: /root/.claude
+              type: disk
+            codex:
+              path: /root/.codex
+              source: /root/.codex
               type: disk
       EOF
   - mode: system

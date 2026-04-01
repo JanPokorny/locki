@@ -38,25 +38,34 @@ def _cmd(*spec_args, **spec_flags):
     --help is always permitted.
     """
     spec_flags = {"help": ..., **spec_flags}
+
     def match(positionals: list[str], flags: dict[str, str]) -> bool:
         if len(positionals) != len(spec_args):
             return False
-        for val, spec in zip(positionals, spec_args):
-            if isinstance(spec, str)  and val != spec:    return False
-            if isinstance(spec, set)  and val not in spec: return False
-            if callable(spec)         and not spec(val):   return False
+        for val, spec in zip(positionals, spec_args, strict=False):
+            if isinstance(spec, str) and val != spec:
+                return False
+            if isinstance(spec, set) and val not in spec:
+                return False
+            if callable(spec) and not spec(val):
+                return False
         for key in flags:
             if key not in spec_flags:
                 return False  # unlisted flag — reject
         return all(_val_ok(flags.get(key), spec) for key, spec in spec_flags.items())
+
     return match
 
 
 def _val_ok(val: str | None, spec) -> bool:
-    if spec is ...:           return True
-    if callable(spec):        return bool(spec(val))
-    if isinstance(spec, set): return val in spec
-    if isinstance(spec, str): return val == spec
+    if spec is ...:
+        return True
+    if callable(spec):
+        return bool(spec(val))
+    if isinstance(spec, set):
+        return val in spec
+    if isinstance(spec, str):
+        return val == spec
     return True
 
 
@@ -138,9 +147,9 @@ def _validate_worktree(worktree_path: str) -> pathlib.Path:
         raise ValueError(f"No worktree metadata found for {wt_id!r}; re-create the worktree.")
     dot_git = wt / ".git"
     if not dot_git.is_file():
-        raise ValueError(f"Worktree .git is not a file — possible tampering detected.")
+        raise ValueError("Worktree .git is not a file — possible tampering detected.")
     if dot_git.read_text().strip() != meta_git.read_text().strip():
-        raise ValueError(f"Worktree .git content mismatch — possible tampering detected.")
+        raise ValueError("Worktree .git content mismatch — possible tampering detected.")
 
     return wt
 
@@ -194,9 +203,12 @@ _TOOL = {
                 "type": "string",
                 "description": "Absolute path to your locki worktree (your current working directory).",
             },
-            "exe":  {"type": "string", "enum": ["git", "gh"]},
-            "args": {"type": "array", "items": {"type": "string"},
-                     "description": "Arguments passed to the executable."},
+            "exe": {"type": "string", "enum": ["git", "gh"]},
+            "args": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Arguments passed to the executable.",
+            },
         },
         "required": ["worktree_path", "exe", "args"],
     },
@@ -210,30 +222,38 @@ def _handle_jsonrpc(request: dict) -> dict | None:
         return None  # notification
 
     if method == "initialize":
-        return {"jsonrpc": "2.0", "id": req_id, "result": {
-            "protocolVersion": "2024-11-05",
-            "capabilities": {"tools": {}},
-            "serverInfo": {"name": "locki", "version": "1.0.0"},
-        }}
+        return {
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "result": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {"tools": {}},
+                "serverInfo": {"name": "locki", "version": "1.0.0"},
+            },
+        }
 
     if method == "tools/list":
         return {"jsonrpc": "2.0", "id": req_id, "result": {"tools": [_TOOL]}}
 
     if method == "tools/call":
         if request["params"]["name"] != "run_host_command":
-            return {"jsonrpc": "2.0", "id": req_id,
-                    "error": {"code": -32601, "message": "Unknown tool"}}
+            return {"jsonrpc": "2.0", "id": req_id, "error": {"code": -32601, "message": "Unknown tool"}}
         a = request["params"].get("arguments", {})
         try:
             text = _run_host_command(a["worktree_path"], a["exe"], a["args"])
-            return {"jsonrpc": "2.0", "id": req_id,
-                    "result": {"content": [{"type": "text", "text": text}], "isError": False}}
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {"content": [{"type": "text", "text": text}], "isError": False},
+            }
         except Exception as exc:
-            return {"jsonrpc": "2.0", "id": req_id,
-                    "result": {"content": [{"type": "text", "text": str(exc)}], "isError": True}}
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {"content": [{"type": "text", "text": str(exc)}], "isError": True},
+            }
 
-    return {"jsonrpc": "2.0", "id": req_id,
-            "error": {"code": -32601, "message": f"Method not found: {method}"}}
+    return {"jsonrpc": "2.0", "id": req_id, "error": {"code": -32601, "message": f"Method not found: {method}"}}
 
 
 class _MCPHandler(BaseHTTPRequestHandler):
@@ -246,7 +266,9 @@ class _MCPHandler(BaseHTTPRequestHandler):
         else:
             response = _handle_jsonrpc(body)
             if response is None:
-                self.send_response(202); self.end_headers(); return
+                self.send_response(202)
+                self.end_headers()
+                return
             data = json.dumps(response).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
