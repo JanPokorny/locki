@@ -7,15 +7,13 @@ Locki is a CLI tool for Linux and macOS that allows running multiple AI agents i
 
 &nbsp;
 
-```bash
-locki claude my-new-feature   # <- Claude CLI in "skip all permission" mode opens in a fresh sandbox
-```
+`$ locki claude my-new-feature` ← Claude Code in "skip all permissions" mode opens in a fresh sandbox
 
 &nbsp;
 
 **How is Locki different than other sandboxes?**
 - _VM-based security_ -- Locki sandboxes are enclosed in a Lima VM. Nothing gets executed on host. Only raw code leaves the VM.
-- _LXC-based environment_ -- Run anything, like Docker and even full Kubernetes in the Locki sandboxes.
+- _LXC-based environment_ -- Run anything: Python, Node.js, Docker or even full Kubernetes in the Locki sandboxes.
 - _Worktree-based convenience_ -- Browse worktree files locally. See agent's changes natively in VSCode sidebar.
 
 &nbsp;
