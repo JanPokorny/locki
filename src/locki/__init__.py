@@ -100,7 +100,7 @@ def prepare_claude_state() -> None:
 
 
 def build_claude_launch_argv(_: pathlib.Path, extra_args: list[str]) -> list[str]:
-    return ["mise", "exec", "nodejs@24", "npm:@anthropic-ai/claude-code@latest", "--", "claude", *extra_args]
+    return ["mise", "exec", "node@24", "npm:@anthropic-ai/claude-code@latest", "--", "claude", *extra_args]
 
 
 def build_codex_launch_argv(wt_path: pathlib.Path, extra_args: list[str]) -> list[str]:
@@ -109,7 +109,7 @@ def build_codex_launch_argv(wt_path: pathlib.Path, extra_args: list[str]) -> lis
         "CODEX_HOME=/root/.codex",
         "mise",
         "exec",
-        "nodejs@24",
+        "node@24",
         "npm:@openai/codex@latest",
         "--",
         "codex",
