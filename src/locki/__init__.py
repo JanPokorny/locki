@@ -223,7 +223,7 @@ def ensure_mcp_server() -> None:  # TODO: Non-functional at the moment
         try:
             os.kill(int(pid_file.read_text().strip()), 0)
             return
-        except (ProcessLookupError, ValueError, OSError):
+        except ProcessLookupError, ValueError, OSError:
             pid_file.unlink(missing_ok=True)
 
     log_path = LOCKI_HOME / "mcp.log"
@@ -480,12 +480,16 @@ async def write_container_files(wt_id: str, files: dict[str, str]) -> None:
 
 async def resolve_host_ip() -> str:
     return (
-        await run_in_vm(
-            ["bash", "-c", "getent hosts host.lima.internal | awk '{print $1}' | head -1"],
-            "Resolving host IP",
-            check=False,
+        (
+            await run_in_vm(
+                ["bash", "-c", "getent hosts host.lima.internal | awk '{print $1}' | head -1"],
+                "Resolving host IP",
+                check=False,
+            )
         )
-    ).stdout.decode().strip()
+        .stdout.decode()
+        .strip()
+    )
 
 
 def build_generic_container_setup(host_ip: str) -> str:
@@ -519,7 +523,9 @@ async def prepare_worktree_environment(branch: str | None) -> tuple[pathlib.Path
     wt_path = await resolve_worktree(branch)
     wt_id = await ensure_container(wt_path)
     await write_container_files(wt_id, build_generic_container_files())
-    await run_container_setup(wt_id, build_generic_container_setup(await resolve_host_ip()), "Configuring container environment")
+    await run_container_setup(
+        wt_id, build_generic_container_setup(await resolve_host_ip()), "Configuring container environment"
+    )
     return wt_path, wt_id
 
 
@@ -529,7 +535,9 @@ async def prepare_provider_environment(wt_id: str, wt_path: pathlib.Path, provid
         provider.host_state_prep()
 
     guest_dir = str(provider.guest_state_dir)
-    await ensure_disk_device(wt_id, provider.name, guest_dir, guest_dir, f"Mounting {provider.name} state into container")
+    await ensure_disk_device(
+        wt_id, provider.name, guest_dir, guest_dir, f"Mounting {provider.name} state into container"
+    )
     await write_container_files(wt_id, provider.container_file_builder(wt_path))
 
     if provider.container_setup_builder:
@@ -571,7 +579,9 @@ def exec_in_container(wt_id: str, wt_path: pathlib.Path, inner_command: list[str
     )
 
 
-def exec_shell_session(wt_id: str, wt_path: pathlib.Path, command: str | None, extra_args: list[str]) -> typing.NoReturn:
+def exec_shell_session(
+    wt_id: str, wt_path: pathlib.Path, command: str | None, extra_args: list[str]
+) -> typing.NoReturn:
     if command is not None:
         inner_command = [
             "bash",
@@ -589,7 +599,9 @@ def exec_shell_session(wt_id: str, wt_path: pathlib.Path, command: str | None, e
 
 
 def exec_provider_session(wt_id: str, wt_path: pathlib.Path, provider_argv: list[str]) -> typing.NoReturn:
-    exec_in_container(wt_id, wt_path, ["bash", "-lc", 'eval "$(mise activate bash)" && exec "$@"', "--", *provider_argv])
+    exec_in_container(
+        wt_id, wt_path, ["bash", "-lc", 'eval "$(mise activate bash)" && exec "$@"', "--", *provider_argv]
+    )
 
 
 async def run_provider_command(ctx: typer.Context, branch: str | None, provider_name: str) -> None:
@@ -693,7 +705,9 @@ async def remove_cmd(
     await run_command(["git", "-C", str(git_root()), "worktree", "prune"], "Removing worktree", check=False)
 
     if delete_branch and branch:
-        await run_command(["git", "-C", str(git_root()), "branch", "-D", branch], f"Deleting branch {branch}", check=False)
+        await run_command(
+            ["git", "-C", str(git_root()), "branch", "-D", branch], f"Deleting branch {branch}", check=False
+        )
 
 
 @app.command("list", help="List branches with locki-managed worktrees.")

@@ -22,7 +22,8 @@ class LockiConfig(pydantic.BaseModel):
         if arch not in self.incus_image:
             logger.error(
                 "No incus_image configured for architecture '%s'. Available: %s",
-                arch, ", ".join(self.incus_image),
+                arch,
+                ", ".join(self.incus_image),
             )
             sys.exit(1)
         return self.incus_image[arch]

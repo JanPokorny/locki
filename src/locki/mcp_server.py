@@ -73,38 +73,39 @@ def _val_ok(val: str | None, spec) -> bool:
 _RULES: dict[str, list] = {
     "git": [
         _cmd("status"),
-        _cmd("diff",            staged=...),
-        _cmd("diff",  str,      staged=...),
-        _cmd("diff",  str, str, staged=...),
-        _cmd("add",    all=...),
+        _cmd("diff", staged=...),
+        _cmd("diff", str, staged=...),
+        _cmd("diff", str, str, staged=...),
+        _cmd("add", all=...),
         _cmd("commit", message=_required),
         _cmd("push"),
         _cmd("fetch"),
-        _cmd("log",             oneline=...),
-        _cmd("log",   str,      oneline=...),
+        _cmd("log", oneline=...),
+        _cmd("log", str, oneline=...),
         _cmd("show"),
-        _cmd("show",  str),
-        _cmd("restore", str,    staged=..., source=...),
+        _cmd("show", str),
+        _cmd("restore", str, staged=..., source=...),
     ],
     "gh": [
-        _cmd("pr",    "create", title=_required, body=..., base=...),
-        _cmd("pr",    "view"),
-        _cmd("pr",    "view",   str.isdigit),
-        _cmd("pr",    "list"),
-        _cmd("pr",    "diff"),
-        _cmd("pr",    "status"),
-        _cmd("run",   "list"),
-        _cmd("run",   "view"),
-        _cmd("run",   "view",   str.isdigit),
+        _cmd("pr", "create", title=_required, body=..., base=...),
+        _cmd("pr", "view"),
+        _cmd("pr", "view", str.isdigit),
+        _cmd("pr", "list"),
+        _cmd("pr", "diff"),
+        _cmd("pr", "status"),
+        _cmd("run", "list"),
+        _cmd("run", "view"),
+        _cmd("run", "view", str.isdigit),
         _cmd("issue", "create", title=_required, body=...),
         _cmd("issue", "view"),
-        _cmd("issue", "view",   str.isdigit),
+        _cmd("issue", "view", str.isdigit),
         _cmd("issue", "list"),
     ],
 }
 
 
 # ── parsing ───────────────────────────────────────────────────────────────────
+
 
 def _parse(args: list[str]) -> tuple[list[str], dict[str, str]]:
     """Split args into positionals and long flags.
@@ -122,16 +123,14 @@ def _parse(args: list[str]) -> tuple[list[str], dict[str, str]]:
             key, _, value = arg[2:].partition("=")
             flags[key.replace("-", "_")] = value
         elif arg.startswith("-"):
-            raise ValueError(
-                f"Short flags are not allowed: {arg!r}. "
-                "Use the long form (--flag or --flag=value)."
-            )
+            raise ValueError(f"Short flags are not allowed: {arg!r}. Use the long form (--flag or --flag=value).")
         else:
             positionals.append(arg)
     return positionals, flags
 
 
 # ── worktree / execution ──────────────────────────────────────────────────────
+
 
 def _validate_worktree(worktree_path: str) -> pathlib.Path:
     wt = pathlib.Path(worktree_path).resolve()
