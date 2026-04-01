@@ -1,6 +1,7 @@
 [tools]
 uv = "latest"
 lima = "2.1.0"
+yq = "latest"
 
 [settings]
 experimental = true
@@ -50,6 +51,7 @@ run = "./test/e2e.sh"
 [tasks."build:download-binaries"]
 description = "Download Lima binaries for all platforms"
 run = '''
+#!/usr/bin/env bash
 set -euxo pipefail
 LIMA_VERSION=$(mise current lima)
 mkdir -p ./vendor

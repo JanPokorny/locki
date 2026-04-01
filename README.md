@@ -49,6 +49,47 @@ Locki is a CLI tool for Linux and macOS that allows running multiple AI agents i
 
 &nbsp;
 
+**Smoke test on this repository**
+
+1. `cd` to this repository.
+2. Install the current checkout locally so the `locki` command exists:
+    - `uv sync --dev`
+3. Start a Codex sandbox for a throwaway branch:
+    - `.venv/bin/locki codex smoke-hello`
+4. When Codex opens, give it this prompt:
+
+```text
+Create a file named hello-locki.txt in the repository root containing exactly:
+Hello world
+
+Do not modify any other files.
+```
+
+5. On the host, find the worktree path:
+    - `.venv/bin/locki list`
+    - Look for the `smoke-hello` entry under `~/.locki/worktrees/...`
+6. Verify the result on the host:
+    - `cat ~/.locki/worktrees/<smoke-hello-worktree>/hello-locki.txt`
+    - Expected contents: `Hello world`
+7. Clean up when done:
+    - `.venv/bin/locki remove smoke-hello --branch`
+
+&nbsp;
+
+**Connect To The VM From VS Code**
+
+1. Install the VS Code `Remote - SSH` extension.
+2. Start any Locki sandbox once so the Lima SSH config is generated:
+    - `.venv/bin/locki shell smoke-hello -c "echo ready"` is enough.
+3. Add this line to your host `~/.ssh/config`:
+    - `Include ~/.locki/lima/locki/ssh.config`
+4. In VS Code, run `Remote-SSH: Connect to Host...` and choose `lima-locki`.
+5. Once connected, open `~/.locki/worktrees` in the VM and browse to the `smoke-hello` worktree.
+6. This connection is to the shared Lima VM, not directly to the per-worktree Incus container.
+    - Use `.venv/bin/locki shell <branch>` or `.venv/bin/locki codex <branch>` when you want to execute inside the sandbox container.
+
+&nbsp;
+
 **In trouble? Or need to uninstall Locki?** Run `locki factory-reset` to teardown the VM.
 
 &nbsp;
