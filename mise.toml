@@ -3,8 +3,6 @@ uv = "latest"
 lima = "2.1.0"
 
 [settings]
-experimental = true
-python.uv_venv_auto = true
 task.disable_spec_from_run_scripts = true
 
 [env]
