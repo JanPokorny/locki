@@ -3,7 +3,7 @@ revision = 3
 requires-python = "==3.14.*"
 
 [options]
-exclude-newer = "2026-03-25T18:07:23.083726Z"
+exclude-newer = "2026-03-26T10:20:21.923255Z"
 exclude-newer-span = "P7D"
 
 [[package]]
@@ -94,7 +94,7 @@ wheels = [
 
 [[package]]
 name = "locki"
-version = "0.0.2"
+version = "0.0.3"
 source = { editable = "." }
 dependencies = [
     { name = "anyio" },

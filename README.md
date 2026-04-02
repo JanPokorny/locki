@@ -44,8 +44,8 @@ Locki is a CLI tool for Linux and macOS that allows running multiple AI agents i
 
 &nbsp;
 
-**In trouble? Or need to uninstall Locki?** Run `locki factory-reset` to teardown the VM.
+**In trouble? Or need to uninstall Locki?** Run `locki vm delete` to teardown the VM. Contents of `~/.locki` (worktrees, settings) will be preserved.
 
 &nbsp;
 
-**Notes on security:** Locki uses a single Lima VM which is set to only share the `~/.locki/worktrees` and `~/.locki/home` folders. Each worktree has an associated LXC container (through Incus). LXC containers are not a security boundary (more so that Locki pokes holes in them for caching etc.), the shared VM is -- thus the only possible vector of escape is the source code written into a worktree. In order to protect Git hook execution, Locki configures the worktree to use Locki-managed hooks that offload execution of parent repo hooks into the sandbox, and checks for `.git` file tampering. Despite best effort, Locki provides no security guarantees and is provided "as is".
+**Notes on security:** Locki uses a single Lima VM which can only access the `~/.locki/worktrees` and `~/.locki/home` (maps to `~` in sandboxes) folders. Each worktree has an associated LXC container (through Incus). LXC containers are not a security boundary (more so that Locki pokes holes in them for caching etc.), the shared VM is -- thus the only possible vector of escape is the source code written into a worktree. In order to protect Git hook execution, Locki configures the worktree to use Locki-managed hooks that offload execution of parent repo hooks into the sandbox, and checks for `.git` file tampering. Despite best effort, Locki provides no security guarantees and is provided "as is".

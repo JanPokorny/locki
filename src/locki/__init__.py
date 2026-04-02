@@ -142,7 +142,7 @@ def git_root() -> pathlib.Path:
 
 
 def current_worktree() -> pathlib.Path | None:
-    """If cwd is inside a locki-managed worktree, return its path."""
+    """If cwd is inside a Locki-managed worktree, return its path."""
     cwd = pathlib.Path.cwd().resolve()
     if not cwd.is_relative_to(WORKTREES_HOME.resolve()):
         return None
@@ -150,7 +150,7 @@ def current_worktree() -> pathlib.Path | None:
 
 
 async def find_worktree_for_branch(branch: str) -> pathlib.Path | None:
-    """Return the worktree path for a branch managed by locki, or None."""
+    """Return the worktree path for a branch managed by Locki, or None."""
     result = await run_command(
         ["git", "-C", str(git_root()), "worktree", "list", "--porcelain"],
         "Listing worktrees",
@@ -473,10 +473,15 @@ async def claude_cmd(
     """Run Claude in the sandbox."""
     ctx.setup_commands = [
         (["mise", "install", "nodejs@24"], "Installing Node.js"),
-        (["mise", "exec", "nodejs@24", "--", "mise", "install", "npm:@anthropic-ai/claude-code@latest"], "Installing Claude Code CLI"),
+        (
+            ["mise", "exec", "nodejs@24", "--", "mise", "install", "npm:@anthropic-ai/claude-code@latest"],
+            "Installing Claude Code CLI",
+        ),
     ]
     await shell_cmd(
-        ctx=ctx, branch=branch, command='exec mise exec nodejs@24 npm:@anthropic-ai/claude-code@latest -- claude --dangerously-skip-permissions "$@"'
+        ctx=ctx,
+        branch=branch,
+        command='exec mise exec nodejs@24 npm:@anthropic-ai/claude-code@latest -- claude --dangerously-skip-permissions "$@"',
     )
 
 
@@ -493,7 +498,10 @@ async def gemini_cmd(
     """Run Gemini in the sandbox."""
     ctx.setup_commands = [
         (["mise", "install", "nodejs@24"], "Installing Node.js"),
-        (["mise", "exec", "nodejs@24", "--", "mise", "install", "npm:@google/gemini-cli@latest"], "Installing Gemini CLI"),
+        (
+            ["mise", "exec", "nodejs@24", "--", "mise", "install", "npm:@google/gemini-cli@latest"],
+            "Installing Gemini CLI",
+        ),
     ]
     await shell_cmd(
         ctx=ctx, branch=branch, command='exec mise exec nodejs@24 npm:@google/gemini-cli@latest -- gemini --yolo "$@"'
@@ -589,7 +597,7 @@ async def remove_cmd(
         )
 
 
-@app.command("list | ls", help="List branches with locki-managed worktrees.")
+@app.command("list | ls", help="List branches with Locki-managed worktrees.")
 async def list_cmd():
     result = await run_command(
         ["git", "-C", str(git_root()), "worktree", "list", "--porcelain"],
@@ -614,8 +622,22 @@ async def list_cmd():
         logger.info("No locki-managed worktrees found.")
 
 
-@app.command("factory-reset", help="Delete the locki VM entirely.")
-async def factory_reset_cmd():
+vm_app = AsyncTyper(name="vm", help="Manage the Locki VM.", no_args_is_help=True)
+app.add_typer(vm_app)
+
+
+@vm_app.command("stop", help="Stop the Locki VM.")
+async def vm_stop_cmd():
+    await run_command(
+        [limactl(), "stop", "locki"],
+        "Stopping VM",
+        env={"LIMA_HOME": str(LIMA_HOME)},
+        cwd="/",
+    )
+
+
+@vm_app.command("delete | remove | rm", help="Delete the Locki VM entirely.")
+async def vm_delete_cmd():
     await run_command(
         [limactl(), "delete", "-f", "locki"],
         "Deleting VM",
