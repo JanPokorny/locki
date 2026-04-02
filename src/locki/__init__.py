@@ -19,14 +19,14 @@ import anyio.to_thread
 import typer
 from halo import Halo
 
-from locki.async_typer import AsyncTyperWithAliases
+from locki.async_typer import AsyncTyper
 from locki.config import load_config
 from locki.utils import run_command, setup_logging
 
 setup_logging()
 logger = logging.getLogger(__name__)
 
-app = AsyncTyperWithAliases(
+app = AsyncTyper(
     name="locki",
     help="Lima VM wrapper that protects worktrees by offering isolated execution environments.",
     no_args_is_help=True,
@@ -170,7 +170,7 @@ async def find_worktree_for_branch(branch: str) -> pathlib.Path | None:
 
 
 @app.command(
-    "shell",
+    "shell | sh | bash",
     help="Open a shell in the per-branch container (creates branch/worktree/container if needed).",
     context_settings={"allow_extra_args": True},
 )
@@ -520,7 +520,7 @@ async def codex_cmd(
     )
 
 
-@app.command("remove", help="Remove a branch's worktree and container.")
+@app.command("remove | rm | delete", help="Remove a branch's worktree and container.")
 async def remove_cmd(
     branch: typing.Annotated[
         str | None, typer.Argument(help="Branch name to remove (optional if inside a worktree)")
@@ -589,7 +589,7 @@ async def remove_cmd(
         )
 
 
-@app.command("list", help="List branches with locki-managed worktrees.")
+@app.command("list | ls", help="List branches with locki-managed worktrees.")
 async def list_cmd():
     result = await run_command(
         ["git", "-C", str(git_root()), "worktree", "list", "--porcelain"],
