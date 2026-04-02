@@ -119,3 +119,9 @@ build_wheel macosx_12_0_x86_64     x86_64  &
 build_wheel macosx_12_0_arm64      aarch64 &
 for job in $(jobs -p); do wait $job; done
 '''
+
+[tasks.publish]
+depends = ["build"]
+run = '''
+UV_PUBLISH_TOKEN="$(op item get "PyPI token" --reveal --fields=credential)" uv publish
+'''
