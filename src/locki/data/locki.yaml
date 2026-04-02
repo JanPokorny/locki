@@ -14,6 +14,11 @@ mounts:
     mountPoint: "/root/.locki/home"
     writable: true
 
+portForwards:
+  - guestIP: "0.0.0.0"
+    proto: any
+    ignore: true
+
 provision:
   - mode: system
     script: |
