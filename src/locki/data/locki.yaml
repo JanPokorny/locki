@@ -129,11 +129,13 @@ provision:
   - mode: data
     content: |
       #!/usr/bin/env python3
-      """One-shot cleanup: stops idle Incus containers and removes orphaned ones."""
+      """One-shot cleanup: stops idle Incus containers, removes orphaned ones, and shuts down the VM after prolonged inactivity."""
       import json, logging, pathlib, subprocess, sys, time
 
       IDLE_TIMEOUT = 600
+      VM_IDLE_TIMEOUT = 600
       LAST_ACTIVE_FILE = pathlib.Path("/var/lib/locki/last-active.json")
+      VM_IDLE_SINCE_FILE = pathlib.Path("/var/lib/locki/vm-idle-since")
 
       logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", stream=sys.stdout, force=True)
       log = logging.getLogger(__name__)
@@ -175,6 +177,20 @@ provision:
 
       LAST_ACTIVE_FILE.parent.mkdir(parents=True, exist_ok=True)
       LAST_ACTIVE_FILE.write_text(json.dumps(last_active))
+
+      # VM shutdown: if no containers are running (or active), shut down after VM_IDLE_TIMEOUT.
+      still_running = set()
+      for line in subprocess.run(["incus", "list", "--format=csv", "--columns=n,s"], capture_output=True, text=True).stdout.splitlines():
+          parts = line.split(",", 1)
+          if len(parts) == 2 and parts[1].strip() == "RUNNING": still_running.add(parts[0].strip())
+      if still_running:
+          VM_IDLE_SINCE_FILE.unlink(missing_ok=True)
+      else:
+          try: idle_since = float(VM_IDLE_SINCE_FILE.read_text())
+          except (FileNotFoundError, ValueError): idle_since = now; VM_IDLE_SINCE_FILE.write_text(str(now))
+          if now - idle_since >= VM_IDLE_TIMEOUT:
+              log.info("No running containers for %.0fs — shutting down VM.", now - idle_since)
+              subprocess.run(["poweroff"])
     path: /usr/local/bin/locki-cleanup
     overwrite: true
     permissions: "0755"
