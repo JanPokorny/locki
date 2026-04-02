@@ -38,8 +38,6 @@ LOCKI_HOME = pathlib.Path.home() / ".locki"
 LIMA_HOME = LOCKI_HOME / "lima"
 WORKTREES_HOME = LOCKI_HOME / "worktrees"
 WORKTREES_META = LOCKI_HOME / "worktrees-meta"
-CLAUDE_HOME = LOCKI_HOME / "claude"
-MCP_PORT = 7890
 
 GIT_HOOKS = [
     "applypatch-msg",
@@ -115,36 +113,6 @@ async def _vm_lock():
         os.close(fd)
 
 
-def ensure_mcp_server() -> None:  # TODO: Non-functional at the moment
-    """Start the locki MCP server as a host daemon if not already running."""
-    pid_file = LOCKI_HOME / "mcp.pid"
-
-    if pid_file.exists():
-        try:
-            os.kill(int(pid_file.read_text().strip()), 0)
-            return  # already running
-        except ProcessLookupError, ValueError, OSError:
-            pid_file.unlink(missing_ok=True)
-
-    log_path = LOCKI_HOME / "mcp.log"
-    with open(log_path, "a") as log:
-        proc = subprocess.Popen(
-            [sys.executable, "-m", "locki.mcp_server"],
-            stdout=log,
-            stderr=log,
-            start_new_session=True,
-        )
-    pid_file.write_text(str(proc.pid))
-
-    # Wait up to 5 s for the server to accept connections
-    for _ in range(10):
-        try:
-            with socket.create_connection(("localhost", MCP_PORT), timeout=0.5):
-                return
-        except OSError:
-            time.sleep(0.5)
-
-
 @functools.cache
 def git_root() -> pathlib.Path:
     cwd = pathlib.Path.cwd().resolve()
@@ -217,15 +185,15 @@ async def shell_cmd(
         str | None, typer.Option("-c", help="Command to run instead of an interactive shell")
     ] = None,
 ):
+    setup_commands: list[tuple[list[str], str]] = getattr(ctx, "setup_commands", [])
     git_root()  # fail fast if not in a git repo
 
-    CLAUDE_HOME.mkdir(parents=True, exist_ok=True)
-    claude_json = CLAUDE_HOME / "claude.json"
-    existing = json.loads(claude_json.read_text()) if claude_json.exists() else {}
-    existing["projects"] = existing.get("projects", {})
-    existing["projects"]["/"] = existing.get("projects", {}).get("/", {})
-    existing["projects"]["/"]["hasTrustDialogAccepted"] = True
-    claude_json.write_text(json.dumps(existing, indent=2) + "\n")
+    sandbox_home = LOCKI_HOME / "home"
+    sandbox_home.mkdir(parents=True, exist_ok=True)
+    claude_json_file = sandbox_home / ".claude.json"
+    claude_json = json.loads(claude_json_file.read_text()) if claude_json_file.exists() else {}
+    claude_json.setdefault("projects", {}).setdefault("/", {})["hasTrustDialogAccepted"] = True
+    claude_json_file.write_text(json.dumps(claude_json, indent=2) + "\n")
 
     LOCKI_HOME.mkdir(exist_ok=True)
     LIMA_HOME.mkdir(exist_ok=True, parents=True)
@@ -383,18 +351,20 @@ async def shell_cmd(
         )
 
         stub = (importlib.resources.files("locki") / "data" / "stub.sh").read_text()
+        agents_md = (importlib.resources.files("locki") / "data" / "AGENTS.md").read_text()
         container_files = {
-            "/etc/claude-code/CLAUDE.md": (importlib.resources.files("locki") / "data" / "CLAUDE.md").read_text(),
-            "/etc/claude-code/managed-mcp.json": json.dumps(
-                {
-                    "mcpServers": {"locki": {"type": "http", "url": "http://host.lima.internal:7890/mcp"}},
-                }
-            ),
+            "/etc/claude-code/CLAUDE.md": agents_md,
             "/etc/claude-code/managed-settings.json": json.dumps(
                 {
                     "skipDangerousModePermissionPrompt": True,
-                    "allowManagedMcpServersOnly": False,
                     "permissions": {"defaultMode": "bypassPermissions"},
+                }
+            ),
+            "/etc/gemini-cli/GEMINI.md": agents_md,
+            "/etc/gemini-cli/settings.json": json.dumps(
+                {
+                    "security": {"folderTrust": {"enabled": False}},
+                    "tools": {"sandbox": False},
                 }
             ),
             "/opt/locki/bin/git": stub,
@@ -408,12 +378,16 @@ async def shell_cmd(
             )
 
         host_ip = (
-            await run_in_vm(
-                ["bash", "-c", "getent hosts host.lima.internal | awk '{print $1}' | head -1"],
-                "Resolving host IP",
-                check=False,
+            (
+                await run_in_vm(
+                    ["bash", "-c", "getent hosts host.lima.internal | awk '{print $1}' | head -1"],
+                    "Resolving host IP",
+                    check=False,
+                )
             )
-        ).stdout.decode().strip()
+            .stdout.decode()
+            .strip()
+        )
 
         await run_in_vm(
             [
@@ -426,8 +400,8 @@ async def shell_cmd(
                 "pipefail",
                 "-c",
                 textwrap.dedent(f"""\
+                    hostnamectl set-hostname locki 2>/dev/null || echo locki > /etc/hostname
                     for bin in /opt/locki/bin/*; do chmod +x "$bin"; done
-                    ln -sf /root/.claude/claude.json /root/.claude.json
                     command -v mise || curl -fsSL https://mise.run | sh || true
                     mkdir -p /etc/dnf && echo -e "cachedir=/var/cache/locki/dnf\\nkeepcache=1" >> /etc/dnf/dnf.conf || true
                     mkdir -p /etc/apt/apt.conf.d && printf 'Dir::Cache "/var/cache/locki/apt/cache";\\nDir::State "/var/cache/locki/apt/state";\\n' > /etc/apt/apt.conf.d/99local-cache || true
@@ -436,6 +410,9 @@ async def shell_cmd(
             ],
             "Configuring container environment",
         )
+
+    for cmd, msg in setup_commands or []:
+        await run_in_vm(["incus", "exec", wt_id, "--", *cmd], msg)
 
     forwarded_env = {"TERM", "COLORTERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION", "LANG", "SSH_TTY"}
 
@@ -487,8 +464,32 @@ async def claude_cmd(
     ] = None,
 ):
     """Run Claude in the sandbox."""
+    ctx.setup_commands = [
+        (["mise", "install", "nodejs@24"], "Installing Node.js"),
+        (["mise", "exec", "nodejs@24", "--", "mise", "install", "npm:@anthropic-ai/claude-code@latest"], "Installing Claude Code CLI"),
+    ]
     await shell_cmd(
         ctx=ctx, branch=branch, command='exec mise exec nodejs@24 npm:@anthropic-ai/claude-code@latest -- claude "$@"'
+    )
+
+
+@app.command(
+    "gemini",
+    context_settings={"allow_extra_args": True},
+)
+async def gemini_cmd(
+    ctx: typer.Context,
+    branch: typing.Annotated[
+        str | None, typer.Argument(help="Branch name to work on (optional if inside a worktree)")
+    ] = None,
+):
+    """Run Gemini in the sandbox."""
+    ctx.setup_commands = [
+        (["mise", "install", "nodejs@24"], "Installing Node.js"),
+        (["mise", "exec", "nodejs@24", "--", "mise", "install", "npm:@google/gemini-cli@latest"], "Installing Gemini CLI"),
+    ]
+    await shell_cmd(
+        ctx=ctx, branch=branch, command='exec mise exec nodejs@24 npm:@google/gemini-cli@latest -- gemini --yolo "$@"'
     )
 
 
@@ -524,7 +525,8 @@ async def remove_cmd(
     ):
         logger.error(
             "Worktree for %s in %s has uncommitted changes. Commit or stash them, or use --force.",
-            branch, wt_path,
+            branch,
+            wt_path,
         )
         sys.exit(1)
 

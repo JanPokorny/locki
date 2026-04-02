@@ -10,8 +10,8 @@ containerd:
 mounts:
   - location: "~/.locki/worktrees"
     writable: true
-  - location: "~/.locki/claude"
-    mountPoint: "/root/.claude"
+  - location: "~/.locki/home"
+    mountPoint: "/root/.locki/home"
     writable: true
 
 provision:
@@ -71,6 +71,7 @@ provision:
             environment.CONAN_USER_HOME: /var/cache/locki/conan
             environment.VCPKG_DEFAULT_BINARY_CACHE: /var/cache/locki/vcpkg
             environment.COREPACK_ENABLE_DOWNLOAD_PROMPT: 0
+            environment.GEMINI_FORCE_ENCRYPTED_FILE_STORAGE: "true"
             environment.MISE_DATA_DIR: /var/cache/locki/mise/data
             environment.MISE_CACHE_DIR: /var/cache/locki/mise/cache
             environment.MISE_INSTALL_PATH: /usr/local/bin/mise
@@ -98,9 +99,9 @@ provision:
               path: /var/cache/locki
               source: /var/cache/locki
               type: disk
-            claude:
-              path: /root/.claude
-              source: /root/.claude
+            home:
+              path: /root
+              source: /root/.locki/home
               type: disk
       EOF
   - mode: system
