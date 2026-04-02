@@ -27,6 +27,7 @@ Locki is a CLI tool for Linux and macOS that allows running multiple AI agents i
 2. `cd` to your Git repository and run:
     - Claude: `locki claude my-first-sandbox`
     - Gemini: `locki gemini my-first-sandbox`
+    - Codex: `locki codex my-first-sandbox`
     - Plain shell: `locki shell my-first-sandbox`
 3. First start takes longer, wait a few minutes for the VM to boot.
 4. Follow prompts to log in to the AI CLI. Login will be persisted across sandboxes.

@@ -9,12 +9,10 @@ import pathlib
 import secrets
 import shlex
 import shutil
-import socket
 import string
 import subprocess
 import sys
 import textwrap
-import time
 import typing
 
 import anyio.to_thread
@@ -367,8 +365,17 @@ async def shell_cmd(
                     "tools": {"sandbox": False},
                 }
             ),
+            "/etc/codex/config.toml": textwrap.dedent(f"""\
+                approval_policy = "never"
+                sandbox_mode = "danger-full-access"
+                cli_auth_credentials_store = "file"
+                developer_instructions = "/etc/codex/AGENTS.md"
+                projects.{json.dumps(str(WORKTREES_HOME))}.trust_level = "trusted"
+            """),
+            "/etc/codex/AGENTS.md": agents_md,
             "/opt/locki/bin/git": stub,
             "/opt/locki/bin/gh": stub,
+            "/opt/locki/bin/bwrap": stub,  # silence codex warning
         }
         for path, content in container_files.items():
             await run_in_vm(
@@ -469,7 +476,7 @@ async def claude_cmd(
         (["mise", "exec", "nodejs@24", "--", "mise", "install", "npm:@anthropic-ai/claude-code@latest"], "Installing Claude Code CLI"),
     ]
     await shell_cmd(
-        ctx=ctx, branch=branch, command='exec mise exec nodejs@24 npm:@anthropic-ai/claude-code@latest -- claude "$@"'
+        ctx=ctx, branch=branch, command='exec mise exec nodejs@24 npm:@anthropic-ai/claude-code@latest -- claude --dangerously-skip-permissions "$@"'
     )
 
 
@@ -490,6 +497,26 @@ async def gemini_cmd(
     ]
     await shell_cmd(
         ctx=ctx, branch=branch, command='exec mise exec nodejs@24 npm:@google/gemini-cli@latest -- gemini --yolo "$@"'
+    )
+
+
+@app.command(
+    "codex",
+    context_settings={"allow_extra_args": True},
+)
+async def codex_cmd(
+    ctx: typer.Context,
+    branch: typing.Annotated[
+        str | None, typer.Argument(help="Branch name to work on (optional if inside a worktree)")
+    ] = None,
+):
+    """Run Codex in the sandbox."""
+    ctx.setup_commands = [
+        (["mise", "install", "nodejs@24"], "Installing Node.js"),
+        (["mise", "exec", "nodejs@24", "--", "mise", "install", "npm:@openai/codex@latest"], "Installing Codex CLI"),
+    ]
+    await shell_cmd(
+        ctx=ctx, branch=branch, command='exec mise exec nodejs@24 npm:@openai/codex@latest -- codex --yolo "$@"'
     )
 
 
