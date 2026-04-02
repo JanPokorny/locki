@@ -481,7 +481,7 @@ async def claude_cmd(
     await shell_cmd(
         ctx=ctx,
         branch=branch,
-        command='exec mise exec nodejs@24 npm:@anthropic-ai/claude-code@latest -- claude --dangerously-skip-permissions "$@"',
+        command='exec mise exec nodejs@24 npm:@anthropic-ai/claude-code@latest -- claude "$@"',
     )
 
 
