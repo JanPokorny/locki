@@ -20,6 +20,7 @@ import typer
 from halo import Halo
 
 from locki.async_typer import AsyncTyper
+from locki.cmd_proxy import CMD_PROXY_PORT
 from locki.config import load_config
 from locki.utils import run_command, setup_logging
 
@@ -147,6 +148,28 @@ def current_worktree() -> pathlib.Path | None:
     if not cwd.is_relative_to(WORKTREES_HOME.resolve()):
         return None
     return WORKTREES_HOME / cwd.relative_to(WORKTREES_HOME).parts[0]
+
+
+def _ensure_cmd_proxy():
+    """Start the command proxy server as a daemon if not already running."""
+    pid_file = LOCKI_HOME / "cmd-proxy.pid"
+    if pid_file.exists():
+        try:
+            pid = int(pid_file.read_text().strip())
+            os.kill(pid, 0)
+            return  # already running
+        except (ProcessLookupError, ValueError, PermissionError):
+            pid_file.unlink(missing_ok=True)
+
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "locki.cmd_proxy"],
+        start_new_session=True,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    pid_file.write_text(str(proc.pid))
+    logger.info("Started command proxy server (pid %d) on port %d.", proc.pid, CMD_PROXY_PORT)
 
 
 async def find_worktree_for_branch(branch: str) -> pathlib.Path | None:
@@ -348,7 +371,7 @@ async def shell_cmd(
             "Starting container",
         )
 
-        stub = (importlib.resources.files("locki") / "data" / "stub.sh").read_text()
+        proxy_stub = (importlib.resources.files("locki") / "data" / "cmd-proxy-stub.py").read_text()
         agents_md = (importlib.resources.files("locki") / "data" / "AGENTS.md").read_text()
         container_files = {
             "/etc/claude-code/CLAUDE.md": agents_md,
@@ -373,9 +396,9 @@ async def shell_cmd(
                 projects.{json.dumps(str(WORKTREES_HOME))}.trust_level = "trusted"
             """),
             "/etc/codex/AGENTS.md": agents_md,
-            "/opt/locki/bin/git": stub,
-            "/opt/locki/bin/gh": stub,
-            "/opt/locki/bin/bwrap": stub,  # silence codex warning
+            "/opt/locki/bin/git": proxy_stub,
+            "/opt/locki/bin/gh": proxy_stub,
+            "/opt/locki/bin/bwrap": "#!/bin/sh\nexit 1\n",  # silence codex warning
         }
         for path, content in container_files.items():
             await run_in_vm(
@@ -420,6 +443,8 @@ async def shell_cmd(
 
     for cmd, msg in setup_commands or []:
         await run_in_vm(["incus", "exec", wt_id, "--", *cmd], msg)
+
+    _ensure_cmd_proxy()
 
     forwarded_env = {"TERM", "COLORTERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION", "LANG", "SSH_TTY"}
 
