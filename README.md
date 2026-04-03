@@ -3,7 +3,7 @@
 
 &nbsp;
 
-Locki is a CLI tool for Linux and macOS that allows running multiple AI agents in "yolo mode", without any interference or security risks.
+Locki is a CLI tool for Linux and macOS that allows running multiple AI agents in "yolo mode", without any risk of mischief.
 
 &nbsp;
 
@@ -48,4 +48,4 @@ Locki is a CLI tool for Linux and macOS that allows running multiple AI agents i
 
 &nbsp;
 
-**Notes on security:** Locki uses a single Lima VM which can only access the `~/.locki/worktrees` and `~/.locki/home` (maps to `~` in sandboxes) folders. Each worktree has an associated LXC container (through Incus). LXC containers are not a security boundary (more so that Locki pokes holes in them for caching etc.), the shared VM is -- thus the only possible vector of escape is the source code written into a worktree. In order to protect Git hook execution, Locki configures the worktree to use Locki-managed hooks that offload execution of parent repo hooks into the sandbox, and checks for `.git` file tampering. Despite best effort, Locki provides no security guarantees and is provided "as is".
+**Notes on security:** Locki uses a single Lima VM which can only access the `~/.locki/worktrees` and `~/.locki/home` (maps to `~` in sandboxes) folders. Each worktree has an associated LXC container (through Incus). LXC containers are not a security boundary (more so that Locki pokes holes in them for caching etc.), the shared VM is -- thus the only possible vector of escape is the source code written into a worktree. In order to protect Git hook execution, Locki configures the worktree to use Locki-managed hooks that offload execution of parent repo hooks into the sandbox, and checks for `.git` file tampering. Be careful when exposing credentials (like API keys) to AI agents, always be aware of the permission scope. Despite best effort, Locki provides no security guarantees and is provided "as is".
