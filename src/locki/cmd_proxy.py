@@ -1,37 +1,22 @@
-"""TCP command proxy: executes allowed git/gh commands on behalf of sandboxed containers.
+"""SSH forced command for locki: validates and executes allowed git/gh commands.
 
-Protocol (custom framed TCP):
-  Frame = <type:1B><length:4B big-endian><payload>
-  Types: H=header, I=stdin, O=stdout, E=stderr, C=close-stdin, X=exit-code
+Invoked by sshd when a sandboxed container connects via SSH. Reads the
+original command from SSH_ORIGINAL_COMMAND, validates it against the allowlist
+and the cwd against managed worktrees, then execs the real binary.
 
-Flow:
-  1. Client → H frame: JSON {"argv": ["git", ...], "cwd": "/path"}
-  2. Server validates argv against allowlist, cwd against managed worktrees
-  3. Full-duplex: client sends I/C frames, server sends O/E frames
-  4. Server → X frame (4B signed int32 exit code) on process exit
+SSH_ORIGINAL_COMMAND format (POSIX shell-quoted): <cwd> <exe> [args...]
 """
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
-import json
 import os
 import pathlib
-import struct
+import shlex
+import sys
 
 LOCKI_HOME = pathlib.Path.home() / ".locki"
 WORKTREES_HOME = LOCKI_HOME / "worktrees"
 WORKTREES_META = LOCKI_HOME / "worktrees-meta"
-CMD_PROXY_PORT = 7890
-
-# Frame types
-FRAME_HEADER = ord("H")
-FRAME_STDIN = ord("I")
-FRAME_STDOUT = ord("O")
-FRAME_STDERR = ord("E")
-FRAME_CLOSE_STDIN = ord("C")
-FRAME_EXIT = ord("X")
 
 
 # ── allowlist DSL ─────────────────────────────────────────────────────────────
@@ -181,119 +166,36 @@ def _validate_command(argv: list[str]) -> tuple[str, list[str]]:
     return exe, args
 
 
-# ── protocol helpers ──────────────────────────────────────────────────────────
-
-
-async def read_frame(reader: asyncio.StreamReader) -> tuple[int, bytes]:
-    header = await reader.readexactly(5)
-    frame_type = header[0]
-    length = struct.unpack("!I", header[1:5])[0]
-    payload = await reader.readexactly(length) if length else b""
-    return frame_type, payload
-
-
-async def write_frame(writer: asyncio.StreamWriter, frame_type: int, payload: bytes = b"") -> None:
-    writer.write(bytes([frame_type]) + struct.pack("!I", len(payload)) + payload)
-    await writer.drain()
-
-
-# ── connection handler ────────────────────────────────────────────────────────
-
-
-async def handle_connection(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-    try:
-        # 1. Read header frame
-        frame_type, payload = await read_frame(reader)
-        if frame_type != FRAME_HEADER:
-            await write_frame(writer, FRAME_STDERR, b"Protocol error: expected header frame\n")
-            await write_frame(writer, FRAME_EXIT, struct.pack("!i", 1))
-            return
-
-        header = json.loads(payload)
-        argv = header["argv"]
-        cwd = header["cwd"]
-
-        # 2. Validate
-        try:
-            validated_cwd = _validate_worktree(cwd)
-            exe, args = _validate_command(argv)
-        except ValueError as e:
-            await write_frame(writer, FRAME_STDERR, f"{e}\n".encode())
-            await write_frame(writer, FRAME_EXIT, struct.pack("!i", 1))
-            return
-
-        # 3. Start subprocess
-        proc = await asyncio.create_subprocess_exec(
-            exe,
-            *args,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=str(validated_cwd),
-        )
-
-        # 4. Full-duplex relay
-        async def relay_stdin():
-            try:
-                while True:
-                    ft, data = await read_frame(reader)
-                    if ft == FRAME_STDIN:
-                        if proc.stdin and not proc.stdin.is_closing():
-                            proc.stdin.write(data)
-                            await proc.stdin.drain()
-                    elif ft == FRAME_CLOSE_STDIN:
-                        if proc.stdin and not proc.stdin.is_closing():
-                            proc.stdin.close()
-                        break
-            except (asyncio.IncompleteReadError, ConnectionError):
-                if proc.stdin and not proc.stdin.is_closing():
-                    proc.stdin.close()
-
-        async def relay_stdout():
-            assert proc.stdout is not None
-            while True:
-                data = await proc.stdout.read(8192)
-                if not data:
-                    break
-                await write_frame(writer, FRAME_STDOUT, data)
-
-        async def relay_stderr():
-            assert proc.stderr is not None
-            while True:
-                data = await proc.stderr.read(8192)
-                if not data:
-                    break
-                await write_frame(writer, FRAME_STDERR, data)
-
-        await asyncio.gather(relay_stdin(), relay_stdout(), relay_stderr())
-
-        # 5. Send exit code
-        returncode = await proc.wait()
-        await write_frame(writer, FRAME_EXIT, struct.pack("!i", returncode))
-
-    except (asyncio.IncompleteReadError, ConnectionError):
-        pass
-    except Exception as e:
-        with contextlib.suppress(Exception):
-            await write_frame(writer, FRAME_STDERR, f"Server error: {e}\n".encode())
-            await write_frame(writer, FRAME_EXIT, struct.pack("!i", 1))
-    finally:
-        writer.close()
-        with contextlib.suppress(Exception):
-            await writer.wait_closed()
-
-
-async def serve() -> None:
-    LOCKI_HOME.mkdir(parents=True, exist_ok=True)
-    pid_file = LOCKI_HOME / "cmd-proxy.pid"
-    pid_file.write_text(str(os.getpid()))
-    server = await asyncio.start_server(handle_connection, "0.0.0.0", CMD_PROXY_PORT)
-    async with server:
-        await server.serve_forever()
+# ── main ──────────────────────────────────────────────────────────────────────
 
 
 def main() -> None:
-    asyncio.run(serve())
+    cmd = os.environ.get("SSH_ORIGINAL_COMMAND", "")
+    if not cmd:
+        print("No command specified.", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        parts = shlex.split(cmd)
+    except ValueError as e:
+        print(f"Failed to parse command: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    if len(parts) < 2:
+        print("Usage: <cwd> <exe> [args...]", file=sys.stderr)
+        sys.exit(1)
+
+    cwd_str, *argv = parts
+
+    try:
+        cwd = _validate_worktree(cwd_str)
+        exe, args = _validate_command(argv)
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        sys.exit(1)
+
+    os.chdir(str(cwd))
+    os.execvp(exe, [exe, *args])
 
 
 if __name__ == "__main__":

@@ -20,7 +20,6 @@ import typer
 from halo import Halo
 
 from locki.async_typer import AsyncTyper
-from locki.cmd_proxy import CMD_PROXY_PORT
 from locki.config import load_config
 from locki.utils import run_command, setup_logging
 
@@ -150,26 +149,75 @@ def current_worktree() -> pathlib.Path | None:
     return WORKTREES_HOME / cwd.relative_to(WORKTREES_HOME).parts[0]
 
 
-def _ensure_cmd_proxy():
-    """Start the command proxy server as a daemon if not already running."""
-    pid_file = LOCKI_HOME / "cmd-proxy.pid"
+SSH_PROXY_PORT = 7890
+SSH_DIR = LOCKI_HOME / "ssh"
+
+
+def _ensure_ssh_proxy():
+    """Start a dedicated sshd that forwards allowed commands to the host."""
+    SSH_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+    client_ssh_dir = LOCKI_HOME / "home" / ".ssh"
+    client_ssh_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+
+    # Generate keys once
+    host_key = SSH_DIR / "host_key"
+    client_key = client_ssh_dir / "id_locki"
+    if not host_key.exists():
+        subprocess.run(["ssh-keygen", "-t", "ed25519", "-f", str(host_key), "-N", ""], check=True,
+                        capture_output=True)
+    if not client_key.exists():
+        subprocess.run(["ssh-keygen", "-t", "ed25519", "-f", str(client_key), "-N", ""], check=True,
+                        capture_output=True)
+
+    # Write authorized_keys with forced command
+    auth_keys = SSH_DIR / "authorized_keys"
+    pub_key = client_key.with_suffix(".pub").read_text().strip()
+    forced_cmd = f"{sys.executable} -m locki.cmd_proxy"
+    auth_keys.write_text(
+        f'command="{forced_cmd}",no-port-forwarding,no-X11-forwarding,no-agent-forwarding {pub_key}\n'
+    )
+    auth_keys.chmod(0o600)
+
+    # Write sshd config
+    sshd_config = SSH_DIR / "sshd_config"
+    pid_file = SSH_DIR / "sshd.pid"
+    sshd_config.write_text(
+        f"Port {SSH_PROXY_PORT}\n"
+        f"ListenAddress 0.0.0.0\n"
+        f"HostKey {host_key}\n"
+        f"AuthorizedKeysFile {auth_keys}\n"
+        f"PidFile {pid_file}\n"
+        f"PasswordAuthentication no\n"
+        f"PubkeyAuthentication yes\n"
+        f"StrictModes no\n"
+        f"UsePAM no\n"
+        f"LogLevel ERROR\n"
+    )
+
+    # Write SSH client config (shared into containers via ~/.locki/home)
+    host_user = os.environ.get("USER") or os.environ.get("LOGNAME") or "root"
+    (client_ssh_dir / "locki-ssh-config").write_text(
+        f"Host locki-proxy\n"
+        f"    HostName host.lima.internal\n"
+        f"    Port {SSH_PROXY_PORT}\n"
+        f"    User {host_user}\n"
+        f"    IdentityFile ~/.ssh/id_locki\n"
+        f"    StrictHostKeyChecking no\n"
+        f"    UserKnownHostsFile /dev/null\n"
+        f"    LogLevel ERROR\n"
+    )
+
+    # Start sshd if not already running
     if pid_file.exists():
         try:
-            pid = int(pid_file.read_text().strip())
-            os.kill(pid, 0)
-            return  # already running
+            os.kill(int(pid_file.read_text().strip()), 0)
+            return
         except (ProcessLookupError, ValueError, PermissionError):
             pid_file.unlink(missing_ok=True)
 
-    proc = subprocess.Popen(
-        [sys.executable, "-m", "locki.cmd_proxy"],
-        start_new_session=True,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    pid_file.write_text(str(proc.pid))
-    logger.info("Started command proxy server (pid %d) on port %d.", proc.pid, CMD_PROXY_PORT)
+    sshd = shutil.which("sshd") or "/usr/sbin/sshd"
+    subprocess.Popen([sshd, "-f", str(sshd_config)], start_new_session=True)
+    logger.info("Started SSH proxy (sshd) on port %d.", SSH_PROXY_PORT)
 
 
 async def find_worktree_for_branch(branch: str) -> pathlib.Path | None:
@@ -371,7 +419,7 @@ async def shell_cmd(
             "Starting container",
         )
 
-        proxy_stub = (importlib.resources.files("locki") / "data" / "cmd-proxy-stub.py").read_text()
+        proxy_stub = (importlib.resources.files("locki") / "data" / "proxy-stub.sh").read_text()
         agents_md = (importlib.resources.files("locki") / "data" / "AGENTS.md").read_text()
         container_files = {
             "/etc/claude-code/CLAUDE.md": agents_md,
@@ -444,7 +492,7 @@ async def shell_cmd(
     for cmd, msg in setup_commands or []:
         await run_in_vm(["incus", "exec", wt_id, "--", *cmd], msg)
 
-    _ensure_cmd_proxy()
+    _ensure_ssh_proxy()
 
     forwarded_env = {"TERM", "COLORTERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION", "LANG", "SSH_TTY"}
 
