@@ -156,39 +156,3 @@ def _validate_command(argv: list[str]) -> tuple[str, list[str]]:
     if not any(_matches(rule, [exe, *positionals], flags) for rule in _RULES):
         raise ValueError(f"Command not allowed: {' '.join(argv)!r}")
     return exe, argv[1:]
-
-
-# ── main ──────────────────────────────────────────────────────────────────────
-
-
-def main() -> None:
-    cmd = os.environ.get("SSH_ORIGINAL_COMMAND", "")
-    if not cmd:
-        print("No command specified.", file=sys.stderr)
-        sys.exit(1)
-
-    try:
-        parts = shlex.split(cmd)
-    except ValueError as e:
-        print(f"Failed to parse command: {e}", file=sys.stderr)
-        sys.exit(1)
-
-    if len(parts) < 2:
-        print("Usage: <cwd> <exe> [args...]", file=sys.stderr)
-        sys.exit(1)
-
-    cwd_str, *argv = parts
-
-    try:
-        cwd = _validate_worktree(cwd_str)
-        exe, args = _validate_command(argv)
-    except ValueError as e:
-        print(str(e), file=sys.stderr)
-        sys.exit(1)
-
-    os.chdir(str(cwd))
-    os.execvp(exe, [exe, *args])
-
-
-if __name__ == "__main__":
-    main()

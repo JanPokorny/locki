@@ -178,7 +178,8 @@ def _ensure_ssh_proxy():
     # Write authorized_keys with forced command (references generated pubkey)
     auth_keys = SSH_DIR / "authorized_keys"
     pub_key = client_key.with_suffix(".pub").read_text().strip()
-    forced_cmd = f"{sys.executable} -m locki.cmd_proxy"
+    locki_bin = shutil.which("locki") or f"{sys.executable} -m locki"
+    forced_cmd = f"{locki_bin} safe-cmd"
     auth_keys.write_text(
         f'command="{forced_cmd}",no-port-forwarding,no-X11-forwarding,no-agent-forwarding {pub_key}\n'
     )
@@ -710,3 +711,36 @@ async def vm_delete_cmd():
         env={"LIMA_HOME": str(LIMA_HOME)},
         cwd="/",
     )
+
+
+@app.command("safe-cmd", hidden=True)
+def safe_cmd():
+    """SSH forced command: validate and execute an allowed git/gh command."""
+    from locki.cmd_proxy import _validate_command, _validate_worktree
+
+    cmd = os.environ.get("SSH_ORIGINAL_COMMAND", "")
+    if not cmd:
+        print("No command specified.", file=sys.stderr)
+        raise SystemExit(1)
+
+    try:
+        parts = shlex.split(cmd)
+    except ValueError as e:
+        print(f"Failed to parse command: {e}", file=sys.stderr)
+        raise SystemExit(1)
+
+    if len(parts) < 2:
+        print("Usage: <cwd> <exe> [args...]", file=sys.stderr)
+        raise SystemExit(1)
+
+    cwd_str, *argv = parts
+
+    try:
+        cwd = _validate_worktree(cwd_str)
+        exe, args = _validate_command(argv)
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        raise SystemExit(1)
+
+    os.chdir(str(cwd))
+    os.execvp(exe, [exe, *args])
