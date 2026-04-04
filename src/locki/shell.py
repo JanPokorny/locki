@@ -13,29 +13,11 @@ import typing
 
 import typer
 
-from locki import (
-    LOCKI_HOME,
-    LIMA_HOME,
-    WORKTREES_HOME,
-    WORKTREES_META,
-    GIT_HOOKS,
-    app,
-    limactl,
-    run_in_vm,
-    _vm_lock,
-    git_root,
-    current_worktree,
-    find_worktree_for_branch,
-)
+import locki
 from locki.config import load_config
 from locki.utils import run_command
 
 
-@app.command(
-    "shell | sh | bash",
-    help="Open a shell in the per-branch container (creates branch/worktree/container if needed).",
-    context_settings={"allow_extra_args": True},
-)
 async def shell_cmd(
     ctx: typer.Context,
     branch: typing.Annotated[
@@ -46,22 +28,22 @@ async def shell_cmd(
     ] = None,
 ):
     setup_commands: list[tuple[list[str], str]] = getattr(ctx, "setup_commands", [])
-    git_root()  # fail fast if not in a git repo
+    locki.git_root()  # fail fast if not in a git repo
 
-    sandbox_home = LOCKI_HOME / "home"
+    sandbox_home = locki.LOCKI_HOME / "home"
     sandbox_home.mkdir(parents=True, exist_ok=True)
     claude_json_file = sandbox_home / ".claude.json"
     claude_json = json.loads(claude_json_file.read_text()) if claude_json_file.exists() else {}
     claude_json.setdefault("projects", {}).setdefault("/", {})["hasTrustDialogAccepted"] = True
     claude_json_file.write_text(json.dumps(claude_json, indent=2) + "\n")
 
-    LOCKI_HOME.mkdir(exist_ok=True)
-    LIMA_HOME.mkdir(exist_ok=True, parents=True)
-    WORKTREES_HOME.mkdir(parents=True, exist_ok=True)
-    async with _vm_lock():
+    locki.LOCKI_HOME.mkdir(exist_ok=True)
+    locki.LIMA_HOME.mkdir(exist_ok=True, parents=True)
+    locki.WORKTREES_HOME.mkdir(parents=True, exist_ok=True)
+    async with locki._vm_lock():
         await run_command(
             [
-                limactl(),
+                locki.limactl(),
                 "--tty=false",
                 "create",
                 str(importlib.resources.files("locki").joinpath("data/locki.yaml")),
@@ -69,66 +51,66 @@ async def shell_cmd(
                 "--name=locki",
             ],
             "Preparing VM",
-            env={"LIMA_HOME": str(LIMA_HOME)},
+            env={"LIMA_HOME": str(locki.LIMA_HOME)},
             cwd="/",
             check=False,
         )
         await run_command(
             [
-                limactl(),
+                locki.limactl(),
                 "--tty=false",
                 "start",
                 "locki",
             ],
             "Starting VM",
-            env={"LIMA_HOME": str(LIMA_HOME)},
+            env={"LIMA_HOME": str(locki.LIMA_HOME)},
             cwd="/",
             check=False,
         )
 
     if branch:
-        wt_path = await find_worktree_for_branch(branch)
+        wt_path = await locki.find_worktree_for_branch(branch)
         if not wt_path:
             await run_command(
-                ["git", "-C", str(git_root()), "worktree", "prune"],
+                ["git", "-C", str(locki.git_root()), "worktree", "prune"],
                 "Pruning stale git worktrees",
             )
 
-            repo_name = git_root().name.replace("/", "-").replace(".", "-").lower()
+            repo_name = locki.git_root().name.replace("/", "-").replace(".", "-").lower()
             safe_branch = branch.replace("/", "-").replace(".", "-").lower()
             wt_id = f"{repo_name}--{safe_branch}--{''.join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(8))}"
-            wt_path = WORKTREES_HOME / wt_id
+            wt_path = locki.WORKTREES_HOME / wt_id
             wt_path.mkdir(parents=True, exist_ok=True)
 
             result = await run_command(
-                ["git", "-C", str(git_root()), "rev-parse", "--verify", f"refs/heads/{branch}"],
+                ["git", "-C", str(locki.git_root()), "rev-parse", "--verify", f"refs/heads/{branch}"],
                 f"Checking if branch '{branch}' exists",
                 check=False,
             )
             if result.returncode != 0:
                 await run_command(
-                    ["git", "-C", str(git_root()), "branch", branch],
+                    ["git", "-C", str(locki.git_root()), "branch", branch],
                     f"Creating branch '{branch}'",
                 )
 
             await run_command(
-                ["git", "-C", str(git_root()), "worktree", "add", str(wt_path), branch],
+                ["git", "-C", str(locki.git_root()), "worktree", "add", str(wt_path), branch],
                 f"Creating worktree for '{branch}'",
             )
 
-            meta_dir = WORKTREES_META / wt_id
+            meta_dir = locki.WORKTREES_META / wt_id
             meta_dir.mkdir(parents=True, exist_ok=True)
             (meta_dir / ".git").write_text((wt_path / ".git").read_text())
 
             await run_command(
-                ["git", "-C", str(git_root()), "config", "extensions.worktreeConfig", "true"],
+                ["git", "-C", str(locki.git_root()), "config", "extensions.worktreeConfig", "true"],
                 "Enabling per-worktree git config",
             )
 
-            hooks_dir = WORKTREES_META / wt_id / "hooks"
+            hooks_dir = locki.WORKTREES_META / wt_id / "hooks"
             hooks_dir.mkdir(parents=True, exist_ok=True)
             hook_script = (importlib.resources.files("locki") / "data" / "locki-hook.sh").read_bytes()
-            for name in GIT_HOOKS:
+            for name in locki.GIT_HOOKS:
                 hook_path = hooks_dir / name
                 hook_path.write_bytes(hook_script)
                 hook_path.chmod(0o755)
@@ -138,21 +120,21 @@ async def shell_cmd(
                 "Configuring per-worktree hooks",
             )
     else:
-        wt_path = current_worktree()
+        wt_path = locki.current_worktree()
         if wt_path is None:
             print("No branch specified and not inside a locki worktree.", file=sys.stderr)
             sys.exit(1)
-    wt_id = wt_path.relative_to(WORKTREES_HOME).parts[0]
+    wt_id = wt_path.relative_to(locki.WORKTREES_HOME).parts[0]
 
-    config = load_config(git_root())
+    config = load_config(locki.git_root())
 
-    result = await run_in_vm(
+    result = await locki.run_in_vm(
         ["incus", "list", "--format=csv", "--columns=n", wt_id],
         "Checking container",
         check=False,
     )
     if wt_id in result.stdout.decode():
-        await run_in_vm(
+        await locki.run_in_vm(
             ["incus", "start", wt_id],
             "Starting container",
             check=False,
@@ -160,17 +142,17 @@ async def shell_cmd(
     else:
         incus_image = config.get_incus_image()
 
-        local_path = git_root() / incus_image
+        local_path = locki.git_root() / incus_image
         if local_path.is_file():
             local_file = local_path.resolve()
             tmp_name = f"locki-img-{''.join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(8))}"
             await run_command(
-                [limactl(), "copy", str(local_file), f"locki:/tmp/{tmp_name}"],
+                [locki.limactl(), "copy", str(local_file), f"locki:/tmp/{tmp_name}"],
                 "Copying image into VM",
-                env={"LIMA_HOME": str(LIMA_HOME)},
+                env={"LIMA_HOME": str(locki.LIMA_HOME)},
                 cwd="/",
             )
-            await run_in_vm(
+            await locki.run_in_vm(
                 ["bash", "-c", f"incus image import /tmp/{tmp_name} --alias={tmp_name} && rm -f /tmp/{tmp_name}"],
                 "Importing container image",
             )
@@ -178,19 +160,19 @@ async def shell_cmd(
         else:
             image_ref = incus_image
 
-        await run_in_vm(
+        await locki.run_in_vm(
             ["incus", "init", image_ref, wt_id],
             "Creating container",
         )
 
         if local_path.is_file():
-            await run_in_vm(
+            await locki.run_in_vm(
                 ["incus", "image", "delete", image_ref],
                 "Cleaning up imported image",
                 check=False,
             )
 
-        await run_in_vm(
+        await locki.run_in_vm(
             [
                 "incus",
                 "config",
@@ -205,7 +187,7 @@ async def shell_cmd(
             "Mounting worktree into container",
         )
 
-        await run_in_vm(
+        await locki.run_in_vm(
             ["incus", "start", wt_id],
             "Starting container",
         )
@@ -232,7 +214,7 @@ async def shell_cmd(
                 sandbox_mode = "danger-full-access"
                 cli_auth_credentials_store = "file"
                 developer_instructions = "/etc/codex/AGENTS.md"
-                projects.{json.dumps(str(WORKTREES_HOME))}.trust_level = "trusted"
+                projects.{json.dumps(str(locki.WORKTREES_HOME))}.trust_level = "trusted"
             """),
             "/etc/codex/AGENTS.md": agents_md,
             "/opt/locki/bin/git": proxy_stub,
@@ -240,7 +222,7 @@ async def shell_cmd(
             "/opt/locki/bin/bwrap": "#!/bin/sh\nexit 1\n",  # silence codex warning
         }
         for path, content in container_files.items():
-            await run_in_vm(
+            await locki.run_in_vm(
                 ["incus", "exec", wt_id, "--", "bash", "-c", f"mkdir -p $(dirname {path}) && cat >{path}"],
                 f"Writing {pathlib.PurePosixPath(path).name}",
                 input=content.encode(),
@@ -248,7 +230,7 @@ async def shell_cmd(
 
         host_ip = (
             (
-                await run_in_vm(
+                await locki.run_in_vm(
                     ["bash", "-c", "getent hosts host.lima.internal | awk '{print $1}' | head -1"],
                     "Resolving host IP",
                     check=False,
@@ -258,7 +240,7 @@ async def shell_cmd(
             .strip()
         )
 
-        await run_in_vm(
+        await locki.run_in_vm(
             [
                 "incus",
                 "exec",
@@ -281,12 +263,12 @@ async def shell_cmd(
         )
 
     for cmd, msg in setup_commands or []:
-        await run_in_vm(["incus", "exec", wt_id, "--", *cmd], msg)
+        await locki.run_in_vm(["incus", "exec", wt_id, "--", *cmd], msg)
 
     # Start SSH proxy (sshd) for git/gh command forwarding
-    ssh_dir = LOCKI_HOME / "ssh"
+    ssh_dir = locki.LOCKI_HOME / "ssh"
     ssh_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-    client_ssh_dir = LOCKI_HOME / "home" / ".ssh"
+    client_ssh_dir = locki.LOCKI_HOME / "home" / ".ssh"
     client_ssh_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
     host_key = ssh_dir / "host_key"
     client_key = client_ssh_dir / "id_locki"
@@ -324,13 +306,13 @@ async def shell_cmd(
 
     forwarded_env = {"TERM", "COLORTERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION", "LANG", "SSH_TTY"}
 
-    os.environ["LIMA_HOME"] = str(LIMA_HOME)
+    os.environ["LIMA_HOME"] = str(locki.LIMA_HOME)
     os.environ["LIMA_SHELLENV_ALLOW"] = ",".join(forwarded_env)
 
     os.execvp(
-        limactl(),
+        locki.limactl(),
         [
-            limactl(),
+            locki.limactl(),
             "shell",
             "--yes",
             "--preserve-env",
@@ -361,7 +343,6 @@ async def shell_cmd(
     )
 
 
-@app.command("claude", context_settings={"allow_extra_args": True})
 async def claude_cmd(
     ctx: typer.Context,
     branch: typing.Annotated[str | None, typer.Argument(help="Branch name")] = None,
@@ -376,7 +357,6 @@ async def claude_cmd(
                     command='exec mise exec nodejs@24 npm:@anthropic-ai/claude-code@latest -- claude "$@"')
 
 
-@app.command("gemini", context_settings={"allow_extra_args": True})
 async def gemini_cmd(
     ctx: typer.Context,
     branch: typing.Annotated[str | None, typer.Argument(help="Branch name")] = None,
@@ -391,7 +371,6 @@ async def gemini_cmd(
                     command='exec mise exec nodejs@24 npm:@google/gemini-cli@latest -- gemini --yolo "$@"')
 
 
-@app.command("codex", context_settings={"allow_extra_args": True})
 async def codex_cmd(
     ctx: typer.Context,
     branch: typing.Annotated[str | None, typer.Argument(help="Branch name")] = None,

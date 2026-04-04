@@ -1,25 +1,17 @@
 import logging
+import pathlib
 import shutil
 import sys
 import typing
 
 import typer
 
-from locki import (
-    WORKTREES_HOME,
-    WORKTREES_META,
-    app,
-    run_in_vm,
-    git_root,
-    current_worktree,
-    find_worktree_for_branch,
-)
+import locki
 from locki.utils import run_command
 
 logger = logging.getLogger(__name__)
 
 
-@app.command("remove | rm | delete", help="Remove a branch's worktree and container.")
 async def remove_cmd(
     branch: typing.Annotated[
         str | None, typer.Argument(help="Branch name to remove (optional if inside a worktree)")
@@ -28,9 +20,9 @@ async def remove_cmd(
     delete_branch: typing.Annotated[bool, typer.Option("--branch", "-b", help="Also delete the branch")] = False,
 ):
     if branch:
-        wt_path = await find_worktree_for_branch(branch)
+        wt_path = await locki.find_worktree_for_branch(branch)
     else:
-        wt_path = current_worktree()
+        wt_path = locki.current_worktree()
         if wt_path is None:
             logger.error("No branch specified and not inside a locki worktree.")
             sys.exit(1)
@@ -64,34 +56,33 @@ async def remove_cmd(
         )
         branch = result.stdout.decode().strip() if result.returncode == 0 else None
 
-    wt_id = wt_path.relative_to(WORKTREES_HOME).parts[0]
+    wt_id = wt_path.relative_to(locki.WORKTREES_HOME).parts[0]
 
-    await run_in_vm(
+    await locki.run_in_vm(
         ["incus", "delete", "--force", wt_id],
         "Deleting container",
         check=False,
     )
 
     shutil.rmtree(wt_path, ignore_errors=True)
-    shutil.rmtree(WORKTREES_META / wt_id, ignore_errors=True)
+    shutil.rmtree(locki.WORKTREES_META / wt_id, ignore_errors=True)
     await run_command(
-        ["git", "-C", str(git_root()), "worktree", "prune"],
+        ["git", "-C", str(locki.git_root()), "worktree", "prune"],
         "Removing worktree",
         check=False,
     )
 
     if delete_branch:
         await run_command(
-            ["git", "-C", str(git_root()), "branch", "-D", branch],
+            ["git", "-C", str(locki.git_root()), "branch", "-D", branch],
             f"Deleting branch {branch}",
             check=False,
         )
 
 
-@app.command("list | ls", help="List branches with Locki-managed worktrees.")
 async def list_cmd():
     result = await run_command(
-        ["git", "-C", str(git_root()), "worktree", "list", "--porcelain"],
+        ["git", "-C", str(locki.git_root()), "worktree", "list", "--porcelain"],
         "Listing worktrees",
     )
 
@@ -100,13 +91,12 @@ async def list_cmd():
     current_branch = None
     for line in result.stdout.decode().splitlines():
         if line.startswith("worktree "):
-            import pathlib
             current_path = pathlib.Path(line.split(" ", 1)[1])
             current_branch = None
         elif line.startswith("branch refs/heads/"):
             current_branch = line.removeprefix("branch refs/heads/")
         elif line == "" and current_path and current_branch:
-            if current_path.is_relative_to(WORKTREES_HOME):
+            if current_path.is_relative_to(locki.WORKTREES_HOME):
                 typer.echo(f"{current_branch}  {current_path}")
                 found = True
 

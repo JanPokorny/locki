@@ -161,10 +161,18 @@ async def find_worktree_for_branch(branch: str) -> pathlib.Path | None:
     return None
 
 
-# Register subcommand modules — imports must be after app/constants are defined.
-import locki.shell  # noqa: E402, F401
-import locki.worktree  # noqa: E402, F401
-import locki.safe_cmd  # noqa: E402, F401
+# Register commands — import bare functions, apply decorators here.
+from locki.shell import shell_cmd, claude_cmd, gemini_cmd, codex_cmd  # noqa: E402
+from locki.worktree import remove_cmd, list_cmd  # noqa: E402
+from locki.safe_cmd import safe_cmd  # noqa: E402
 from locki.vm import vm_app  # noqa: E402
 
+app.command("shell | sh | bash", help="Open a shell in the per-branch container.",
+            context_settings={"allow_extra_args": True})(shell_cmd)
+app.command("claude", context_settings={"allow_extra_args": True})(claude_cmd)
+app.command("gemini", context_settings={"allow_extra_args": True})(gemini_cmd)
+app.command("codex", context_settings={"allow_extra_args": True})(codex_cmd)
+app.command("remove | rm | delete", help="Remove a branch's worktree and container.")(remove_cmd)
+app.command("list | ls", help="List branches with Locki-managed worktrees.")(list_cmd)
+app.command("safe-cmd", hidden=True)(safe_cmd)
 app.add_typer(vm_app)

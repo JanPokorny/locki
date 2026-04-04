@@ -3,8 +3,6 @@ import pathlib
 import shlex
 import sys
 
-from locki import WORKTREES_HOME, WORKTREES_META, app
-
 _required = bool          # --flag=<non-empty value>
 _flag = {None, ""}        # optional boolean flag (--flag or absent, no value)
 
@@ -84,9 +82,10 @@ def parse_args(args: list[str]) -> tuple[list[str], dict[str, str]]:
     return positionals, flags
 
 
-@app.command("safe-cmd", hidden=True)
 def safe_cmd():
     """SSH forced command: validate and execute an allowed git/gh command."""
+    import locki
+
     cmd = os.environ.get("SSH_ORIGINAL_COMMAND", "")
     if not cmd:
         print("No command specified.", file=sys.stderr)
@@ -106,12 +105,12 @@ def safe_cmd():
 
     # Validate worktree
     cwd = pathlib.Path(cwd_str).resolve()
-    if not cwd.is_relative_to(WORKTREES_HOME.resolve()):
+    if not cwd.is_relative_to(locki.WORKTREES_HOME.resolve()):
         print(f"Not a locki worktree: {cwd_str!r}", file=sys.stderr)
         raise SystemExit(1)
-    wt_root = WORKTREES_HOME / cwd.relative_to(WORKTREES_HOME).parts[0]
+    wt_root = locki.WORKTREES_HOME / cwd.relative_to(locki.WORKTREES_HOME).parts[0]
     wt_id = wt_root.name
-    meta_git = WORKTREES_META / wt_id / ".git"
+    meta_git = locki.WORKTREES_META / wt_id / ".git"
     dot_git = wt_root / ".git"
     if not wt_root.is_dir() or not meta_git.exists() or not dot_git.is_file():
         print(f"Invalid worktree: {cwd_str!r}", file=sys.stderr)
