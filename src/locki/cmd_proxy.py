@@ -66,38 +66,34 @@ def _val_ok(val: str | None, spec) -> bool:
 
 
 # Allowlist — add a _cmd(...) line to permit a new operation.
-_RULES: dict[str, list] = {
-    "git": [
-        _cmd("status"),
-        _cmd("diff", staged=...),
-        _cmd("diff", str, staged=...),
-        _cmd("diff", str, str, staged=...),
-        _cmd("add", all=...),
-        _cmd("commit", message=_required),
-        _cmd("push"),
-        _cmd("fetch"),
-        _cmd("log", oneline=...),
-        _cmd("log", str, oneline=...),
-        _cmd("show"),
-        _cmd("show", str),
-        _cmd("restore", str, staged=..., source=...),
-    ],
-    "gh": [
-        _cmd("pr", "create", title=_required, body=..., base=...),
-        _cmd("pr", "view"),
-        _cmd("pr", "view", str.isdigit),
-        _cmd("pr", "list"),
-        _cmd("pr", "diff"),
-        _cmd("pr", "status"),
-        _cmd("run", "list"),
-        _cmd("run", "view"),
-        _cmd("run", "view", str.isdigit),
-        _cmd("issue", "create", title=_required, body=...),
-        _cmd("issue", "view"),
-        _cmd("issue", "view", str.isdigit),
-        _cmd("issue", "list"),
-    ],
-}
+_RULES: list = [
+    _cmd("git", "status"),
+    _cmd("git", "diff", staged=...),
+    _cmd("git", "diff", str, staged=...),
+    _cmd("git", "diff", str, str, staged=...),
+    _cmd("git", "add", all=...),
+    _cmd("git", "commit", message=_required),
+    _cmd("git", "push"),
+    _cmd("git", "fetch"),
+    _cmd("git", "log", oneline=...),
+    _cmd("git", "log", str, oneline=...),
+    _cmd("git", "show"),
+    _cmd("git", "show", str),
+    _cmd("git", "restore", str, staged=..., source=...),
+    _cmd("gh", "pr", "create", title=_required, body=..., base=...),
+    _cmd("gh", "pr", "view"),
+    _cmd("gh", "pr", "view", str.isdigit),
+    _cmd("gh", "pr", "list"),
+    _cmd("gh", "pr", "diff"),
+    _cmd("gh", "pr", "status"),
+    _cmd("gh", "run", "list"),
+    _cmd("gh", "run", "view"),
+    _cmd("gh", "run", "view", str.isdigit),
+    _cmd("gh", "issue", "create", title=_required, body=...),
+    _cmd("gh", "issue", "view"),
+    _cmd("gh", "issue", "view", str.isdigit),
+    _cmd("gh", "issue", "list"),
+]
 
 
 # ── parsing ───────────────────────────────────────────────────────────────────
@@ -157,13 +153,10 @@ def _validate_command(argv: list[str]) -> tuple[str, list[str]]:
     if not argv:
         raise ValueError("Empty command")
     exe = pathlib.Path(argv[0]).name  # handle full paths like /opt/locki/bin/git
-    args = argv[1:]
-    if exe not in _RULES:
-        raise ValueError(f"Executable {exe!r} is not allowed; use 'git' or 'gh'")
-    positionals, flags = _parse(args)
-    if not any(rule(positionals, flags) for rule in _RULES[exe]):
-        raise ValueError(f"Command not allowed: {exe} {' '.join(args)!r}")
-    return exe, args
+    positionals, flags = _parse(argv[1:])
+    if not any(rule([exe, *positionals], flags) for rule in _RULES):
+        raise ValueError(f"Command not allowed: {' '.join(argv)!r}")
+    return exe, argv[1:]
 
 
 # ── main ──────────────────────────────────────────────────────────────────────
