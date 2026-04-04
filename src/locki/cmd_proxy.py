@@ -21,37 +21,9 @@ WORKTREES_META = LOCKI_HOME / "worktrees-meta"
 
 # ── allowlist DSL ─────────────────────────────────────────────────────────────
 
-# Validators: called with str | None (None = flag absent, "" = boolean --flag).
+# Flag specs: used as values in the flags dict (last element of a rule tuple).
 _required = bool          # --flag=<non-empty value>
 _flag = {None, ""}        # optional boolean flag (--flag or absent, no value)
-
-
-def _cmd(*spec_args, **spec_flags):
-    """Build a predicate for one allowed command pattern.
-
-    spec_args  — positional matchers: str exact, set membership, callable predicate.
-    spec_flags — flag matchers (hyphens → underscores); each is called with the
-                 flag's value (str) or None if absent and must return True to pass.
-    --help is always permitted.
-    """
-    spec_flags = {"help": _flag, **spec_flags}
-
-    def match(positionals: list[str], flags: dict[str, str]) -> bool:
-        if len(positionals) != len(spec_args):
-            return False
-        for val, spec in zip(positionals, spec_args):
-            if isinstance(spec, str) and val != spec:
-                return False
-            if isinstance(spec, set) and val not in spec:
-                return False
-            if callable(spec) and not spec(val):
-                return False
-        for key in flags:
-            if key not in spec_flags:
-                return False  # unlisted flag — reject
-        return all(_val_ok(flags.get(key), spec) for key, spec in spec_flags.items())
-
-    return match
 
 
 def _val_ok(val: str | None, spec) -> bool:
@@ -66,34 +38,60 @@ def _val_ok(val: str | None, spec) -> bool:
     return True
 
 
-# Allowlist — add a _cmd(...) line to permit a new operation.
-_RULES: list = [
-    _cmd("git", "status"),
-    _cmd("git", "diff", staged=_flag),
-    _cmd("git", "diff", str, staged=_flag),
-    _cmd("git", "diff", str, str, staged=_flag),
-    _cmd("git", "add", all=_flag),
-    _cmd("git", "commit", message=_required),
-    _cmd("git", "push"),
-    _cmd("git", "fetch"),
-    _cmd("git", "log", oneline=_flag),
-    _cmd("git", "log", str, oneline=_flag),
-    _cmd("git", "show"),
-    _cmd("git", "show", str),
-    _cmd("git", "restore", str, staged=_flag, source=...),
-    _cmd("gh", "pr", "create", title=_required, body=..., base=...),
-    _cmd("gh", "pr", "view"),
-    _cmd("gh", "pr", "view", str.isdigit),
-    _cmd("gh", "pr", "list"),
-    _cmd("gh", "pr", "diff"),
-    _cmd("gh", "pr", "status"),
-    _cmd("gh", "run", "list"),
-    _cmd("gh", "run", "view"),
-    _cmd("gh", "run", "view", str.isdigit),
-    _cmd("gh", "issue", "create", title=_required, body=...),
-    _cmd("gh", "issue", "view"),
-    _cmd("gh", "issue", "view", str.isdigit),
-    _cmd("gh", "issue", "list"),
+def _matches(rule: tuple, positionals: list[str], flags: dict[str, str]) -> bool:
+    """Test whether positionals+flags match a rule tuple.
+
+    A rule is a tuple of positional specs, optionally ending with a dict of
+    flag specs.  Positional specs: str (exact), set (membership), callable
+    (predicate).  --help is always permitted.
+    """
+    if rule and isinstance(rule[-1], dict):
+        spec_args, spec_flags = rule[:-1], {"help": _flag, **rule[-1]}
+    else:
+        spec_args, spec_flags = rule, {"help": _flag}
+    if len(positionals) != len(spec_args):
+        return False
+    for val, spec in zip(positionals, spec_args):
+        if isinstance(spec, str) and val != spec:
+            return False
+        if isinstance(spec, set) and val not in spec:
+            return False
+        if callable(spec) and not spec(val):
+            return False
+    for key in flags:
+        if key not in spec_flags:
+            return False
+    return all(_val_ok(flags.get(key), spec) for key, spec in spec_flags.items())
+
+
+# Allowlist — each tuple is (positional_specs..., {flag_specs}) or just (positional_specs...).
+_RULES = [
+    ("git", "status"),
+    ("git", "diff", {"staged": _flag}),
+    ("git", "diff", str, {"staged": _flag}),
+    ("git", "diff", str, str, {"staged": _flag}),
+    ("git", "add", {"all": _flag}),
+    ("git", "commit", {"message": _required}),
+    ("git", "push"),
+    ("git", "fetch"),
+    ("git", "log", {"oneline": _flag}),
+    ("git", "log", str, {"oneline": _flag}),
+    ("git", "show"),
+    ("git", "show", str),
+    ("git", "restore", str, {"staged": _flag, "source": ...}),
+    ("gh", "pr", "create", {"title": _required, "body": ..., "base": ...}),
+    ("gh", "pr", "view"),
+    ("gh", "pr", "view", str.isdigit),
+    ("gh", "pr", "list"),
+    ("gh", "pr", "diff"),
+    ("gh", "pr", "status"),
+    ("gh", "run", "list"),
+    ("gh", "run", "view"),
+    ("gh", "run", "view", str.isdigit),
+    ("gh", "issue", "create", {"title": _required, "body": ...}),
+    ("gh", "issue", "view"),
+    ("gh", "issue", "view", str.isdigit),
+    ("gh", "issue", "list"),
 ]
 
 
@@ -155,7 +153,7 @@ def _validate_command(argv: list[str]) -> tuple[str, list[str]]:
         raise ValueError("Empty command")
     exe = pathlib.Path(argv[0]).name  # handle full paths like /opt/locki/bin/git
     positionals, flags = _parse(argv[1:])
-    if not any(rule([exe, *positionals], flags) for rule in _RULES):
+    if not any(_matches(rule, [exe, *positionals], flags) for rule in _RULES):
         raise ValueError(f"Command not allowed: {' '.join(argv)!r}")
     return exe, argv[1:]
 
