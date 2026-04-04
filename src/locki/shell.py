@@ -409,9 +409,6 @@ async def opencode_cmd(
 ):
     """Run OpenCode in the sandbox."""
     ctx.setup_commands = [
-        (["mise", "install", "nodejs@24"], "Installing Node.js"),
-        (["mise", "exec", "nodejs@24", "--", "mise", "install", "npm:opencode-ai@latest"], "Installing OpenCode CLI"),
+        (["mise", "use", "-g", "github:anomalyco/opencode"], "Installing OpenCode CLI"),
     ]
-    await shell_cmd(ctx=ctx, branch=branch,
-                    command='set -a; [ -f ~/.config/opencode/.env ] && . ~/.config/opencode/.env; set +a; '
-                            'exec mise exec nodejs@24 npm:opencode-ai@latest -- opencode "$@"')
+    await shell_cmd(ctx=ctx, branch=branch, command='exec opencode "$@"')
