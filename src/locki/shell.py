@@ -36,6 +36,19 @@ async def shell_cmd(
     claude_json = json.loads(claude_json_file.read_text()) if claude_json_file.exists() else {}
     claude_json.setdefault("projects", {}).setdefault("/", {})["hasTrustDialogAccepted"] = True
     claude_json_file.write_text(json.dumps(claude_json, indent=2) + "\n")
+    opencode_config_file = sandbox_home / ".config" / "opencode" / "opencode.json"
+    opencode_config_file.parent.mkdir(parents=True, exist_ok=True)
+    opencode_config = json.loads(opencode_config_file.read_text()) if opencode_config_file.exists() else {}
+    opencode_config.setdefault("$schema", "https://opencode.ai/config.json")
+    opencode_config.setdefault("permission", "allow")
+    if "instructions" not in opencode_config:
+        opencode_config["instructions"] = ["/etc/opencode/AGENTS.md"]
+    elif (
+        isinstance(opencode_config["instructions"], list)
+        and "/etc/opencode/AGENTS.md" not in opencode_config["instructions"]
+    ):
+        opencode_config["instructions"].append("/etc/opencode/AGENTS.md")
+    opencode_config_file.write_text(json.dumps(opencode_config, indent=2) + "\n")
 
     locki.LOCKI_HOME.mkdir(exist_ok=True)
     locki.LIMA_HOME.mkdir(exist_ok=True, parents=True)
@@ -217,6 +230,7 @@ async def shell_cmd(
                 projects.{json.dumps(str(locki.WORKTREES_HOME))}.trust_level = "trusted"
             """),
             "/etc/codex/AGENTS.md": agents_md,
+            "/etc/opencode/AGENTS.md": agents_md,
             "/opt/locki/bin/git": proxy_stub,
             "/opt/locki/bin/gh": proxy_stub,
             "/opt/locki/bin/bwrap": "#!/bin/sh\nexit 1\n",  # silence codex warning
@@ -382,3 +396,16 @@ async def codex_cmd(
     ]
     await shell_cmd(ctx=ctx, branch=branch,
                     command='exec mise exec nodejs@24 npm:@openai/codex@latest -- codex --yolo "$@"')
+
+
+async def opencode_cmd(
+    ctx: typer.Context,
+    branch: typing.Annotated[str | None, typer.Argument(help="Branch name")] = None,
+):
+    """Run OpenCode in the sandbox."""
+    ctx.setup_commands = [
+        (["mise", "install", "nodejs@24"], "Installing Node.js"),
+        (["mise", "exec", "nodejs@24", "--", "mise", "install", "npm:opencode-ai@latest"], "Installing OpenCode CLI"),
+    ]
+    await shell_cmd(ctx=ctx, branch=branch,
+                    command='exec mise exec nodejs@24 npm:opencode-ai@latest -- opencode "$@"')

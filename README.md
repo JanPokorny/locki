@@ -29,12 +29,13 @@ Locki is a CLI tool for Linux and macOS that allows running multiple AI agents i
     - Claude: `locki claude my-first-sandbox`
     - Gemini: `locki gemini my-first-sandbox`
     - Codex: `locki codex my-first-sandbox`
+    - OpenCode: `locki opencode my-first-sandbox`
     - Plain shell: `locki shell my-first-sandbox`
 3. First start takes longer, wait a few minutes for the VM to boot.
 4. Follow prompts to log in to the AI CLI. Login will be persisted across sandboxes.
 5. Build!
     - Agent is instructed to start by setting up project tools. This may take a bit of time. Subsequent sandbox installs will be much faster due to shared cache for most common dependency managers (`mise`, `npm`, `pip`, etc.)
-    - Want to use custom configuration in the VM? Copy your config to `~/.locki/home`, e.g. `cp ~/.claude/CLAUDE.md ~/.locki/home/.claude/CLAUDE.md`.
+    - Want to use custom configuration in the VM? Copy your config to `~/.locki/home`, e.g. `cp ~/.claude/CLAUDE.md ~/.locki/home/.claude/CLAUDE.md` or `cp ~/.config/opencode/opencode.json ~/.locki/home/.config/opencode/opencode.json`.
 6. Once happy, commit and push your changes from host. (Sandbox does not have Git access for security reasons.)
     - Tip: VSCode will make this simple by showing worktrees in the sidebar.
     - Locki ensures that Git hooks are still executed inside the sandbox.
