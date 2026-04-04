@@ -22,7 +22,8 @@ WORKTREES_META = LOCKI_HOME / "worktrees-meta"
 # ── allowlist DSL ─────────────────────────────────────────────────────────────
 
 # Validators: called with str | None (None = flag absent, "" = boolean --flag).
-_required = bool  # --flag=<non-empty value>
+_required = bool          # --flag=<non-empty value>
+_flag = {None, ""}        # optional boolean flag (--flag or absent, no value)
 
 
 def _cmd(*spec_args, **spec_flags):
@@ -33,7 +34,7 @@ def _cmd(*spec_args, **spec_flags):
                  flag's value (str) or None if absent and must return True to pass.
     --help is always permitted.
     """
-    spec_flags = {"help": ..., **spec_flags}
+    spec_flags = {"help": _flag, **spec_flags}
 
     def match(positionals: list[str], flags: dict[str, str]) -> bool:
         if len(positionals) != len(spec_args):
@@ -68,18 +69,18 @@ def _val_ok(val: str | None, spec) -> bool:
 # Allowlist — add a _cmd(...) line to permit a new operation.
 _RULES: list = [
     _cmd("git", "status"),
-    _cmd("git", "diff", staged=...),
-    _cmd("git", "diff", str, staged=...),
-    _cmd("git", "diff", str, str, staged=...),
-    _cmd("git", "add", all=...),
+    _cmd("git", "diff", staged=_flag),
+    _cmd("git", "diff", str, staged=_flag),
+    _cmd("git", "diff", str, str, staged=_flag),
+    _cmd("git", "add", all=_flag),
     _cmd("git", "commit", message=_required),
     _cmd("git", "push"),
     _cmd("git", "fetch"),
-    _cmd("git", "log", oneline=...),
-    _cmd("git", "log", str, oneline=...),
+    _cmd("git", "log", oneline=_flag),
+    _cmd("git", "log", str, oneline=_flag),
     _cmd("git", "show"),
     _cmd("git", "show", str),
-    _cmd("git", "restore", str, staged=..., source=...),
+    _cmd("git", "restore", str, staged=_flag, source=...),
     _cmd("gh", "pr", "create", title=_required, body=..., base=...),
     _cmd("gh", "pr", "view"),
     _cmd("gh", "pr", "view", str.isdigit),
