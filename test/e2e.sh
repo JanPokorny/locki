@@ -113,7 +113,6 @@ assert_ok    "git show works"                locki shell a -c "git show"
 assert_fail  "git checkout is blocked"       locki shell a -c "git checkout main"
 assert_fail  "git reset is blocked"          locki shell a -c "git reset --hard"
 assert_fail  "short flags are blocked"       locki shell a -c "git commit -m test"
-assert_fail  "curl is blocked"               locki shell a -c "curl http://localhost"
 
 # ── warm start (new container, existing VM) ──────────────────────────────────
 

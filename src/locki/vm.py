@@ -1,5 +1,3 @@
-import pathlib
-
 from locki.async_typer import AsyncTyper
 from locki.utils import run_command
 
