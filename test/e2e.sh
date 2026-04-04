@@ -101,12 +101,18 @@ git -C "$WORKTREE" commit --allow-empty -m "trigger hook" 2>/dev/null || true
 assert_ok "hook created file from guest" test -f "$WORKTREE/hook-proof"
 assert_output "hook copied correct content" "42" cat "$WORKTREE/hook-proof"
 
-# ── guest git is blocked ─────────────────────────────────────────────────────
+# ── proxied git/gh commands ──────────────────────────────────────────────────
 
 echo
-echo "Testing guest restrictions..."
+echo "Testing proxied git commands..."
 
-assert_fail "git is blocked in guest" locki shell a -c "git status"
+assert_ok    "git status works"              locki shell a -c "git status"
+assert_ok    "git log works"                 locki shell a -c "git log --oneline"
+assert_ok    "git diff works"                locki shell a -c "git diff"
+assert_ok    "git show works"                locki shell a -c "git show"
+assert_fail  "git checkout is blocked"       locki shell a -c "git checkout main"
+assert_fail  "git reset is blocked"          locki shell a -c "git reset --hard"
+assert_fail  "short flags are blocked"       locki shell a -c "git commit -m test"
 
 # ── warm start (new container, existing VM) ──────────────────────────────────
 
