@@ -15,6 +15,11 @@ from halo import Halo
 from locki.async_typer import AsyncTyper
 from locki.utils import run_command, setup_logging
 
+from locki.shell import shell_cmd, claude_cmd, gemini_cmd, codex_cmd
+from locki.worktree import remove_cmd, list_cmd
+from locki.safe_cmd import safe_cmd
+from locki.vm import vm_app
+
 setup_logging()
 logger = logging.getLogger(__name__)
 
@@ -160,12 +165,6 @@ async def find_worktree_for_branch(branch: str) -> pathlib.Path | None:
             return current_path
     return None
 
-
-# Register commands — import bare functions, apply decorators here.
-from locki.shell import shell_cmd, claude_cmd, gemini_cmd, codex_cmd  # noqa: E402
-from locki.worktree import remove_cmd, list_cmd  # noqa: E402
-from locki.safe_cmd import safe_cmd  # noqa: E402
-from locki.vm import vm_app  # noqa: E402
 
 app.command("shell | sh | bash", help="Open a shell in the per-branch container.",
             context_settings={"allow_extra_args": True})(shell_cmd)
