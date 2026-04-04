@@ -1,5 +1,6 @@
 import importlib.resources
 import json
+import logging
 import os
 import pathlib
 import secrets
@@ -16,6 +17,8 @@ import typer
 import locki
 from locki.config import load_config
 from locki.utils import run_command
+
+logger = logging.getLogger(__name__)
 
 
 async def shell_cmd(
@@ -300,9 +303,11 @@ async def shell_cmd(
             sshd_running = True
         except (ProcessLookupError, ValueError, PermissionError):
             pass
-    if not sshd_running:
-        subprocess.Popen([shutil.which("sshd") or "/usr/sbin/sshd", "-f", str(ssh_dir / "sshd_config")],
-                         start_new_session=True)
+    sshd_path = shutil.which("sshd")
+    if sshd_path is None:
+        logger.warning("sshd was not found on the host. Safe git/gh proxy is disabled in this sandbox.")
+    elif not sshd_running:
+        subprocess.Popen([sshd_path, "-f", str(ssh_dir / "sshd_config")], start_new_session=True)
 
     forwarded_env = {"TERM", "COLORTERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION", "LANG", "SSH_TTY"}
 

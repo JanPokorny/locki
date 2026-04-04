@@ -24,7 +24,7 @@ Locki is a CLI tool for Linux and macOS that allows running multiple AI agents i
     - `uv tool install locki`
     - `pipx install locki`
     - `mise use -g pipx:locki`
-2. If you're on Linux, also [install QEMU](https://www.qemu.org/download/#linux).
+2. If you're on Linux, also [install QEMU](https://www.qemu.org/download/#linux). For the safe sandboxed `git`/`gh` proxy, install an OpenSSH server package that provides `sshd`.
 2. `cd` to your Git repository and run:
     - Claude: `locki claude my-first-sandbox`
     - Gemini: `locki gemini my-first-sandbox`
