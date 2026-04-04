@@ -169,7 +169,13 @@ def _ensure_ssh_proxy():
         subprocess.run(["ssh-keygen", "-t", "ed25519", "-f", str(client_key), "-N", ""], check=True,
                         capture_output=True)
 
-    # Write authorized_keys with forced command
+    # Install static SSH client config (shared into containers via ~/.locki/home)
+    ssh_config_src = importlib.resources.files("locki") / "data" / "locki-ssh-config"
+    ssh_config_dst = client_ssh_dir / "locki-ssh-config"
+    if not ssh_config_dst.exists():
+        ssh_config_dst.write_text(ssh_config_src.read_text())
+
+    # Write authorized_keys with forced command (references generated pubkey)
     auth_keys = SSH_DIR / "authorized_keys"
     pub_key = client_key.with_suffix(".pub").read_text().strip()
     forced_cmd = f"{sys.executable} -m locki.cmd_proxy"
@@ -178,7 +184,7 @@ def _ensure_ssh_proxy():
     )
     auth_keys.chmod(0o600)
 
-    # Write sshd config
+    # Write sshd config (references generated host key + absolute paths)
     sshd_config = SSH_DIR / "sshd_config"
     pid_file = SSH_DIR / "sshd.pid"
     sshd_config.write_text(
@@ -192,19 +198,6 @@ def _ensure_ssh_proxy():
         f"StrictModes no\n"
         f"UsePAM no\n"
         f"LogLevel ERROR\n"
-    )
-
-    # Write SSH client config (shared into containers via ~/.locki/home)
-    host_user = os.environ.get("USER") or os.environ.get("LOGNAME") or "root"
-    (client_ssh_dir / "locki-ssh-config").write_text(
-        f"Host locki-proxy\n"
-        f"    HostName host.lima.internal\n"
-        f"    Port {SSH_PROXY_PORT}\n"
-        f"    User {host_user}\n"
-        f"    IdentityFile ~/.ssh/id_locki\n"
-        f"    StrictHostKeyChecking no\n"
-        f"    UserKnownHostsFile /dev/null\n"
-        f"    LogLevel ERROR\n"
     )
 
     # Start sshd if not already running
