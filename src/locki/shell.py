@@ -413,4 +413,5 @@ async def opencode_cmd(
         (["mise", "exec", "nodejs@24", "--", "mise", "install", "npm:opencode-ai@latest"], "Installing OpenCode CLI"),
     ]
     await shell_cmd(ctx=ctx, branch=branch,
-                    command='exec mise exec nodejs@24 npm:opencode-ai@latest -- opencode "$@"')
+                    command='set -a; [ -f ~/.config/opencode/.env ] && . ~/.config/opencode/.env; set +a; '
+                            'exec mise exec nodejs@24 npm:opencode-ai@latest -- opencode "$@"')
