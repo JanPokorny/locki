@@ -149,71 +149,6 @@ def current_worktree() -> pathlib.Path | None:
     return WORKTREES_HOME / cwd.relative_to(WORKTREES_HOME).parts[0]
 
 
-SSH_PROXY_PORT = 7890
-SSH_DIR = LOCKI_HOME / "ssh"
-
-
-def _ensure_ssh_proxy():
-    """Start a dedicated sshd that forwards allowed commands to the host."""
-    SSH_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
-    client_ssh_dir = LOCKI_HOME / "home" / ".ssh"
-    client_ssh_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-
-    # Generate keys once
-    host_key = SSH_DIR / "host_key"
-    client_key = client_ssh_dir / "id_locki"
-    if not host_key.exists():
-        subprocess.run(["ssh-keygen", "-t", "ed25519", "-f", str(host_key), "-N", ""], check=True,
-                        capture_output=True)
-    if not client_key.exists():
-        subprocess.run(["ssh-keygen", "-t", "ed25519", "-f", str(client_key), "-N", ""], check=True,
-                        capture_output=True)
-
-    # Install static SSH client config (shared into containers via ~/.locki/home)
-    ssh_config_src = importlib.resources.files("locki") / "data" / "locki-ssh-config"
-    ssh_config_dst = client_ssh_dir / "locki-ssh-config"
-    if not ssh_config_dst.exists():
-        ssh_config_dst.write_text(ssh_config_src.read_text())
-
-    # Write authorized_keys with forced command (references generated pubkey)
-    auth_keys = SSH_DIR / "authorized_keys"
-    pub_key = client_key.with_suffix(".pub").read_text().strip()
-    locki_bin = shutil.which("locki") or f"{sys.executable} -m locki"
-    forced_cmd = f"{locki_bin} safe-cmd"
-    auth_keys.write_text(
-        f'command="{forced_cmd}",no-port-forwarding,no-X11-forwarding,no-agent-forwarding {pub_key}\n'
-    )
-    auth_keys.chmod(0o600)
-
-    # Write sshd config (references generated host key + absolute paths)
-    sshd_config = SSH_DIR / "sshd_config"
-    pid_file = SSH_DIR / "sshd.pid"
-    sshd_config.write_text(
-        f"Port {SSH_PROXY_PORT}\n"
-        f"ListenAddress 0.0.0.0\n"
-        f"HostKey {host_key}\n"
-        f"AuthorizedKeysFile {auth_keys}\n"
-        f"PidFile {pid_file}\n"
-        f"PasswordAuthentication no\n"
-        f"PubkeyAuthentication yes\n"
-        f"StrictModes no\n"
-        f"UsePAM no\n"
-        f"LogLevel ERROR\n"
-    )
-
-    # Start sshd if not already running
-    if pid_file.exists():
-        try:
-            os.kill(int(pid_file.read_text().strip()), 0)
-            return
-        except (ProcessLookupError, ValueError, PermissionError):
-            pid_file.unlink(missing_ok=True)
-
-    sshd = shutil.which("sshd") or "/usr/sbin/sshd"
-    subprocess.Popen([sshd, "-f", str(sshd_config)], start_new_session=True)
-    logger.info("Started SSH proxy (sshd) on port %d.", SSH_PROXY_PORT)
-
-
 async def find_worktree_for_branch(branch: str) -> pathlib.Path | None:
     """Return the worktree path for a branch managed by Locki, or None."""
     result = await run_command(
@@ -486,7 +421,44 @@ async def shell_cmd(
     for cmd, msg in setup_commands or []:
         await run_in_vm(["incus", "exec", wt_id, "--", *cmd], msg)
 
-    _ensure_ssh_proxy()
+    # Start SSH proxy (sshd) for git/gh command forwarding
+    ssh_dir = LOCKI_HOME / "ssh"
+    ssh_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    client_ssh_dir = LOCKI_HOME / "home" / ".ssh"
+    client_ssh_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    host_key = ssh_dir / "host_key"
+    client_key = client_ssh_dir / "id_locki"
+    if not host_key.exists():
+        subprocess.run(["ssh-keygen", "-t", "ed25519", "-f", str(host_key), "-N", ""], check=True, capture_output=True)
+    if not client_key.exists():
+        subprocess.run(["ssh-keygen", "-t", "ed25519", "-f", str(client_key), "-N", ""], check=True, capture_output=True)
+    ssh_config_dst = client_ssh_dir / "locki-ssh-config"
+    if not ssh_config_dst.exists():
+        ssh_config_dst.write_text((importlib.resources.files("locki") / "data" / "locki-ssh-config").read_text())
+    auth_keys = ssh_dir / "authorized_keys"
+    locki_bin = shutil.which("locki") or f"{sys.executable} -m locki"
+    auth_keys.write_text(
+        f'command="{locki_bin} safe-cmd",no-port-forwarding,no-X11-forwarding,no-agent-forwarding '
+        f"{client_key.with_suffix('.pub').read_text().strip()}\n"
+    )
+    auth_keys.chmod(0o600)
+    pid_file = ssh_dir / "sshd.pid"
+    (ssh_dir / "sshd_config").write_text(
+        f"Port 7890\nListenAddress 0.0.0.0\nHostKey {host_key}\n"
+        f"AuthorizedKeysFile {auth_keys}\nPidFile {pid_file}\n"
+        f"PasswordAuthentication no\nPubkeyAuthentication yes\n"
+        f"StrictModes no\nUsePAM no\nLogLevel ERROR\n"
+    )
+    sshd_running = False
+    if pid_file.exists():
+        try:
+            os.kill(int(pid_file.read_text().strip()), 0)
+            sshd_running = True
+        except (ProcessLookupError, ValueError, PermissionError):
+            pass
+    if not sshd_running:
+        subprocess.Popen([shutil.which("sshd") or "/usr/sbin/sshd", "-f", str(ssh_dir / "sshd_config")],
+                         start_new_session=True)
 
     forwarded_env = {"TERM", "COLORTERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION", "LANG", "SSH_TTY"}
 
@@ -689,28 +661,9 @@ async def list_cmd():
         logger.info("No locki-managed worktrees found.")
 
 
-vm_app = AsyncTyper(name="vm", help="Manage the Locki VM.", no_args_is_help=True)
+from locki.vm import vm_app  # noqa: E402
+
 app.add_typer(vm_app)
-
-
-@vm_app.command("stop", help="Stop the Locki VM.")
-async def vm_stop_cmd():
-    await run_command(
-        [limactl(), "stop", "locki"],
-        "Stopping VM",
-        env={"LIMA_HOME": str(LIMA_HOME)},
-        cwd="/",
-    )
-
-
-@vm_app.command("delete | remove | rm", help="Delete the Locki VM entirely.")
-async def vm_delete_cmd():
-    await run_command(
-        [limactl(), "delete", "-f", "locki"],
-        "Deleting VM",
-        env={"LIMA_HOME": str(LIMA_HOME)},
-        cwd="/",
-    )
 
 
 # ── safe-cmd: SSH forced command for proxied git/gh ──────────────────────────
@@ -748,14 +701,6 @@ _RULES = [
 ]
 
 
-def _val_ok(val: str | None, spec) -> bool:
-    if spec is ...:           return True
-    if callable(spec):        return bool(spec(val))
-    if isinstance(spec, set): return val in spec
-    if isinstance(spec, str): return val == spec
-    return True
-
-
 def _matches(rule: tuple, positionals: list[str], flags: dict[str, str]) -> bool:
     if rule and isinstance(rule[-1], dict):
         spec_args, spec_flags = rule[:-1], {"help": _flag, **rule[-1]}
@@ -767,10 +712,15 @@ def _matches(rule: tuple, positionals: list[str], flags: dict[str, str]) -> bool
         if isinstance(spec, str) and val != spec:   return False
         if isinstance(spec, set) and val not in spec: return False
         if callable(spec) and not spec(val):          return False
-    for key in flags:
-        if key not in spec_flags:
-            return False
-    return all(_val_ok(flags.get(key), spec) for key, spec in spec_flags.items())
+    if any(key not in spec_flags for key in flags):
+        return False
+    for key, spec in spec_flags.items():
+        val = flags.get(key)
+        if spec is ...:                              continue
+        if callable(spec) and not spec(val):         return False
+        elif isinstance(spec, set) and val not in spec: return False
+        elif isinstance(spec, str) and val != spec:  return False
+    return True
 
 
 @app.command("safe-cmd", hidden=True)
