@@ -13,12 +13,11 @@ import anyio.to_thread
 from halo import Halo
 
 from locki.async_typer import AsyncTyper
-from locki.utils import run_command, setup_logging
-
-from locki.shell import shell_cmd, claude_cmd, gemini_cmd, codex_cmd
-from locki.worktree import remove_cmd, list_cmd
 from locki.safe_cmd import safe_cmd
+from locki.shell import claude_cmd, codex_cmd, gemini_cmd, opencode_cmd, shell_cmd
+from locki.utils import run_command, setup_logging
 from locki.vm import vm_app
+from locki.worktree import list_cmd, remove_cmd
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -171,6 +170,7 @@ app.command("shell | sh | bash", help="Open a shell in the per-branch container.
 app.command("claude", context_settings={"allow_extra_args": True})(claude_cmd)
 app.command("gemini", context_settings={"allow_extra_args": True})(gemini_cmd)
 app.command("codex", context_settings={"allow_extra_args": True})(codex_cmd)
+app.command("opencode", context_settings={"allow_extra_args": True})(opencode_cmd)
 app.command("remove | rm | delete", help="Remove a branch's worktree and container.")(remove_cmd)
 app.command("list | ls", help="List branches with Locki-managed worktrees.")(list_cmd)
 app.command("safe-cmd", hidden=True)(safe_cmd)
