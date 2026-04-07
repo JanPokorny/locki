@@ -1,3 +1,4 @@
+import getpass
 import importlib.resources
 import json
 import logging
@@ -294,12 +295,12 @@ async def shell_cmd(
     if not client_key.exists():
         subprocess.run(["ssh-keygen", "-t", "ed25519", "-f", str(client_key), "-N", ""], check=True, capture_output=True)
     ssh_config_dst = client_ssh_dir / "locki-ssh-config"
-    if not ssh_config_dst.exists():
-        ssh_config_dst.write_text((importlib.resources.files("locki") / "data" / "locki-ssh-config").read_text())
+    ssh_config_template = (importlib.resources.files("locki") / "data" / "locki-ssh-config").read_text()
+    ssh_config_dst.write_text(ssh_config_template + f"    User {getpass.getuser()}\n")
     auth_keys = ssh_dir / "authorized_keys"
     locki_bin = shutil.which("locki") or f"{sys.executable} -m locki"
     auth_keys.write_text(
-        f'command="{locki_bin} safe-cmd",no-port-forwarding,no-X11-forwarding,no-agent-forwarding '
+        f'command="HOME={shlex.quote(str(pathlib.Path.home()))} {locki_bin} safe-cmd",no-port-forwarding,no-X11-forwarding,no-agent-forwarding '
         f"{client_key.with_suffix('.pub').read_text().strip()}\n"
     )
     auth_keys.chmod(0o600)

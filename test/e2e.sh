@@ -40,7 +40,10 @@ timed() {
 # Use /tmp directly to keep paths short — Lima needs UNIX_PATH_MAX < 104 for sockets
 # Resolve symlinks (macOS: /tmp -> /private/tmp) to avoid path mismatches
 TMPDIR_ROOT=$(cd "$(mktemp -d /tmp/locki-e2e.XXXX)" && pwd -P)
-trap 'rm -rf "$TMPDIR_ROOT"' EXIT
+# Kill any stale sshd on port 7890 from previous runs
+lsof -ti :7890 | xargs kill 2>/dev/null || true
+cleanup() { lsof -ti :7890 | xargs kill 2>/dev/null || true; rm -rf "$TMPDIR_ROOT"; }
+trap cleanup EXIT
 
 export HOME="$TMPDIR_ROOT/h"
 mkdir -p "$HOME"
@@ -145,8 +148,8 @@ echo "Testing locki.toml custom image..."
 
 cat > "$REPO/locki.toml" << 'TOML'
 [incus_image]
-arm64 = "images:ubuntu/24.04"
-amd64 = "images:ubuntu/24.04"
+aarch64 = "images:ubuntu/24.04"
+x86_64 = "images:ubuntu/24.04"
 TOML
 
 assert_output "custom image container runs ubuntu" "Ubuntu" locki shell d -c "cat /etc/os-release"
