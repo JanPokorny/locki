@@ -57,10 +57,13 @@ uv venv "$VENV" --python 3.14
 export PATH="$VENV/bin:$PATH"
 uv pip install --python "$VENV/bin/python" "$PROJECT_ROOT"
 
+REMOTE="$TMPDIR_ROOT/remote.git"
+
 echo "Creating test repo..."
-mkdir -p "$REPO"
-git -C "$REPO" init
+git init --bare "$REMOTE"
+git clone "$REMOTE" "$REPO"
 git -C "$REPO" commit --allow-empty -m "initial"
+git -C "$REPO" push
 
 cd "$REPO"
 
@@ -116,6 +119,27 @@ assert_ok    "git show works"                locki shell a -c "git show"
 assert_fail  "git checkout is blocked"       locki shell a -c "git checkout main"
 assert_fail  "git reset is blocked"          locki shell a -c "git reset --hard"
 assert_fail  "short flags are blocked"       locki shell a -c "git commit -m test"
+
+# ── remote branch tracking ──────────────────────────────────────────────────
+
+echo
+echo "Testing remote branch tracking..."
+
+# Create a branch on the remote that doesn't exist locally
+git clone "$REMOTE" "$TMPDIR_ROOT/pusher"
+git -C "$TMPDIR_ROOT/pusher" checkout -b remote-only
+git -C "$TMPDIR_ROOT/pusher" commit --allow-empty -m "remote commit"
+git -C "$TMPDIR_ROOT/pusher" push -u origin remote-only
+
+# Verify the branch doesn't exist locally yet
+assert_fail "remote-only branch not local yet" git -C "$REPO" rev-parse --verify refs/heads/remote-only
+
+# locki shell should fetch and create the branch from remote
+assert_ok "locki fetches remote branch" locki shell remote-only -c "echo ok"
+
+# Check the branch was created from the remote (has the remote commit)
+REMOTE_ONLY_WT=$(git -C "$REPO" worktree list --porcelain | grep -B2 "branch refs/heads/remote-only" | head -1 | sed 's/worktree //')
+assert_output "branch has remote commit" "remote commit" git -C "$REMOTE_ONLY_WT" log --oneline -1 --format=%s
 
 # ── warm start (new container, existing VM) ──────────────────────────────────
 

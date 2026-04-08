@@ -99,9 +99,15 @@ async def shell_cmd(
             wt_path = locki.WORKTREES_HOME / wt_id
             wt_path.mkdir(parents=True, exist_ok=True)
 
+            await run_command(
+                ["git", "-C", str(locki.git_root()), "fetch"],
+                "Fetching from remote",
+                check=False,
+            )
+
             result = await run_command(
-                ["git", "-C", str(locki.git_root()), "rev-parse", "--verify", f"refs/heads/{branch}"],
-                f"Checking if branch '{branch}' exists",
+                ["git", "-C", str(locki.git_root()), "worktree", "add", str(wt_path), branch],
+                f"Creating worktree for '{branch}'",
                 check=False,
             )
             if result.returncode != 0:
@@ -109,11 +115,10 @@ async def shell_cmd(
                     ["git", "-C", str(locki.git_root()), "branch", branch],
                     f"Creating branch '{branch}'",
                 )
-
-            await run_command(
-                ["git", "-C", str(locki.git_root()), "worktree", "add", str(wt_path), branch],
-                f"Creating worktree for '{branch}'",
-            )
+                await run_command(
+                    ["git", "-C", str(locki.git_root()), "worktree", "add", str(wt_path), branch],
+                    f"Creating worktree for '{branch}'",
+                )
 
             meta_dir = locki.WORKTREES_META / wt_id
             meta_dir.mkdir(parents=True, exist_ok=True)
