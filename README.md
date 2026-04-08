@@ -42,7 +42,7 @@ Others run either: \
 *b)* OS-level jail (Landlock, Bubblewrap, etc.) which does not properly isolate (ports can collide, etc.) \
 *c)* OCI container / microVM, which has limitations in terms of background services (no `systemd`), container building, Kubernetes, ...
 
-**Locki** runs LXC containers (full OS) inside a single shared VM. While the VM layer isolates host from AI mischief, LXC containers are a lightweight layer on top to isolate sandboxes from each other. Spawn a real non-micro OS in <10s and run anything in it.
+**Locki** runs LXC containers (full OS) inside a single shared VM. While the VM layer isolates the host from AI mischief, LXC containers are a lightweight layer on top to isolate sandboxes from each other. Spawn a real non-micro OS in <10s and run anything in it.
 
 Furthermore, Locki protects your Git history from tampering while still allowing safe operations like commits to the worktree branch. Be able to fall back on earlier commits when an agent goes haywire, while not giving up the convenience of arriving at a fully baked pull request.
 
@@ -53,19 +53,19 @@ Case study: [Kagenti ADK](https://github.com/kagenti/adk) uses Locki to run a fu
 ## How to install and use Locki?
 
 1. Install using your preferred manager: `uv tool install locki` or `pipx install locki`. ([Install](https://docs.astral.sh/uv/getting-started/installation/) and use `uv` if unsure.)
-2. If you're on Linux, also install [QEMU](https://www.qemu.org/download/#linux) and [OpenSSH](https://repology.org/project/openssh/versions) (usually preinstalled).
-2. `cd` to your Git repository and run: `locki claude my-first-sandbox`
+2. If you're on Linux, also install [OpenSSH](https://repology.org/project/openssh/versions) (usually preinstalled) and [QEMU](https://www.qemu.org/download/#linux).
+3. `cd` to your Git repository and run: `locki claude my-first-sandbox`
 
     <small>
 
     (Replace `claude` with `gemini`, `codex`, `opencode`, or `shell` for raw shell access.)
 
     </small>
-3. First start takes longer, wait a few minutes for the VM to boot.
-4. Follow prompts to log in to the AI CLI. Login will be persisted across sandboxes.
-5. Build! Your agent is already instructed on how to behave in the sandbox. 
-6. Once happy, commit and push your changes. Ask the agent, or do this manually for more control.
-7. After merging the branch, remove the sandbox using: `locki remove my-first-sandbox` -- or manually, Locki will clean up.
+4. First start takes longer, wait a few minutes for the VM to boot.
+5. Follow prompts to log in to the AI CLI. Login will be persisted across sandboxes.
+6. Build! Your agent is already instructed on how to behave in the sandbox. 
+7. Once happy, commit and push your changes. Ask the agent, or do this manually for more control.
+8. After merging the branch, remove the sandbox using: `locki remove my-first-sandbox` -- or just remove the worktree (e.g. from your IDE) and Locki will clean up automatically.
 
 &nbsp;
 
