@@ -45,7 +45,7 @@ async def shell_cmd(
     if not (claude_settings_file := sandbox_home / ".claude" / "settings.json").exists():
         claude_settings_file.parent.mkdir(parents=True, exist_ok=True)
         claude_settings_file.write_text(
-            '{ "skipDangerousModePermissionPrompt": True, "permissions": { "defaultMode": "bypassPermissions" } }'
+            '{ "skipDangerousModePermissionPrompt": true, "permissions": { "defaultMode": "bypassPermissions" } }'
         )
     if not (opencode_config_file := sandbox_home / ".config" / "opencode" / "opencode.json").exists():
         opencode_config_file.parent.mkdir(parents=True, exist_ok=True)
