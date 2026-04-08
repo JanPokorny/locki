@@ -57,7 +57,7 @@ async def shell_cmd(
     locki.LOCKI_HOME.mkdir(exist_ok=True)
     locki.LIMA_HOME.mkdir(exist_ok=True, parents=True)
     locki.WORKTREES_HOME.mkdir(parents=True, exist_ok=True)
-    async with locki._vm_lock():
+    async with locki._file_lock("vm", "Waiting for VM to start"):
         await run_command(
             [
                 locki.limactl(),
@@ -95,7 +95,7 @@ async def shell_cmd(
 
             repo_name = locki.git_root().name.replace("/", "-").replace(".", "-").lower()
             safe_branch = branch.replace("/", "-").replace(".", "-").lower()
-            wt_id = f"{repo_name}--{safe_branch}--{''.join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(8))}"
+            wt_id = f"{(f"{repo_name}--{safe_branch}"[:53].rstrip("-"))}--{"".join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(8))}"
             wt_path = locki.WORKTREES_HOME / wt_id
             wt_path.mkdir(parents=True, exist_ok=True)
 
@@ -165,34 +165,35 @@ async def shell_cmd(
         incus_image = config.get_incus_image()
 
         local_path = locki.git_root() / incus_image
-        if local_path.is_file():
-            local_file = local_path.resolve()
-            tmp_name = f"locki-img-{''.join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(8))}"
-            await run_command(
-                [locki.limactl(), "copy", str(local_file), f"locki:/tmp/{tmp_name}"],
-                "Copying image into VM",
-                env={"LIMA_HOME": str(locki.LIMA_HOME)},
-                cwd="/",
-            )
-            await locki.run_in_vm(
-                ["bash", "-c", f"incus image import /tmp/{tmp_name} --alias={tmp_name} && rm -f /tmp/{tmp_name}"],
-                "Importing container image",
-            )
-            image_ref = tmp_name
-        else:
-            image_ref = incus_image
+        async with locki._file_lock("image", "Waiting for another image import"):
+            if local_path.is_file():
+                local_file = local_path.resolve()
+                tmp_name = f"locki-img-{''.join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(8))}"
+                await run_command(
+                    [locki.limactl(), "copy", str(local_file), f"locki:/tmp/{tmp_name}"],
+                    "Copying image into VM",
+                    env={"LIMA_HOME": str(locki.LIMA_HOME)},
+                    cwd="/",
+                )
+                await locki.run_in_vm(
+                    ["bash", "-c", f"incus image import /tmp/{tmp_name} --alias={tmp_name} && rm -f /tmp/{tmp_name}"],
+                    "Importing container image",
+                )
+                image_ref = tmp_name
+            else:
+                image_ref = incus_image
 
-        await locki.run_in_vm(
-            ["incus", "init", image_ref, wt_id],
-            "Creating container",
-        )
-
-        if local_path.is_file():
             await locki.run_in_vm(
-                ["incus", "image", "delete", image_ref],
-                "Cleaning up imported image",
-                check=False,
+                ["incus", "init", image_ref, wt_id],
+                "Creating container",
             )
+
+            if local_path.is_file():
+                await locki.run_in_vm(
+                    ["incus", "image", "delete", image_ref],
+                    "Cleaning up imported image",
+                    check=False,
+                )
 
         await locki.run_in_vm(
             [

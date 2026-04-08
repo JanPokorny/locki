@@ -127,18 +127,18 @@ echo "Testing remote branch tracking..."
 
 # Create a branch on the remote that doesn't exist locally
 git clone "$REMOTE" "$TMPDIR_ROOT/pusher"
-git -C "$TMPDIR_ROOT/pusher" checkout -b remote-only
+git -C "$TMPDIR_ROOT/pusher" checkout -b dependabot/pip/apps/some-long-server-name/pip-security-4d376cd218
 git -C "$TMPDIR_ROOT/pusher" commit --allow-empty -m "remote commit"
-git -C "$TMPDIR_ROOT/pusher" push -u origin remote-only
+git -C "$TMPDIR_ROOT/pusher" push -u origin dependabot/pip/apps/some-long-server-name/pip-security-4d376cd218
 
 # Verify the branch doesn't exist locally yet
-assert_fail "remote-only branch not local yet" git -C "$REPO" rev-parse --verify refs/heads/remote-only
+assert_fail "remote branch not local yet" git -C "$REPO" rev-parse --verify refs/heads/dependabot/pip/apps/some-long-server-name/pip-security-4d376cd218
 
 # locki shell should fetch and create the branch from remote
-assert_ok "locki fetches remote branch" locki shell remote-only -c "echo ok"
+assert_ok "locki fetches remote branch" locki shell dependabot/pip/apps/some-long-server-name/pip-security-4d376cd218 -c "echo ok"
 
 # Check the branch was created from the remote (has the remote commit)
-REMOTE_ONLY_WT=$(git -C "$REPO" worktree list --porcelain | grep -B2 "branch refs/heads/remote-only" | head -1 | sed 's/worktree //')
+REMOTE_ONLY_WT=$(git -C "$REPO" worktree list --porcelain | grep -B2 "branch refs/heads/dependabot/pip/apps/some-long-server-name/pip-security-4d376cd218" | head -1 | sed 's/worktree //')
 assert_output "branch has remote commit" "remote commit" git -C "$REMOTE_ONLY_WT" log --oneline -1 --format=%s
 
 # ── warm start (new container, existing VM) ──────────────────────────────────

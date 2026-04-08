@@ -90,16 +90,16 @@ async def run_in_vm(
 
 
 @contextlib.asynccontextmanager
-async def _vm_lock():
-    """Acquire an exclusive file lock so only one process creates/starts the VM at a time."""
+async def _file_lock(name: str, wait_message: str):
+    """Acquire an exclusive file lock."""
     LOCKI_HOME.mkdir(exist_ok=True)
-    lock_path = LOCKI_HOME / "vm.lock"
+    lock_path = LOCKI_HOME / f"{name}.lock"
     fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR)
     try:
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
-            with Halo(text="Waiting for another locki process", spinner="dots", stream=sys.stderr):
+            with Halo(text=wait_message, spinner="dots", stream=sys.stderr):
                 await anyio.to_thread.run_sync(lambda: fcntl.flock(fd, fcntl.LOCK_EX))
         yield
     finally:
