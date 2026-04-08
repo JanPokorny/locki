@@ -34,29 +34,25 @@ async def shell_cmd(
     setup_commands: list[tuple[list[str], str]] = getattr(ctx, "setup_commands", [])
     locki.git_root()  # fail fast if not in a git repo
 
-    sandbox_home = locki.LOCKI_HOME / "home"
-    sandbox_home.mkdir(parents=True, exist_ok=True)
-    claude_json_file = sandbox_home / ".claude.json"
-    claude_json = json.loads(claude_json_file.read_text()) if claude_json_file.exists() else {}
-    claude_json.setdefault("projects", {}).setdefault("/", {})["hasTrustDialogAccepted"] = True
-    claude_json_file.write_text(json.dumps(claude_json, indent=2) + "\n")
-    opencode_config_file = sandbox_home / ".config" / "opencode" / "opencode.json"
-    opencode_config_file.parent.mkdir(parents=True, exist_ok=True)
-    opencode_config = json.loads(opencode_config_file.read_text()) if opencode_config_file.exists() else {}
-    opencode_config.setdefault("$schema", "https://opencode.ai/config.json")
-    opencode_config.setdefault("permission", "allow")
-    if "instructions" not in opencode_config:
-        opencode_config["instructions"] = ["/etc/opencode/AGENTS.md"]
-    elif (
-        isinstance(opencode_config["instructions"], list)
-        and "/etc/opencode/AGENTS.md" not in opencode_config["instructions"]
-    ):
-        opencode_config["instructions"].append("/etc/opencode/AGENTS.md")
-    opencode_config_file.write_text(json.dumps(opencode_config, indent=2) + "\n")
-
     locki.LOCKI_HOME.mkdir(exist_ok=True)
     locki.LIMA_HOME.mkdir(exist_ok=True, parents=True)
     locki.WORKTREES_HOME.mkdir(parents=True, exist_ok=True)
+
+    sandbox_home = locki.LOCKI_HOME / "home"
+    sandbox_home.mkdir(parents=True, exist_ok=True)
+    if not (claude_json_file := sandbox_home / ".claude.json").exists():
+        claude_json_file.write_text('{ "projects": { "/": { "hasTrustDialogAccepted": true } } }')
+    if not (claude_settings_file := sandbox_home / ".claude" / "settings.json").exists():
+        claude_settings_file.parent.mkdir(parents=True, exist_ok=True)
+        claude_settings_file.write_text(
+            '{ "skipDangerousModePermissionPrompt": True, "permissions": { "defaultMode": "bypassPermissions" } }'
+        )
+    if not (opencode_config_file := sandbox_home / ".config" / "opencode" / "opencode.json").exists():
+        opencode_config_file.parent.mkdir(parents=True, exist_ok=True)
+        opencode_config_file.write_text(
+            '{ "$schema": "https://opencode.ai/config.json", "permission": "allow", "instructions": "/etc/opencode/AGENTS.md" }'
+        )
+
     async with locki._file_lock("vm", "Waiting for VM to start"):
         await run_command(
             [
@@ -95,7 +91,7 @@ async def shell_cmd(
 
             repo_name = locki.git_root().name.replace("/", "-").replace(".", "-").lower()
             safe_branch = branch.replace("/", "-").replace(".", "-").lower()
-            wt_id = f"{(f"{repo_name}--{safe_branch}"[:53].rstrip("-"))}--{"".join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(8))}"
+            wt_id = f"{(f'{repo_name}--{safe_branch}'[:53].rstrip('-'))}--{''.join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(8))}"
             wt_path = locki.WORKTREES_HOME / wt_id
             wt_path.mkdir(parents=True, exist_ok=True)
 
@@ -168,7 +164,9 @@ async def shell_cmd(
         async with locki._file_lock("image", "Waiting for another image import"):
             if local_path.is_file():
                 local_file = local_path.resolve()
-                tmp_name = f"locki-img-{''.join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(8))}"
+                tmp_name = (
+                    f"locki-img-{''.join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(8))}"
+                )
                 await run_command(
                     [locki.limactl(), "copy", str(local_file), f"locki:/tmp/{tmp_name}"],
                     "Copying image into VM",
@@ -219,12 +217,6 @@ async def shell_cmd(
         agents_md = (importlib.resources.files("locki") / "data" / "AGENTS.md").read_text()
         container_files = {
             "/etc/claude-code/CLAUDE.md": agents_md,
-            "/etc/claude-code/managed-settings.json": json.dumps(
-                {
-                    "skipDangerousModePermissionPrompt": True,
-                    "permissions": {"defaultMode": "bypassPermissions"},
-                }
-            ),
             "/etc/gemini-cli/GEMINI.md": agents_md,
             "/etc/gemini-cli/settings.json": json.dumps(
                 {
@@ -299,7 +291,9 @@ async def shell_cmd(
     if not host_key.exists():
         subprocess.run(["ssh-keygen", "-t", "ed25519", "-f", str(host_key), "-N", ""], check=True, capture_output=True)
     if not client_key.exists():
-        subprocess.run(["ssh-keygen", "-t", "ed25519", "-f", str(client_key), "-N", ""], check=True, capture_output=True)
+        subprocess.run(
+            ["ssh-keygen", "-t", "ed25519", "-f", str(client_key), "-N", ""], check=True, capture_output=True
+        )
     ssh_config_dst = client_ssh_dir / "locki-ssh-config"
     ssh_config_template = (importlib.resources.files("locki") / "data" / "locki-ssh-config").read_text()
     ssh_config_dst.write_text(ssh_config_template + f"    User {getpass.getuser()}\n")
@@ -322,7 +316,7 @@ async def shell_cmd(
         try:
             os.kill(int(pid_file.read_text().strip()), 0)
             sshd_running = True
-        except (ProcessLookupError, ValueError, PermissionError):
+        except ProcessLookupError, ValueError, PermissionError:
             pass
     sshd_path = shutil.which("sshd")
     if sshd_path is None:
@@ -376,11 +370,16 @@ async def claude_cmd(
     """Run Claude in the sandbox."""
     ctx.setup_commands = [
         (["mise", "install", "nodejs@24"], "Installing Node.js"),
-        (["mise", "exec", "nodejs@24", "--", "mise", "install", "npm:@anthropic-ai/claude-code@latest"],
-         "Installing Claude Code CLI"),
+        (
+            ["mise", "exec", "nodejs@24", "--", "mise", "install", "npm:@anthropic-ai/claude-code@latest"],
+            "Installing Claude Code CLI",
+        ),
     ]
-    await shell_cmd(ctx=ctx, branch=branch,
-                    command='exec mise exec nodejs@24 npm:@anthropic-ai/claude-code@latest -- claude "$@"')
+    await shell_cmd(
+        ctx=ctx,
+        branch=branch,
+        command='exec mise exec nodejs@24 npm:@anthropic-ai/claude-code@latest -- claude --dangerously-skip-permissions "$@"',
+    )
 
 
 async def gemini_cmd(
@@ -390,11 +389,14 @@ async def gemini_cmd(
     """Run Gemini in the sandbox."""
     ctx.setup_commands = [
         (["mise", "install", "nodejs@24"], "Installing Node.js"),
-        (["mise", "exec", "nodejs@24", "--", "mise", "install", "npm:@google/gemini-cli@latest"],
-         "Installing Gemini CLI"),
+        (
+            ["mise", "exec", "nodejs@24", "--", "mise", "install", "npm:@google/gemini-cli@latest"],
+            "Installing Gemini CLI",
+        ),
     ]
-    await shell_cmd(ctx=ctx, branch=branch,
-                    command='exec mise exec nodejs@24 npm:@google/gemini-cli@latest -- gemini --yolo "$@"')
+    await shell_cmd(
+        ctx=ctx, branch=branch, command='exec mise exec nodejs@24 npm:@google/gemini-cli@latest -- gemini --yolo "$@"'
+    )
 
 
 async def codex_cmd(
@@ -406,8 +408,9 @@ async def codex_cmd(
         (["mise", "install", "nodejs@24"], "Installing Node.js"),
         (["mise", "exec", "nodejs@24", "--", "mise", "install", "npm:@openai/codex@latest"], "Installing Codex CLI"),
     ]
-    await shell_cmd(ctx=ctx, branch=branch,
-                    command='exec mise exec nodejs@24 npm:@openai/codex@latest -- codex --yolo "$@"')
+    await shell_cmd(
+        ctx=ctx, branch=branch, command='exec mise exec nodejs@24 npm:@openai/codex@latest -- codex --yolo "$@"'
+    )
 
 
 async def opencode_cmd(
