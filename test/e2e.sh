@@ -120,6 +120,41 @@ assert_fail  "git checkout is blocked"       locki shell a -c "git checkout main
 assert_fail  "git reset is blocked"          locki shell a -c "git reset --hard"
 assert_fail  "short flags are blocked"       locki shell a -c "git commit -m test"
 
+# ── git commit from sandbox ─────────────────────────────────────────────────
+
+echo
+echo "Testing git commit from sandbox..."
+
+WORKTREE_A=$(git worktree list --porcelain | grep -B2 "branch refs/heads/a" | head -1 | sed 's/worktree //')
+locki shell a -c "echo test-content > $WORKTREE_A/commit-test.txt && git add --all && git commit --message='simple commit'"
+assert_output "simple commit landed" "simple commit" git -C "$WORKTREE_A" log -1 --format=%s
+
+# Multi-line commit message (newlines triggered $'...' quoting bug)
+locki shell a -c "echo more > $WORKTREE_A/commit-test2.txt && git add --all && git commit --message='multi line
+
+second paragraph'"
+assert_output "multi-line commit subject" "multi line" git -C "$WORKTREE_A" log -1 --format=%s
+assert_output "multi-line commit body" "second paragraph" git -C "$WORKTREE_A" log -1 --format=%b
+
+# ── hook modifies COMMIT_EDITMSG ────────────────────────────────────────────
+
+echo
+echo "Testing commit-msg hook modifies message..."
+
+cat > "$HOOKS_DIR/commit-msg" << 'HOOK'
+#!/bin/bash
+# Append a trailer to the commit message
+echo "" >> "$1"
+echo "Signed-off-by: Test Bot <test@example.com>" >> "$1"
+HOOK
+chmod +x "$HOOKS_DIR/commit-msg"
+
+locki shell a -c "echo hook-msg-test > $WORKTREE_A/hook-msg-file.txt && git add --all && git commit --message='test hook message'"
+assert_output "commit-msg hook appended trailer" "Signed-off-by: Test Bot" git -C "$WORKTREE_A" log -1 --format=%b
+assert_output "original message preserved" "test hook message" git -C "$WORKTREE_A" log -1 --format=%s
+
+rm -f "$HOOKS_DIR/commit-msg"
+
 # ── remote branch tracking ──────────────────────────────────────────────────
 
 echo

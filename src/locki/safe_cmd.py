@@ -3,7 +3,7 @@ import pathlib
 import shlex
 import sys
 
-_required = bool          # --flag=<non-empty value>
+_required = bool               # --flag=<non-empty value>
 _flag = {None, ""}        # optional boolean flag (--flag or absent, no value)
 
 RULES = [
@@ -12,7 +12,7 @@ RULES = [
     ("git", "diff", str, {"staged": _flag}),
     ("git", "diff", str, str, {"staged": _flag}),
     ("git", "add", {"all": _flag}),
-    ("git", "commit", {"message": _required}),
+    ("git", "commit", {"message": _required, "signoff": _flag}),
     ("git", "push"),
     ("git", "fetch"),
     ("git", "log", {"oneline": _flag}),
@@ -29,7 +29,6 @@ RULES = [
     ("gh", "run", "list"),
     ("gh", "run", "view"),
     ("gh", "run", "view", str.isdigit),
-    ("gh", "issue", "create", {"title": _required, "body": ...}),
     ("gh", "issue", "view"),
     ("gh", "issue", "view", str.isdigit),
     ("gh", "issue", "list"),
