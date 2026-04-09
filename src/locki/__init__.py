@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 app = AsyncTyper(
     name="locki",
-    help="Lima VM wrapper that protects worktrees by offering isolated execution environments.",
+    help="AI sandboxing without the taste of sand, using a managed Lima VM with Incus containers.",
     no_args_is_help=True,
 )
 
