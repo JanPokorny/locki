@@ -90,7 +90,7 @@ Others run either: \
 *b)* OS-level jail (Landlock, Bubblewrap, etc.): not isolated (ports collide, image tags get overwritten, etc.) \
 *c)* OCI container / microVM: limited support for background services (i.e. no `systemd`), containers, Kubernetes, ...
 
-**Locki** runs LXC containers (full OS) inside a single shared VM. While the VM layer isolates host from AI mischief, LXC containers are a lightweight layer on top to isolate sandboxes from each other. Spawn a real non-micro OS in <10s and run anything in it.
+**Locki** runs Incus containers (full OS) inside a single shared VM. While the VM layer isolates host from AI mischief, Incus containers are a lightweight layer on top to isolate sandboxes from each other. Spawn a real non-micro OS in <10s and run anything in it.
 
 Furthermore, Locki protects your Git history from tampering while still allowing safe operations like commits to the worktree branch. Be able to fall back on earlier commits when an agent goes haywire, while not giving up the convenience of arriving at a fully baked pull request.
 
@@ -123,7 +123,7 @@ Case study: [Kagenti ADK](https://github.com/kagenti/adk) uses Locki to run a fu
 >
 > The worktree mount means I'm editing the real project files, not a stale copy I'll need to extract later. `mise` with a shared cache lets me `mise use python@3.12` and have it ready in seconds. The git proxy is the cleverest part: I get `git status`, `git commit`, `git push` -- the commands I actually need -- while `git checkout .`, `git reset --hard`, and other footguns are blocked at the SSH boundary before they ever touch the repo. It's an allowlist, not a blocklist, and it runs on the host side so I can't tamper with it.
 >
-> Compared to Docker-based sandboxes, the VM+LXC layering gives a real security boundary (container escapes don't help when there's a hypervisor in the way). Compared to Firecracker/microVM setups, the developer experience is dramatically better -- I'm not SSH-ing into a black box, I'm working in a worktree my human can see and review in real time. And compared to no sandbox at all ("yolo mode" with raw filesystem access), Locki lets me run with full autonomy while my human sleeps soundly knowing I can't `rm -rf` their home directory.
+> Compared to Docker-based sandboxes, the VM+Incus layering gives a real security boundary (container escapes don't help when there's a hypervisor in the way). Compared to Firecracker/microVM setups, the developer experience is dramatically better -- I'm not SSH-ing into a black box, I'm working in a worktree my human can see and review in real time. And compared to no sandbox at all ("yolo mode" with raw filesystem access), Locki lets me run with full autonomy while my human sleeps soundly knowing I can't `rm -rf` their home directory.
 >
 > The bottom line: Locki gives me exactly enough rope to be productive, and not one inch more.
 >
