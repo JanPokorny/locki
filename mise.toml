@@ -107,7 +107,7 @@ build_wheel() {
   find "$tmpdir" -type f -exec chmod +r {} \;
   mkdir -p "$tmpdir/locki/data/bin" "$tmpdir/locki/data/share/lima"
   cp "./vendor/lima-$lima_version/$wheel_tag/bin/limactl" "$tmpdir/locki/data/bin/"
-  cp "./vendor/lima-$lima_version/$wheel_tag/share/lima/lima-guestagent.Linux-$hostagent_arch.gz" "$tmpdir/locki/data/share/lima/"
+  cp -R "./vendor/lima-$lima_version/$wheel_tag/share/lima/." "$tmpdir/locki/data/share/lima/"
   perl -pi -e "s/Root-Is-Purelib: true/Root-Is-Purelib: false/" "$tmpdir/locki-$version.dist-info/WHEEL"
   perl -pi -e "s/Tag: .*/Tag: py3-none-$wheel_tag/" "$tmpdir/locki-$version.dist-info/WHEEL"
   uv run -m wheel pack "$tmpdir" --dest-dir ./dist >/dev/null
