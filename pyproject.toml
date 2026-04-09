@@ -1,7 +1,7 @@
 [project]
 name = "locki"
 version = "0.0.4"
-description = "Lock down agents in a VM, enabling mischief without consequences"
+description = "AI sandboxing without the taste of sand"
 readme = "README.md"
 requires-python = ">=3.14,<3.15"
 dependencies = [
