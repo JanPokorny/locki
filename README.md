@@ -23,15 +23,63 @@
     </h1>
 </div>
 
-<p align="center">AI sandboxing for real-world projects</p>
+<p align="center">AI sandboxing without the taste of sand</p>
+
+<div align=center>
+  
+  ![](https://badgen.net/badge/_/macOS%20%E2%9C%94/green?icon=apple&label)
+  ![](https://badgen.net/badge/_/Linux%20%E2%9C%94/green?icon=linux&label)
+  ![](https://badgen.net/badge/_/pipx%20install%20locki/3776AB?icon=python&label)
+  ![](https://badgen.net/badge/_/uv%20tool%20install%20locki/DE5FE9?icon=uv&label)
+  
+</div>
 
 &nbsp;
 
-<b>Locki</b> is a CLI tool for Linux and macOS that allows running multiple AI agents with all permissions bypassed, without any risk of mischief.
+<b>Locki</b> safely runs AI agents with all permissions bypassed.
+
+<table align=center>
+<tr>
+<th>❌ without Locki</th>
+<th>✅ with Locki</th>
+</tr>
+<tr>
+<td>
+
+```sh
+git worktree add -b my-feature ../my-feature
+cd ../my-feature
+claude "fix issue #123"
+# ...wait a few seconds
+# ...approve a command
+# ...wait a few seconds
+# ...approve another command
+# ...another agent rebuilt the container image
+#    and caused a name clash
+# ...something is already listening on the app port
+# ...approve another command
+# ...
+```
+
+</td>
+<td>
+
+```sh
+locki claude my-feature -- "fix issue #123"
+# ...go make a cup of tea
+# ...drink tea 🍵
+# ...look, the PR is ready
+```
+
+</td>
+</tr>
+</table>
 
 &nbsp;
 
-`$ locki claude my-new-feature` ← Claude Code in "skip all permissions" mode opens in a fresh sandbox
+**Locki** gives you:
+- **Maximum UX** (user experience): no permission prompts, isolated worktrees automatically managed.
+- **Maximum AX** (agent experience): run real-world software, including systemd, Docker, or Kubernetes.
 
 &nbsp;
 
@@ -42,9 +90,9 @@ Others run either: \
 *b)* OS-level jail (Landlock, Bubblewrap, etc.) which does not properly isolate (ports can collide, etc.) \
 *c)* OCI container / microVM, which has limitations in terms of background services (no `systemd`), container building, Kubernetes, ...
 
-**Locki** runs LXC containers (full OS) inside a single shared VM. While the VM layer isolates the host from AI mischief, LXC containers are a lightweight layer on top to isolate sandboxes from each other. Spawn a real non-micro OS in <10s and run anything in it.
+**Locki** runs LXC containers (full OS) inside a single shared VM. While the VM layer isolates host from AI mischief, LXC containers are a lightweight layer on top to isolate sandboxes from each other. Spawn a real non-micro OS in <10s and run anything in it.
 
-Each sandbox gets its own [git worktree](https://git-scm.com/docs/git-worktree) — a separate working copy of your repo on its own branch, stored in `~/.locki/worktrees` and mounted into the sandbox. Locki protects your Git history from tampering while still allowing safe operations like commits to the worktree branch. Be able to fall back on earlier commits when an agent goes haywire, while not giving up the convenience of arriving at a fully baked pull request.
+Furthermore, Locki protects your Git history from tampering while still allowing safe operations like commits to the worktree branch. Be able to fall back on earlier commits when an agent goes haywire, while not giving up the convenience of arriving at a fully baked pull request.
 
 Case study: [Kagenti ADK](https://github.com/kagenti/adk) uses Locki to run a full MicroShift node, allowing agents to verify their work using E2E tests on a real cluster. Something breaks? The agent can `kubectl` right in and debug, all contained within the Locki sandbox.
 
@@ -53,20 +101,19 @@ Case study: [Kagenti ADK](https://github.com/kagenti/adk) uses Locki to run a fu
 ## How to install and use Locki?
 
 1. Install using your preferred manager: `uv tool install locki` or `pipx install locki`. ([Install](https://docs.astral.sh/uv/getting-started/installation/) and use `uv` if unsure.)
-2. If you're on Linux, also install [OpenSSH](https://repology.org/project/openssh/versions) (usually preinstalled) and [QEMU](https://www.qemu.org/download/#linux).
-3. `cd` to your Git repository and run: `locki claude my-first-sandbox`
+2. If you're on Linux, also install [QEMU](https://www.qemu.org/download/#linux) and [OpenSSH](https://repology.org/project/openssh/versions) (usually preinstalled).
+2. `cd` to your Git repository and run: `locki claude my-first-sandbox`
 
     <small>
 
-    The argument is a branch name — it also identifies the sandbox (1:1 mapping). Replace `claude` with `gemini`, `codex`, `opencode`, or `shell` for raw shell access.
+    (Replace `claude` with `gemini`, `codex`, `opencode`, or `shell` for raw shell access.)
 
     </small>
-4. First start takes longer, wait a few minutes for the VM to boot.
-5. A terminal opens with the chosen agent (or shell) inside the sandbox. Follow prompts to log in to the AI CLI. Login will be persisted across sandboxes.
-6. Build! Your agent is already instructed on how to behave in the sandbox. 
-7. Once happy, commit and push your changes. Ask the agent, or do this manually for more control.
-8. Create a pull request — the agent can do this for you using the GitHub CLI.
-9. After merging, remove the sandbox using: `locki remove my-first-sandbox` -- or just remove the worktree (e.g. from your IDE) and Locki will clean up automatically.
+3. First start takes longer, wait a few minutes for the VM to boot.
+4. Follow prompts to log in to the AI CLI. Login will be persisted across sandboxes.
+5. Build! Your agent is already instructed on how to behave in the sandbox. 
+6. Once happy, commit and push your changes. Ask the agent, or do this manually for more control.
+7. After merging the branch, remove the sandbox using: `locki remove my-first-sandbox` -- or manually, Locki will clean up.
 
 &nbsp;
 
@@ -96,7 +143,7 @@ Case study: [Kagenti ADK](https://github.com/kagenti/adk) uses Locki to run a fu
 
 - Something is broken? Try `locki vm delete` -- it will preserve your worktrees and settings in `~/.locki`, but the VM will be recreated from scratch on next run.
 
-- Want a different OS in the sandbox? Create a `locki.toml` file in your repo root referencing either [an available OS image](https://images.linuxcontainers.org/) like `Fedora/43`, or a local Incus rootfs tarball. Example:
+- Want a different OS in the sandbox? Create a `locki.toml` file referencing either [an available OS image](https://images.linuxcontainers.org/) like `Fedora/43`, or a local Incus rootfs tarball. Example:
 
 ```toml
 # locki.toml
@@ -114,4 +161,4 @@ Locki uses a single Lima VM which can only access the `~/.locki/worktrees` and `
 
 Locki is designed to provide protection for the host operating system and files from being messed up by a malfunctioning AI agent. There is no exfiltration protection, so be aware that API keys exposed to the agents need to be treated as potentially exposed and disposable, with limited scope. (This is no different from running the agent locally, just specifying that Locki does not help here. Use a dedicated solution like [OneCLI](https://github.com/onecli/onecli) if interested.)
 
-Despite best effort, Locki provides no security guarantees and is provided "as is". That's the legal speak for "this is a random project by a random dude provided for free", you can't expect corporate-paid-support level security assurances. Random dude believes that while not perfect, using Locki is better than many existing sandboxing solutions and certainly better than `--yolo`ing on your bare machine and hoping for the best.
+Despite best effort, Locki provides no security guarantees and is provided "as is". That's the legal speak for "this is a random project by a random dude provided for free", you can't expect corporate-paid-support level security assurances. Random dude believes that while not perfect, using Locki is better than many existing sandboxing solutions and certainly better than going full `--yolo` on your bare machine and hoping for the best.
