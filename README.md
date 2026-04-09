@@ -86,9 +86,9 @@ locki claude my-feature -- "fix issue #123"
 ## How is Locki different than other sandboxes?
 
 Others run either: \
-*a)* full VM per sandbox, which is resource-heavy and slow \
-*b)* OS-level jail (Landlock, Bubblewrap, etc.) which does not properly isolate (ports can collide, etc.) \
-*c)* OCI container / microVM, which has limitations in terms of background services (no `systemd`), container building, Kubernetes, ...
+*a)* full VM per sandbox: resource-heavy and slow to start\
+*b)* OS-level jail (Landlock, Bubblewrap, etc.): does not properly isolate (ports collide, image tags get overwritten, etc.) \
+*c)* OCI container / microVM: limited support for background services (i.e. no `systemd`), building containers, Kubernetes, ...
 
 **Locki** runs LXC containers (full OS) inside a single shared VM. While the VM layer isolates host from AI mischief, LXC containers are a lightweight layer on top to isolate sandboxes from each other. Spawn a real non-micro OS in <10s and run anything in it.
 
@@ -101,19 +101,19 @@ Case study: [Kagenti ADK](https://github.com/kagenti/adk) uses Locki to run a fu
 ## How to install and use Locki?
 
 1. Install using your preferred manager: `uv tool install locki` or `pipx install locki`. ([Install](https://docs.astral.sh/uv/getting-started/installation/) and use `uv` if unsure.)
-2. If you're on Linux, also install [QEMU](https://www.qemu.org/download/#linux) and [OpenSSH](https://repology.org/project/openssh/versions) (usually preinstalled).
-2. `cd` to your Git repository and run: `locki claude my-first-sandbox`
+1. If you're on Linux, also install [OpenSSH](https://repology.org/project/openssh/versions) (usually preinstalled) and [QEMU](https://www.qemu.org/download/#linux).
+1. `cd` to your Git repository and run: `locki claude my-feature-branch`
 
     <small>
 
-    (Replace `claude` with `gemini`, `codex`, `opencode`, or `shell` for raw shell access.)
+    (Arg is branch name, existing or new. Replace `claude` with `gemini`, `codex`, `opencode`, or `shell`.)
 
     </small>
-3. First start takes longer, wait a few minutes for the VM to boot.
-4. Follow prompts to log in to the AI CLI. Login will be persisted across sandboxes.
-5. Build! Your agent is already instructed on how to behave in the sandbox. 
-6. Once happy, commit and push your changes. Ask the agent, or do this manually for more control.
-7. After merging the branch, remove the sandbox using: `locki remove my-first-sandbox` -- or manually, Locki will clean up.
+1. First start takes longer, wait a few minutes for the VM to boot.
+1. Follow prompts to log in to the AI CLI. Login will be persisted across sandboxes.
+1. Build! Your agent is already instructed on how to behave in the sandbox. 
+1. Once happy, commit and push your changes. Ask the agent, or do this manually for more control.
+1. After merging the branch, clean up: `locki rm my-feature-branch` -- or just delete the worktree from your IDE.
 
 &nbsp;
 
@@ -127,7 +127,7 @@ Case study: [Kagenti ADK](https://github.com/kagenti/adk) uses Locki to run a fu
 >
 > The bottom line: Locki gives me exactly enough rope to be productive, and not one inch more.
 >
-> *-- Claude (Opus 4.6), after exploring its own sandbox*
+> *-- Claude Code (Opus 4.6), after exploring its own sandbox*
 
 &nbsp;
 
