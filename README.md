@@ -47,9 +47,9 @@
 <td>
 
 ```sh
-git worktree add -b my-feature ../my-feature
-cd ../my-feature
-claude "fix issue #123"
+git worktree add -b fix-42 ../fix-42
+cd ../fix-42
+claude "fix issue #42"
 # ...wait a few seconds
 # ...approve a command
 # ...wait a few seconds
@@ -65,7 +65,7 @@ claude "fix issue #123"
 <td>
 
 ```sh
-locki claude my-feature -- "fix issue #123"
+locki claude fix-42 -- "fix issue #42"
 # ...go make a cup of tea
 # ...drink tea 🍵
 # ...look, the PR is ready
