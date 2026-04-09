@@ -36,7 +36,7 @@
 
 &nbsp;
 
-<b>Locki</b> safely runs AI agents with all permissions bypassed.
+<b>Locki</b> is a CLI that safely runs AI agents with all permissions bypassed in isolated worktrees.
 
 <table align=center>
 <tr>
@@ -54,7 +54,7 @@ claude "fix issue #42"
 # ...approve a command
 # ...wait a few seconds
 # ...approve another command
-# ...another agent rebuilt the image
+# ...different agent rebuilt the image
 #    and caused a name clash‽
 # ...something is hogging the port‽
 # ...approve another command
