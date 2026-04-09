@@ -133,7 +133,7 @@ Case study: [Kagenti ADK](https://github.com/kagenti/adk) uses Locki to run a fu
 
 ## Pro-tips for power users
 
-- Editors like VSCode show worktrees in the sidebar, useful as a quick UI for reviewing and modifying changes.
+- Editors like VSCode show worktrees in the sidebar, useful as a quick UI for reviewing and modifying changes. *(⚠️ VSCode 1.115.0 is bugged and does not show worktrees. [Downgrading to 1.114.0 is simple.](https://code.visualstudio.com/updates/v1_114))*
 
 - Locki sandboxes provide [Mise](https://mise.jdx.dev) for tool version management -- replacing `nvm`, `rbenv`, `brew` etc. with a single tool. To make your agents' (and humans') lives easier, optionally <small>(ask your agent to)</small> create `mise.toml` with tool versions and project tasks.
 
