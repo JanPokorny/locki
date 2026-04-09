@@ -87,8 +87,8 @@ locki claude fix-42 -- "fix issue #42"
 
 Others run either: \
 *a)* full VM per sandbox: resource-heavy and slow to start\
-*b)* OS-level jail (Landlock, Bubblewrap, etc.): does not properly isolate (ports collide, image tags get overwritten, etc.) \
-*c)* OCI container / microVM: limited support for background services (i.e. no `systemd`), building containers, Kubernetes, ...
+*b)* OS-level jail (Landlock, Bubblewrap, etc.): not isolated (ports collide, image tags get overwritten, etc.) \
+*c)* OCI container / microVM: limited support for background services (i.e. no `systemd`), containers, Kubernetes, ...
 
 **Locki** runs LXC containers (full OS) inside a single shared VM. While the VM layer isolates host from AI mischief, LXC containers are a lightweight layer on top to isolate sandboxes from each other. Spawn a real non-micro OS in <10s and run anything in it.
 
@@ -100,7 +100,7 @@ Case study: [Kagenti ADK](https://github.com/kagenti/adk) uses Locki to run a fu
 
 ## How to install and use Locki?
 
-1. Install using your preferred manager: `uv tool install locki` or `pipx install locki`. ([Install](https://docs.astral.sh/uv/getting-started/installation/) and use `uv` if unsure.)
+1. Install using your preferred manager: `uv tool install locki` or `pipx install locki`. ([Use uv](https://docs.astral.sh/uv/getting-started/installation/) if unsure.)
 1. If you're on Linux, also install [OpenSSH](https://repology.org/project/openssh/versions) (usually preinstalled) and [QEMU](https://www.qemu.org/download/#linux).
 1. `cd` to your Git repository and run: `locki claude my-feature-branch`
 
