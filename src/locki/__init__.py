@@ -157,7 +157,7 @@ async def find_worktree_for_branch(branch: str) -> pathlib.Path | None:
             current_path = pathlib.Path(line.split(" ", 1)[1])
         elif (
             line.startswith("branch refs/heads/")
-            and line.split("/")[-1] == branch
+            and line.removeprefix("branch refs/heads/") == branch
             and current_path
             and current_path.is_relative_to(WORKTREES_HOME)
         ):

@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import pathlib
+import re
 import secrets
 import shlex
 import shutil
@@ -89,8 +90,8 @@ async def shell_cmd(
                 "Pruning stale git worktrees",
             )
 
-            repo_name = locki.git_root().name.replace("/", "-").replace(".", "-").lower()
-            safe_branch = branch.replace("/", "-").replace(".", "-").lower()
+            repo_name = re.sub(r"[^a-z0-9-]", "-", locki.git_root().name.lower())
+            safe_branch = re.sub(r"[^a-z0-9-]", "-", branch.lower())
             wt_id = f"{(f'{repo_name}--{safe_branch}'[:53].rstrip('-'))}--{''.join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(8))}"
             wt_path = locki.WORKTREES_HOME / wt_id
             wt_path.mkdir(parents=True, exist_ok=True)

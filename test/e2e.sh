@@ -57,7 +57,7 @@ uv venv "$VENV" --python 3.14
 export PATH="$VENV/bin:$PATH"
 uv pip install --python "$VENV/bin/python" "$PROJECT_ROOT"
 
-REMOTE="$TMPDIR_ROOT/remote.git"
+REMOTE="$TMPDIR_ROOT/my_repo.v2-test"
 
 echo "Creating test repo..."
 git init --bare "$REMOTE"
@@ -72,19 +72,19 @@ cd "$REPO"
 echo
 echo "Testing cold start + parallel VM creation..."
 
-cold_start=$(timed locki shell a -c "echo 1") || true
+cold_start=$(timed locki shell 'feat/auth_v2.0' -c "echo 1") || true
 echo "  cold start: ${cold_start}s"
 
 # branch b in parallel with a (VM already exists, but tests lock waiting)
-assert_output "locki shell b runs" "2" locki shell b -c "echo 2"
+assert_output "locki shell b runs" "2" locki shell 'fix-login_bug.3' -c "echo 2"
 
 # ── cache persistence across invocations ─────────────────────────────────────
 
 echo
 echo "Testing cache persistence..."
 
-assert_ok "write to cache" locki shell a -c "mkdir -p /var/cache/locki && echo 42 > /var/cache/locki/test"
-assert_ok "cached file persists" locki shell a -c "test -f /var/cache/locki/test"
+assert_ok "write to cache" locki shell 'feat/auth_v2.0' -c "mkdir -p /var/cache/locki && echo 42 > /var/cache/locki/test"
+assert_ok "cached file persists" locki shell 'feat/auth_v2.0' -c "test -f /var/cache/locki/test"
 
 # ── hook execution in guest ──────────────────────────────────────────────────
 
@@ -93,7 +93,7 @@ echo "Testing hook execution in guest..."
 
 HOOKS_DIR="$REPO/.git/hooks"
 mkdir -p "$HOOKS_DIR"
-WORKTREE=$(git worktree list --porcelain | grep -B2 "branch refs/heads/a" | head -1 | sed 's/worktree //')
+WORKTREE=$(git worktree list --porcelain | grep -B2 "branch refs/heads/feat/auth_v2.0" | head -1 | sed 's/worktree //')
 
 cat > "$HOOKS_DIR/pre-commit" << HOOK
 #!/bin/bash
@@ -112,25 +112,25 @@ assert_output "hook copied correct content" "42" cat "$WORKTREE/hook-proof"
 echo
 echo "Testing proxied git commands..."
 
-assert_ok    "git status works"              locki shell a -c "git status"
-assert_ok    "git log works"                 locki shell a -c "git log --oneline"
-assert_ok    "git diff works"                locki shell a -c "git diff"
-assert_ok    "git show works"                locki shell a -c "git show"
-assert_fail  "git checkout is blocked"       locki shell a -c "git checkout main"
-assert_fail  "git reset is blocked"          locki shell a -c "git reset --hard"
-assert_fail  "short flags are blocked"       locki shell a -c "git commit -m test"
+assert_ok    "git status works"              locki shell 'feat/auth_v2.0' -c "git status"
+assert_ok    "git log works"                 locki shell 'feat/auth_v2.0' -c "git log --oneline"
+assert_ok    "git diff works"                locki shell 'feat/auth_v2.0' -c "git diff"
+assert_ok    "git show works"                locki shell 'feat/auth_v2.0' -c "git show"
+assert_fail  "git checkout is blocked"       locki shell 'feat/auth_v2.0' -c "git checkout main"
+assert_fail  "git reset is blocked"          locki shell 'feat/auth_v2.0' -c "git reset --hard"
+assert_fail  "short flags are blocked"       locki shell 'feat/auth_v2.0' -c "git commit -m test"
 
 # ── git commit from sandbox ─────────────────────────────────────────────────
 
 echo
 echo "Testing git commit from sandbox..."
 
-WORKTREE_A=$(git worktree list --porcelain | grep -B2 "branch refs/heads/a" | head -1 | sed 's/worktree //')
-locki shell a -c "echo test-content > $WORKTREE_A/commit-test.txt && git add --all && git commit --message='simple commit'"
+WORKTREE_A=$(git worktree list --porcelain | grep -B2 "branch refs/heads/feat/auth_v2.0" | head -1 | sed 's/worktree //')
+locki shell 'feat/auth_v2.0' -c "echo test-content > $WORKTREE_A/commit-test.txt && git add --all && git commit --message='simple commit'"
 assert_output "simple commit landed" "simple commit" git -C "$WORKTREE_A" log -1 --format=%s
 
 # Multi-line commit message (newlines triggered $'...' quoting bug)
-locki shell a -c "echo more > $WORKTREE_A/commit-test2.txt && git add --all && git commit --message='multi line
+locki shell 'feat/auth_v2.0' -c "echo more > $WORKTREE_A/commit-test2.txt && git add --all && git commit --message='multi line
 
 second paragraph'"
 assert_output "multi-line commit subject" "multi line" git -C "$WORKTREE_A" log -1 --format=%s
@@ -149,7 +149,7 @@ echo "Signed-off-by: Test Bot <test@example.com>" >> "$1"
 HOOK
 chmod +x "$HOOKS_DIR/commit-msg"
 
-locki shell a -c "echo hook-msg-test > $WORKTREE_A/hook-msg-file.txt && git add --all && git commit --message='test hook message'"
+locki shell 'feat/auth_v2.0' -c "echo hook-msg-test > $WORKTREE_A/hook-msg-file.txt && git add --all && git commit --message='test hook message'"
 assert_output "commit-msg hook appended trailer" "Signed-off-by: Test Bot" git -C "$WORKTREE_A" log -1 --format=%b
 assert_output "original message preserved" "test hook message" git -C "$WORKTREE_A" log -1 --format=%s
 
@@ -162,15 +162,15 @@ echo "Testing remote branch tracking..."
 
 # Create a branch on the remote that doesn't exist locally
 git clone "$REMOTE" "$TMPDIR_ROOT/pusher"
-git -C "$TMPDIR_ROOT/pusher" checkout -b dependabot/pip/apps/some-long-server-name/pip-security-4d376cd218
+git -C "$TMPDIR_ROOT/pusher" checkout -b 'dependabot/pip/apps/some-long-server-name/pip-security-4d376cd218'
 git -C "$TMPDIR_ROOT/pusher" commit --allow-empty -m "remote commit"
-git -C "$TMPDIR_ROOT/pusher" push -u origin dependabot/pip/apps/some-long-server-name/pip-security-4d376cd218
+git -C "$TMPDIR_ROOT/pusher" push -u origin 'dependabot/pip/apps/some-long-server-name/pip-security-4d376cd218'
 
 # Verify the branch doesn't exist locally yet
-assert_fail "remote branch not local yet" git -C "$REPO" rev-parse --verify refs/heads/dependabot/pip/apps/some-long-server-name/pip-security-4d376cd218
+assert_fail "remote branch not local yet" git -C "$REPO" rev-parse --verify 'refs/heads/dependabot/pip/apps/some-long-server-name/pip-security-4d376cd218'
 
 # locki shell should fetch and create the branch from remote
-assert_ok "locki fetches remote branch" locki shell dependabot/pip/apps/some-long-server-name/pip-security-4d376cd218 -c "echo ok"
+assert_ok "locki fetches remote branch" locki shell 'dependabot/pip/apps/some-long-server-name/pip-security-4d376cd218' -c "echo ok"
 
 # Check the branch was created from the remote (has the remote commit)
 REMOTE_ONLY_WT=$(git -C "$REPO" worktree list --porcelain | grep -B2 "branch refs/heads/dependabot/pip/apps/some-long-server-name/pip-security-4d376cd218" | head -1 | sed 's/worktree //')
@@ -181,7 +181,7 @@ assert_output "branch has remote commit" "remote commit" git -C "$REMOTE_ONLY_WT
 echo
 echo "Testing warm start..."
 
-warm_start=$(timed locki shell c -c "echo 3") || true
+warm_start=$(timed locki shell 'release_v1.0-rc#1' -c "echo 3") || true
 echo "  warm start: ${warm_start}s"
 
 # ── hot start (existing container) ───────────────────────────────────────────
@@ -189,7 +189,7 @@ echo "  warm start: ${warm_start}s"
 echo
 echo "Testing hot start..."
 
-hot_start=$(timed locki shell c -c "echo 4") || true
+hot_start=$(timed locki shell 'release_v1.0-rc#1' -c "echo 4") || true
 echo "  hot start: ${hot_start}s"
 
 # ── container isolation ──────────────────────────────────────────────────────
@@ -197,8 +197,8 @@ echo "  hot start: ${hot_start}s"
 echo
 echo "Testing container isolation..."
 
-assert_ok "write secret in branch a" locki shell a -c "echo secret > /tmp/a-only"
-assert_fail "branch b can't see branch a's /tmp" locki shell b -c "test -f /tmp/a-only"
+assert_ok "write secret in branch a" locki shell 'feat/auth_v2.0' -c "echo secret > /tmp/a-only"
+assert_fail "branch b can't see branch a's /tmp" locki shell 'fix-login_bug.3' -c "test -f /tmp/a-only"
 
 # ── custom image via locki.toml ──────────────────────────────────────────────
 
@@ -211,7 +211,7 @@ aarch64 = "images:ubuntu/24.04"
 x86_64 = "images:ubuntu/24.04"
 TOML
 
-assert_output "custom image container runs ubuntu" "Ubuntu" locki shell d -c "cat /etc/os-release"
+assert_output "custom image container runs ubuntu" "Ubuntu" locki shell '@user+hotfix%2!weird,name' -c "cat /etc/os-release"
 rm -f "$REPO/locki.toml"
 
 # ── worktree cleanup ─────────────────────────────────────────────────────────
@@ -219,7 +219,7 @@ rm -f "$REPO/locki.toml"
 echo
 echo "Testing worktree removal..."
 
-assert_ok "locki remove works" locki remove --force a
+assert_ok "locki remove works" locki remove --force 'feat/auth_v2.0'
 assert_fail "removed worktree dir is gone" test -d "$WORKTREE"
 
 # ── summary ──────────────────────────────────────────────────────────────────
