@@ -54,9 +54,9 @@ claude "fix issue #123"
 # ...approve a command
 # ...wait a few seconds
 # ...approve another command
-# ...another agent rebuilt the container image
-#    and caused a name clash
-# ...something is already listening on the app port
+# ...another agent rebuilt the image
+#    and caused a name clash‽
+# ...something is hogging the port‽
 # ...approve another command
 # ...
 ```
