@@ -62,18 +62,19 @@ provision:
             environment.JULIA_DEPOT_PATH: /var/cache/locki/julia
             environment.LEIN_HOME: /var/cache/locki/lein
             environment.MAVEN_OPTS: -Dmaven.repo.local=/var/cache/locki/maven
-            environment.MISE_CACHE_DIR: /var/cache/locki/mise/cache
-            environment.MISE_DATA_DIR: /var/cache/locki/mise/data
+            environment.MISE_CACHE_DIR: /var/cache/locki/mise
+            environment.MISE_DATA_DIR: /usr/share/mise
             environment.MISE_INSTALL_PATH: /usr/local/bin/mise
             environment.MISE_TRUSTED_CONFIG_PATHS: /
             environment.MIX_HOME: /var/cache/locki/mix
             environment.NIMBLE_DIR: /var/cache/locki/nimble
-            environment.NPM_CONFIG_CACHE: /var/cache/locki/npm
-            environment.NPM_CONFIG_STORE_DIR: /var/cache/locki/npm-store
+            environment.npm_config_cache: /var/cache/locki/npm
+            environment.npm_config_global_bin_dir: /usr/local/bin
+            environment.npm_config_store_dir: /var/cache/locki/pnpm
             environment.NUGET_PACKAGES: /var/cache/locki/nuget
-            environment.PATH: /opt/locki/bin:/root/.local/bin:/var/cache/locki/mise/data/shims:/var/cache/locki/pnpm:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+            environment.PATH: /opt/locki/bin:/root/.local/bin:/usr/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
             environment.PIP_CACHE_DIR: /var/cache/locki/pip
-            environment.PNPM_HOME: /var/cache/locki/pnpm
+            environment.PNPM_HOME: /usr/share/pnpm
             environment.PUB_CACHE: /var/cache/locki/pub
             environment.R_LIBS_USER: /var/cache/locki/r
             environment.REBAR_CACHE_DIR: /var/cache/locki/rebar3
@@ -81,7 +82,9 @@ provision:
             environment.TF_PLUGIN_CACHE_DIR: /var/cache/locki/terraform
             environment.UV_CACHE_DIR: /var/cache/locki/uv
             environment.VCPKG_DEFAULT_BINARY_CACHE: /var/cache/locki/vcpkg
-            environment.XDG_DATA_HOME: /var/cache/locki/xdg
+            environment.XDG_DATA_HOME: /usr/share
+            environment.XDG_CACHE_HOME: /var/cache/locki
+            environment.XDG_BIN_HOME: /usr/local/bin
             environment.YARN_CACHE_FOLDER: /var/cache/locki/yarn
             environment.ZIG_GLOBAL_CACHE_DIR: /var/cache/locki/zig
             security.nesting: "true"
