@@ -101,6 +101,7 @@ def run_in_vm(
     env: dict[str, str] | None = None,
     input: bytes | None = None,
     check: bool = True,
+    quiet: bool = False,
 ) -> subprocess.CompletedProcess[bytes]:
     return run_command(
         [limactl(), "shell", "--start", "--preserve-env", "--tty=false", "locki", "--", "sudo", "-E", *command],
@@ -109,6 +110,7 @@ def run_in_vm(
         cwd="/",
         input=input,
         check=check,
+        quiet=quiet,
     )
 
 
@@ -193,7 +195,7 @@ from locki.port_forward import port_forward_cmd  # noqa: E402
 from locki.safe_cmd import safe_cmd  # noqa: E402
 from locki.shell import claude_cmd, codex_cmd, gemini_cmd, opencode_cmd, shell_cmd  # noqa: E402
 from locki.vm import vm_app  # noqa: E402
-from locki.worktree import list_cmd, remove_cmd  # noqa: E402
+from locki.worktree import remove_cmd, status_cmd, stop_cmd  # noqa: E402
 
 app.add_command(shell_cmd, "shell | sh | bash")
 app.add_command(claude_cmd, "claude")
@@ -202,6 +204,7 @@ app.add_command(codex_cmd, "codex")
 app.add_command(opencode_cmd, "opencode")
 app.add_command(port_forward_cmd, "port-forward | pf")
 app.add_command(remove_cmd, "remove | rm | delete")
-app.add_command(list_cmd, "list | ls")
+app.add_command(stop_cmd, "stop")
+app.add_command(status_cmd, "status | st")
 app.add_command(safe_cmd, "safe-cmd")
 app.add_command(vm_app, "vm")
