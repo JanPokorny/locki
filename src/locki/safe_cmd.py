@@ -1,6 +1,7 @@
 import os
 import pathlib
 import shlex
+import subprocess
 import sys
 
 import click
@@ -14,6 +15,7 @@ RULES = [
     ("git", "diff", str, {"staged": _flag}),
     ("git", "diff", str, str, {"staged": _flag}),
     ("git", "add", {"all": _flag}),
+    ("git", "add", str, ...),
     ("git", "commit", {"message": _required, "signoff": _flag}),
     ("git", "push"),
     ("git", "fetch"),
@@ -22,6 +24,17 @@ RULES = [
     ("git", "show"),
     ("git", "show", str),
     ("git", "restore", str, {"staged": _flag, "source": ...}),
+    ("git", "switch", str),
+    ("git", "switch", {"create": _required}),
+    ("git", "stash", "push", {"message": ...}),
+    ("git", "stash", "push"),
+    ("git", "stash", "list"),
+    ("git", "stash", "pop"),
+    ("git", "stash", "pop", str),
+    ("git", "stash", "apply"),
+    ("git", "stash", "apply", str),
+    ("git", "stash", "drop"),
+    ("git", "stash", "drop", str),
     ("gh", "pr", "create", {"title": _required, "body": ..., "base": ...}),
     ("gh", "pr", "view"),
     ("gh", "pr", "view", str.isdigit),
@@ -42,18 +55,31 @@ def matches(rule: tuple, positionals: list[str], flags: dict[str, str]) -> bool:
 
     A rule is a tuple of positional specs, optionally ending with a dict of
     flag specs.  Positional specs: str (exact), set (membership), callable
-    (predicate).  --help is always permitted.
+    (predicate).  Ellipsis (...) after a positional spec means zero or more
+    additional positionals are allowed.  --help is always permitted.
     """
     if rule and isinstance(rule[-1], dict):
         spec_args, spec_flags = rule[:-1], {"help": _flag, **rule[-1]}
     else:
         spec_args, spec_flags = rule, {"help": _flag}
-    if len(positionals) != len(spec_args):
-        return False
-    for val, spec in zip(positionals, spec_args):
-        if isinstance(spec, str) and val != spec:   return False
-        if isinstance(spec, set) and val not in spec: return False
-        if callable(spec) and not spec(val):          return False
+
+    has_varargs = ... in spec_args
+    if has_varargs:
+        fixed_specs = spec_args[:spec_args.index(...)]
+        if len(positionals) < len(fixed_specs):
+            return False
+        for val, spec in zip(positionals[:len(fixed_specs)], fixed_specs):
+            if isinstance(spec, str) and val != spec:   return False
+            if isinstance(spec, set) and val not in spec: return False
+            if callable(spec) and not spec(val):          return False
+    else:
+        if len(positionals) != len(spec_args):
+            return False
+        for val, spec in zip(positionals, spec_args):
+            if isinstance(spec, str) and val != spec:   return False
+            if isinstance(spec, set) and val not in spec: return False
+            if callable(spec) and not spec(val):          return False
+
     if any(key not in spec_flags for key in flags):
         return False
     for key, spec in spec_flags.items():
@@ -81,6 +107,81 @@ def parse_args(args: list[str]) -> tuple[list[str], dict[str, str]]:
         else:
             positionals.append(arg)
     return positionals, flags
+
+
+def _get_branch(wt_id: str) -> str | None:
+    """Read the initial branch name from worktree metadata."""
+    import locki
+    branch_file = locki.WORKTREES_META / wt_id / "branch"
+    if branch_file.exists():
+        return branch_file.read_text().strip()
+    return None
+
+
+def _validate_switch(wt_id: str, positionals: list[str], flags: dict[str, str]):
+    """Validate that the target branch is allowed for git switch."""
+    initial = _get_branch(wt_id)
+    if not initial:
+        print("No initial branch recorded for this worktree. git switch is not available.", file=sys.stderr)
+        raise SystemExit(1)
+
+    target = flags.get("create")
+    if target:
+        pass
+    elif len(positionals) >= 3:
+        target = positionals[2]
+    else:
+        print("No branch specified.", file=sys.stderr)
+        raise SystemExit(1)
+
+    if target != initial and not target.startswith(initial + "/"):
+        print(f"Branch '{target}' is not allowed. Must be '{initial}' or '{initial}/<suffix>'.", file=sys.stderr)
+        raise SystemExit(1)
+
+
+def _handle_stash_push(wt_id: str, flags: dict[str, str]):
+    """Auto-prefix stash message with [branch] for branch-scoped stashing."""
+    branch = _get_branch(wt_id) or "unknown"
+    prefix = f"[{branch}]"
+    msg = flags.get("message", "")
+    full_msg = f"{prefix} {msg}" if msg else prefix
+    os.execvp("git", ["git", "stash", "push", f"--message={full_msg}"])
+
+
+def _handle_stash_list(wt_id: str):
+    """Show only stashes belonging to the current branch."""
+    branch = _get_branch(wt_id) or "unknown"
+    prefix = f"[{branch}]"
+    result = subprocess.run(["git", "stash", "list"], capture_output=True, text=True)
+    for line in result.stdout.splitlines():
+        if prefix in line:
+            print(line)
+    raise SystemExit(0 if result.returncode == 0 else result.returncode)
+
+
+def _handle_stash_pop_apply_drop(wt_id: str, positionals: list[str]):
+    """For pop/apply/drop: scope operations to the current branch's stashes."""
+    action = positionals[2]  # "pop", "apply", or "drop"
+    ref = positionals[3] if len(positionals) >= 4 else None
+    branch = _get_branch(wt_id) or "unknown"
+    prefix = f"[{branch}]"
+
+    result = subprocess.run(["git", "stash", "list"], capture_output=True, text=True)
+    stash_lines = result.stdout.splitlines()
+
+    if ref:
+        for line in stash_lines:
+            if line.startswith(ref + ":") and prefix in line:
+                os.execvp("git", ["git", "stash", action, ref])
+        print(f"Stash {ref} does not belong to branch '{branch}'.", file=sys.stderr)
+        raise SystemExit(1)
+    else:
+        for line in stash_lines:
+            if prefix in line:
+                found_ref = line.split(":", 1)[0]
+                os.execvp("git", ["git", "stash", action, found_ref])
+        print(f"No stashes found for branch '{branch}'.", file=sys.stderr)
+        raise SystemExit(1)
 
 
 @click.command(hidden=True)
@@ -136,4 +237,16 @@ def safe_cmd():
         raise SystemExit(1)
 
     os.chdir(str(cwd))
-    os.execvp(exe, [exe, *argv[1:]])
+
+    # Command-specific handlers
+    if exe == "git" and positionals[:1] == ["switch"]:
+        _validate_switch(wt_id, [exe, *positionals], flags)
+        os.execvp(exe, [exe, *argv[1:]])
+    elif exe == "git" and positionals[:2] == ["stash", "push"]:
+        _handle_stash_push(wt_id, flags)
+    elif exe == "git" and positionals[:2] == ["stash", "list"]:
+        _handle_stash_list(wt_id)
+    elif exe == "git" and positionals[:1] == ["stash"] and len(positionals) >= 2 and positionals[1] in ("pop", "apply", "drop"):
+        _handle_stash_pop_apply_drop(wt_id, [exe, *positionals])
+    else:
+        os.execvp(exe, [exe, *argv[1:]])

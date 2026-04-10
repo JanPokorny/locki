@@ -1,3 +1,4 @@
+import json as json_module
 import logging
 import pathlib
 import shutil
@@ -77,16 +78,80 @@ def remove_cmd(branch, force, delete_branch):
 
 
 @click.command()
-def list_cmd():
-    """List branches with Locki-managed worktrees."""
-    result = run_command(
-        ["git", "-C", str(locki.git_root()), "worktree", "list", "--porcelain"],
-        "Listing worktrees",
+@click.argument("branch", required=False)
+def stop_cmd(branch):
+    """Stop a branch's container without removing it."""
+    if branch:
+        wt_path = locki.find_worktree_for_branch(branch)
+    else:
+        wt_path = locki.current_worktree()
+        if wt_path is None:
+            logger.error("No branch specified and not inside a locki worktree.")
+            sys.exit(1)
+
+    if wt_path is None:
+        logger.info("No locki-managed worktree found for '%s', nothing to do.", branch)
+        return
+
+    wt_id = wt_path.relative_to(locki.WORKTREES_HOME).parts[0]
+    locki.run_in_vm(
+        ["incus", "stop", wt_id],
+        "Stopping container",
+        check=False,
     )
 
-    found = False
-    current_path = None
-    current_branch = None
+
+@click.command()
+@click.option("--all", "-a", "show_all", is_flag=True, help="Show worktrees from all repos.")
+def status_cmd(show_all):
+    """Show VM status and managed worktrees."""
+    # VM status
+    vm_status = "not created"
+    try:
+        result = run_command(
+            [locki.limactl(), "list", "--json"],
+            "Checking VM",
+            env={"LIMA_HOME": str(locki.LIMA_HOME)},
+            cwd="/",
+            check=False,
+            quiet=True,
+        )
+        for vm in json_module.loads(result.stdout.decode()):
+            if vm.get("name") == "locki":
+                vm_status = vm.get("status", "unknown").lower()
+    except Exception:
+        pass
+
+    click.echo(f"VM: {vm_status}")
+
+    # Container statuses (only if VM is running)
+    containers: dict[str, str] = {}
+    if vm_status == "running":
+        try:
+            result = locki.run_in_vm(
+                ["incus", "list", "--format=csv", "--columns=n,s"],
+                "Listing containers",
+                check=False,
+                quiet=True,
+            )
+            for line in result.stdout.decode().splitlines():
+                parts = line.split(",", 1)
+                if len(parts) == 2:
+                    containers[parts[0].strip()] = parts[1].strip().lower()
+        except Exception:
+            pass
+
+    # Current repo worktrees
+    repo_root = locki.git_root()
+    result = run_command(
+        ["git", "-C", str(repo_root), "worktree", "list", "--porcelain"],
+        "Listing worktrees",
+        quiet=True,
+    )
+
+    current_repo_wts: list[tuple[str, pathlib.Path, str]] = []
+    current_path: pathlib.Path | None = None
+    current_branch: str | None = None
     for line in result.stdout.decode().splitlines():
         if line.startswith("worktree "):
             current_path = pathlib.Path(line.split(" ", 1)[1])
@@ -95,8 +160,41 @@ def list_cmd():
             current_branch = line.removeprefix("branch refs/heads/")
         elif line == "" and current_path and current_branch:
             if current_path.is_relative_to(locki.WORKTREES_HOME):
-                click.echo(f"{current_branch}  {current_path}")
-                found = True
+                wt_id = current_path.relative_to(locki.WORKTREES_HOME).parts[0]
+                current_repo_wts.append((current_branch, current_path, wt_id))
 
-    if not found:
-        logger.info("No locki-managed worktrees found.")
+    current_repo_wt_paths = {str(wt[1]) for wt in current_repo_wts}
+
+    if current_repo_wts:
+        click.echo(f"\n{repo_root.name}:")
+        for branch, _wt_path, wt_id in current_repo_wts:
+            status = containers.get(wt_id, "no container")
+            click.echo(f"  {branch:<30s} {status}")
+    else:
+        click.echo(f"\n{repo_root.name}: no worktrees")
+
+    # Other worktrees
+    other_wts: list[pathlib.Path] = []
+    if locki.WORKTREES_HOME.exists():
+        for d in sorted(locki.WORKTREES_HOME.iterdir()):
+            if d.is_dir() and str(d) not in current_repo_wt_paths:
+                other_wts.append(d)
+
+    if other_wts and not show_all:
+        click.echo(f"\n{len(other_wts)} more worktree(s) from other repos (use --all to see all)")
+    elif other_wts and show_all:
+        # Group other worktrees by repo
+        by_repo: dict[str, list[tuple[str, str]]] = {}
+        for d in other_wts:
+            wt_id = d.name
+            branch_file = locki.WORKTREES_META / wt_id / "branch"
+            repo_file = locki.WORKTREES_META / wt_id / "repo"
+            branch = branch_file.read_text().strip() if branch_file.exists() else wt_id
+            repo_name = pathlib.Path(repo_file.read_text().strip()).name if repo_file.exists() else "unknown"
+            by_repo.setdefault(repo_name, []).append((branch, wt_id))
+
+        for repo_name, wts in sorted(by_repo.items()):
+            click.echo(f"\n{repo_name}:")
+            for branch, wt_id in wts:
+                status = containers.get(wt_id, "no container")
+                click.echo(f"  {branch:<30s} {status}")

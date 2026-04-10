@@ -122,6 +122,8 @@ def _shell(ctx, branch, setup_commands):
             meta_dir = locki.WORKTREES_META / wt_id
             meta_dir.mkdir(parents=True, exist_ok=True)
             (meta_dir / ".git").write_text((wt_path / ".git").read_text())
+            (meta_dir / "branch").write_text(branch)
+            (meta_dir / "repo").write_text(str(locki.git_root()))
 
             run_command(
                 ["git", "-C", str(locki.git_root()), "config", "extensions.worktreeConfig", "true"],
