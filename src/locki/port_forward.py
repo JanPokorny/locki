@@ -1,4 +1,5 @@
 import logging
+import socket
 import sys
 import typing
 
@@ -9,15 +10,23 @@ import locki
 logger = logging.getLogger(__name__)
 
 
+def _free_port() -> int:
+    """Find a random free port on the host."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("", 0))
+        return s.getsockname()[1]
+
+
 def _parse_port_spec(spec: str) -> tuple[int, int]:
-    """Parse 'host_port:container_port' or 'port' into (host_port, container_port)."""
+    """Parse port spec into (host_port, container_port). Host port 0 means random."""
     parts = spec.split(":")
     if len(parts) == 1:
         port = int(parts[0])
         return port, port
     if len(parts) == 2:
-        return int(parts[0]), int(parts[1])
-    raise typer.BadParameter(f"Invalid port spec '{spec}'. Use 'port' or 'host_port:container_port'.")
+        host = _free_port() if parts[0] == "" else int(parts[0])
+        return host, int(parts[1])
+    raise typer.BadParameter(f"Invalid port spec '{spec}'. Use 'port', 'host_port:container_port', or ':container_port'.")
 
 
 async def port_forward_cmd(
@@ -28,7 +37,7 @@ async def port_forward_cmd(
         bool, typer.Option("--clear", help="Remove all existing port forwards before adding new ones")
     ] = False,
     ports: typing.Annotated[
-        list[str] | None, typer.Argument(help="Ports to forward: 'port' or 'host_port:container_port'")
+        list[str] | None, typer.Argument(help="Ports to forward: 'port', 'host:container', or ':container' for random host port")
     ] = None,
 ):
     """Forward ports from the host to a branch's container."""
@@ -98,3 +107,4 @@ async def port_forward_cmd(
             ],
             f"Forwarding host port {host_port} -> container port {container_port}",
         )
+        print(f"{host_port}:{container_port}")

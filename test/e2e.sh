@@ -243,6 +243,13 @@ assert_ok    "port-forward --clear removes device" locki port-forward 'fix-login
 sleep 3
 assert_fail  "cleared forward is unreachable" bash -c "nc -w2 localhost 9111"
 
+# Random host port with :container_port syntax
+random_output=$(locki port-forward 'fix-login_bug.3' :9222 2>/dev/null)
+random_host_port=$(echo "$random_output" | grep -oE '^[0-9]+')
+if [[ "$random_host_port" -ge 1024 ]]; then pass ":port assigns random host port >= 1024"; else fail ":port assigns random host port >= 1024 (got '$random_host_port')"; fi
+assert_output ":port output shows container port" ":9222" echo "$random_output"
+assert_ok    ":port forward cleaned up" locki port-forward 'fix-login_bug.3' --clear
+
 # Reject privileged ports
 assert_fail  "port < 1024 rejected" locki port-forward 'fix-login_bug.3' 80
 
