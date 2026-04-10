@@ -14,11 +14,6 @@ mounts:
     mountPoint: "/root/.locki/home"
     writable: true
 
-portForwards:
-  - guestIP: "0.0.0.0"
-    proto: any
-    ignore: true
-
 provision:
   - mode: system
     script: |
@@ -65,6 +60,7 @@ provision:
             environment.MISE_CACHE_DIR: /var/cache/locki/mise
             environment.MISE_DATA_DIR: /usr/share/mise
             environment.MISE_INSTALL_PATH: /usr/local/bin/mise
+            environment.MISE_NODE_VERIFY: "false"
             environment.MISE_TRUSTED_CONFIG_PATHS: /
             environment.MIX_HOME: /var/cache/locki/mix
             environment.NIMBLE_DIR: /var/cache/locki/nimble

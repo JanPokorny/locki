@@ -214,6 +214,38 @@ TOML
 assert_output "custom image container runs ubuntu" "Ubuntu" locki shell '@user+hotfix%2!weird,name' -c "cat /etc/os-release"
 rm -f "$REPO/locki.toml"
 
+# ── port forwarding ─────────────────────────────────────────────────────────
+
+echo
+echo "Testing port forwarding..."
+
+# Install ncat in the container (locki-base doesn't include it)
+locki shell 'fix-login_bug.3' -c "dnf install -y nmap-ncat >/dev/null 2>&1"
+
+# Start a persistent listener inside the container
+locki shell 'fix-login_bug.3' -c "nohup bash -c 'while true; do echo pf-ok | ncat -l 9111; done' &>/dev/null &"
+
+# Forward host 9111 -> container 9111
+assert_ok    "port-forward adds device" locki port-forward 'fix-login_bug.3' 9111
+
+# Wait for Lima to detect and forward the new listening port
+pf_ok=false
+for i in $(seq 1 24); do
+    if result=$(nc -w2 localhost 9111 2>/dev/null) && [[ "$result" == *"pf-ok"* ]]; then
+        pf_ok=true; break
+    fi
+    sleep 5
+done
+if $pf_ok; then pass "port-forward is reachable"; else fail "port-forward is reachable (timed out after 120s)"; fi
+
+# Clear all forwards
+assert_ok    "port-forward --clear removes device" locki port-forward 'fix-login_bug.3' --clear
+sleep 3
+assert_fail  "cleared forward is unreachable" bash -c "nc -w2 localhost 9111"
+
+# Reject privileged ports
+assert_fail  "port < 1024 rejected" locki port-forward 'fix-login_bug.3' 80
+
 # ── worktree cleanup ─────────────────────────────────────────────────────────
 
 echo

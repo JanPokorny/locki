@@ -14,6 +14,7 @@ from halo import Halo
 
 from locki.async_typer import AsyncTyper
 from locki.safe_cmd import safe_cmd
+from locki.port_forward import port_forward_cmd
 from locki.shell import claude_cmd, codex_cmd, gemini_cmd, opencode_cmd, shell_cmd
 from locki.utils import run_command, setup_logging
 from locki.vm import vm_app
@@ -171,6 +172,7 @@ app.command("claude", context_settings={"allow_extra_args": True})(claude_cmd)
 app.command("gemini", context_settings={"allow_extra_args": True})(gemini_cmd)
 app.command("codex", context_settings={"allow_extra_args": True})(codex_cmd)
 app.command("opencode", context_settings={"allow_extra_args": True})(opencode_cmd)
+app.command("port-forward | pf", help="Forward ports from the host to a branch's container.")(port_forward_cmd)
 app.command("remove | rm | delete", help="Remove a branch's worktree and container.")(remove_cmd)
 app.command("list | ls", help="List branches with Locki-managed worktrees.")(list_cmd)
 app.command("safe-cmd", hidden=True)(safe_cmd)
