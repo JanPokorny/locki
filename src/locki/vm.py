@@ -1,13 +1,18 @@
-from locki.async_typer import AsyncTyper
+import click
+
+from locki import AliasGroup
 from locki.utils import run_command
 
-vm_app = AsyncTyper(name="vm", help="Manage the Locki VM.", no_args_is_help=True)
+
+@click.group(cls=AliasGroup, help="Manage the Locki VM.")
+def vm_app():
+    pass
 
 
 @vm_app.command("stop", help="Stop the Locki VM.")
-async def vm_stop_cmd():
+def vm_stop_cmd():
     import locki
-    await run_command(
+    run_command(
         [locki.limactl(), "stop", "locki"],
         "Stopping VM",
         env={"LIMA_HOME": str(locki.LIMA_HOME)},
@@ -16,9 +21,9 @@ async def vm_stop_cmd():
 
 
 @vm_app.command("delete | remove | rm", help="Delete the Locki VM entirely.")
-async def vm_delete_cmd():
+def vm_delete_cmd():
     import locki
-    await run_command(
+    run_command(
         [locki.limactl(), "delete", "-f", "locki"],
         "Deleting VM",
         env={"LIMA_HOME": str(locki.LIMA_HOME)},

@@ -9,25 +9,13 @@ import shutil
 import subprocess
 import sys
 
-import anyio.to_thread
+import click
 from halo import Halo
 
-from locki.async_typer import AsyncTyper
-from locki.safe_cmd import safe_cmd
-from locki.port_forward import port_forward_cmd
-from locki.shell import claude_cmd, codex_cmd, gemini_cmd, opencode_cmd, shell_cmd
 from locki.utils import run_command, setup_logging
-from locki.vm import vm_app
-from locki.worktree import list_cmd, remove_cmd
 
 setup_logging()
 logger = logging.getLogger(__name__)
-
-app = AsyncTyper(
-    name="locki",
-    help="AI sandboxing without the taste of sand, using a managed Lima VM with Incus containers.",
-    no_args_is_help=True,
-)
 
 LOCKI_HOME = pathlib.Path.home() / ".locki"
 LIMA_HOME = LOCKI_HOME / "lima"
@@ -61,6 +49,40 @@ GIT_HOOKS = [
 ]
 
 
+class AliasGroup(click.Group):
+    """Click group that supports pipe-separated command aliases (e.g. 'shell | sh | bash')."""
+
+    def get_command(self, ctx, cmd_name):
+        # Direct match first
+        rv = super().get_command(ctx, cmd_name)
+        if rv is not None:
+            return rv
+        # Try alias match
+        for name in self.list_commands(ctx):
+            if cmd_name in name.split(" | "):
+                return super().get_command(ctx, name)
+        return None
+
+    def format_commands(self, ctx, formatter):
+        """Write the commands, showing only the primary name."""
+        commands = []
+        for subcommand in self.list_commands(ctx):
+            cmd = self.get_command(ctx, subcommand)
+            if cmd is None or cmd.hidden:
+                continue
+            primary = subcommand.split(" | ")[0]
+            help_text = cmd.get_short_help_str(limit=formatter.width)
+            commands.append((primary, help_text))
+        if commands:
+            with formatter.section("Commands"):
+                formatter.write_dl(commands)
+
+
+@click.group(cls=AliasGroup, help="AI sandboxing without the taste of sand, using a managed Lima VM with Incus containers.")
+def app():
+    pass
+
+
 @functools.cache
 def limactl() -> str:
     bundled = importlib.resources.files("locki") / "data" / "bin" / "limactl"
@@ -73,14 +95,14 @@ def limactl() -> str:
     sys.exit(1)
 
 
-async def run_in_vm(
+def run_in_vm(
     command: list[str],
     message: str,
     env: dict[str, str] | None = None,
     input: bytes | None = None,
     check: bool = True,
 ) -> subprocess.CompletedProcess[bytes]:
-    return await run_command(
+    return run_command(
         [limactl(), "shell", "--start", "--preserve-env", "--tty=false", "locki", "--", "sudo", "-E", *command],
         message,
         env={"LIMA_HOME": str(LIMA_HOME)} | (env or {}),
@@ -90,8 +112,8 @@ async def run_in_vm(
     )
 
 
-@contextlib.asynccontextmanager
-async def _file_lock(name: str, wait_message: str):
+@contextlib.contextmanager
+def _file_lock(name: str, wait_message: str):
     """Acquire an exclusive file lock."""
     LOCKI_HOME.mkdir(exist_ok=True)
     lock_path = LOCKI_HOME / f"{name}.lock"
@@ -101,7 +123,7 @@ async def _file_lock(name: str, wait_message: str):
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
             with Halo(text=wait_message, spinner="dots", stream=sys.stderr):
-                await anyio.to_thread.run_sync(lambda: fcntl.flock(fd, fcntl.LOCK_EX))
+                fcntl.flock(fd, fcntl.LOCK_EX)
         yield
     finally:
         fcntl.flock(fd, fcntl.LOCK_UN)
@@ -146,9 +168,9 @@ def current_worktree() -> pathlib.Path | None:
     return WORKTREES_HOME / cwd.relative_to(WORKTREES_HOME).parts[0]
 
 
-async def find_worktree_for_branch(branch: str) -> pathlib.Path | None:
+def find_worktree_for_branch(branch: str) -> pathlib.Path | None:
     """Return the worktree path for a branch managed by Locki, or None."""
-    result = await run_command(
+    result = run_command(
         ["git", "-C", str(git_root()), "worktree", "list", "--porcelain"],
         "Listing worktrees",
     )
@@ -166,14 +188,20 @@ async def find_worktree_for_branch(branch: str) -> pathlib.Path | None:
     return None
 
 
-app.command("shell | sh | bash", help="Open a shell in the per-branch container.",
-            context_settings={"allow_extra_args": True})(shell_cmd)
-app.command("claude", context_settings={"allow_extra_args": True})(claude_cmd)
-app.command("gemini", context_settings={"allow_extra_args": True})(gemini_cmd)
-app.command("codex", context_settings={"allow_extra_args": True})(codex_cmd)
-app.command("opencode", context_settings={"allow_extra_args": True})(opencode_cmd)
-app.command("port-forward | pf", help="Forward ports from the host to a branch's container.")(port_forward_cmd)
-app.command("remove | rm | delete", help="Remove a branch's worktree and container.")(remove_cmd)
-app.command("list | ls", help="List branches with Locki-managed worktrees.")(list_cmd)
-app.command("safe-cmd", hidden=True)(safe_cmd)
-app.add_typer(vm_app)
+# Register commands (imported here to avoid circular imports)
+from locki.port_forward import port_forward_cmd  # noqa: E402
+from locki.safe_cmd import safe_cmd  # noqa: E402
+from locki.shell import claude_cmd, codex_cmd, gemini_cmd, opencode_cmd, shell_cmd  # noqa: E402
+from locki.vm import vm_app  # noqa: E402
+from locki.worktree import list_cmd, remove_cmd  # noqa: E402
+
+app.add_command(shell_cmd, "shell | sh | bash")
+app.add_command(claude_cmd, "claude")
+app.add_command(gemini_cmd, "gemini")
+app.add_command(codex_cmd, "codex")
+app.add_command(opencode_cmd, "opencode")
+app.add_command(port_forward_cmd, "port-forward | pf")
+app.add_command(remove_cmd, "remove | rm | delete")
+app.add_command(list_cmd, "list | ls")
+app.add_command(safe_cmd, "safe-cmd")
+app.add_command(vm_app, "vm")

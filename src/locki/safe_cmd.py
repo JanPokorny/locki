@@ -3,6 +3,8 @@ import pathlib
 import shlex
 import sys
 
+import click
+
 _required = bool               # --flag=<non-empty value>
 _flag = {None, ""}        # optional boolean flag (--flag or absent, no value)
 
@@ -81,6 +83,7 @@ def parse_args(args: list[str]) -> tuple[list[str], dict[str, str]]:
     return positionals, flags
 
 
+@click.command(hidden=True)
 def safe_cmd():
     """SSH forced command: validate and execute an allowed git/gh command."""
     import locki

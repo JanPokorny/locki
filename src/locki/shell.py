@@ -12,9 +12,8 @@ import string
 import subprocess
 import sys
 import textwrap
-import typing
 
-import typer
+import click
 
 import locki
 from locki.config import load_config
@@ -23,16 +22,19 @@ from locki.utils import run_command
 logger = logging.getLogger(__name__)
 
 
-async def shell_cmd(
-    ctx: typer.Context,
-    branch: typing.Annotated[
-        str | None, typer.Argument(help="Branch name to work on (optional if inside a worktree)")
-    ] = None,
-    command: typing.Annotated[
-        str | None, typer.Option("-c", help="Command to run instead of an interactive shell")
-    ] = None,
-):
-    setup_commands: list[tuple[list[str], str]] = getattr(ctx, "setup_commands", [])
+@click.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
+@click.argument("branch", required=False)
+@click.pass_context
+def shell_cmd(ctx, branch):
+    """Open a shell in the per-branch container."""
+    # Click may consume -c as branch when no branch is given; fix up.
+    if branch is not None and branch.startswith("-"):
+        ctx.args = [branch, *ctx.args]
+        branch = None
+    _shell(ctx, branch, setup_commands=[])
+
+
+def _shell(ctx, branch, setup_commands):
     locki.git_root()  # fail fast if not in a git repo
 
     locki.LOCKI_HOME.mkdir(exist_ok=True)
@@ -54,8 +56,8 @@ async def shell_cmd(
             '{ "$schema": "https://opencode.ai/config.json", "permission": "allow", "instructions": "/etc/opencode/AGENTS.md" }'
         )
 
-    async with locki._file_lock("vm", "Waiting for VM to start"):
-        await run_command(
+    with locki._file_lock("vm", "Waiting for VM to start"):
+        run_command(
             [
                 locki.limactl(),
                 "--tty=false",
@@ -69,7 +71,7 @@ async def shell_cmd(
             cwd="/",
             check=False,
         )
-        await run_command(
+        run_command(
             [
                 locki.limactl(),
                 "--tty=false",
@@ -83,9 +85,9 @@ async def shell_cmd(
         )
 
     if branch:
-        wt_path = await locki.find_worktree_for_branch(branch)
+        wt_path = locki.find_worktree_for_branch(branch)
         if not wt_path:
-            await run_command(
+            run_command(
                 ["git", "-C", str(locki.git_root()), "worktree", "prune"],
                 "Pruning stale git worktrees",
             )
@@ -96,23 +98,23 @@ async def shell_cmd(
             wt_path = locki.WORKTREES_HOME / wt_id
             wt_path.mkdir(parents=True, exist_ok=True)
 
-            await run_command(
+            run_command(
                 ["git", "-C", str(locki.git_root()), "fetch"],
                 "Fetching from remote",
                 check=False,
             )
 
-            result = await run_command(
+            result = run_command(
                 ["git", "-C", str(locki.git_root()), "worktree", "add", str(wt_path), branch],
                 f"Creating worktree for '{branch}'",
                 check=False,
             )
             if result.returncode != 0:
-                await run_command(
+                run_command(
                     ["git", "-C", str(locki.git_root()), "branch", branch],
                     f"Creating branch '{branch}'",
                 )
-                await run_command(
+                run_command(
                     ["git", "-C", str(locki.git_root()), "worktree", "add", str(wt_path), branch],
                     f"Creating worktree for '{branch}'",
                 )
@@ -121,7 +123,7 @@ async def shell_cmd(
             meta_dir.mkdir(parents=True, exist_ok=True)
             (meta_dir / ".git").write_text((wt_path / ".git").read_text())
 
-            await run_command(
+            run_command(
                 ["git", "-C", str(locki.git_root()), "config", "extensions.worktreeConfig", "true"],
                 "Enabling per-worktree git config",
             )
@@ -134,7 +136,7 @@ async def shell_cmd(
                 hook_path.write_bytes(hook_script)
                 hook_path.chmod(0o755)
 
-            await run_command(
+            run_command(
                 ["git", "-C", str(wt_path), "config", "--worktree", "core.hooksPath", str(hooks_dir)],
                 "Configuring per-worktree hooks",
             )
@@ -147,13 +149,13 @@ async def shell_cmd(
 
     config = load_config(locki.git_root())
 
-    result = await locki.run_in_vm(
+    result = locki.run_in_vm(
         ["incus", "list", "--format=csv", "--columns=n", wt_id],
         "Checking container",
         check=False,
     )
     if wt_id in result.stdout.decode():
-        await locki.run_in_vm(
+        locki.run_in_vm(
             ["incus", "start", wt_id],
             "Starting container",
             check=False,
@@ -162,19 +164,19 @@ async def shell_cmd(
         incus_image = config.get_incus_image()
 
         local_path = locki.git_root() / incus_image
-        async with locki._file_lock("image", "Waiting for another image import"):
+        with locki._file_lock("image", "Waiting for another image import"):
             if local_path.is_file():
                 local_file = local_path.resolve()
                 tmp_name = (
                     f"locki-img-{''.join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(8))}"
                 )
-                await run_command(
+                run_command(
                     [locki.limactl(), "copy", str(local_file), f"locki:/tmp/{tmp_name}"],
                     "Copying image into VM",
                     env={"LIMA_HOME": str(locki.LIMA_HOME)},
                     cwd="/",
                 )
-                await locki.run_in_vm(
+                locki.run_in_vm(
                     ["bash", "-c", f"incus image import /tmp/{tmp_name} --alias={tmp_name} && rm -f /tmp/{tmp_name}"],
                     "Importing container image",
                 )
@@ -182,19 +184,19 @@ async def shell_cmd(
             else:
                 image_ref = incus_image
 
-            await locki.run_in_vm(
+            locki.run_in_vm(
                 ["incus", "init", image_ref, wt_id],
                 "Creating container",
             )
 
             if local_path.is_file():
-                await locki.run_in_vm(
+                locki.run_in_vm(
                     ["incus", "image", "delete", image_ref],
                     "Cleaning up imported image",
                     check=False,
                 )
 
-        await locki.run_in_vm(
+        locki.run_in_vm(
             [
                 "incus",
                 "config",
@@ -209,7 +211,7 @@ async def shell_cmd(
             "Mounting worktree into container",
         )
 
-        await locki.run_in_vm(
+        locki.run_in_vm(
             ["incus", "start", wt_id],
             "Starting container",
         )
@@ -239,25 +241,23 @@ async def shell_cmd(
             "/opt/locki/bin/bwrap": "#!/bin/sh\nexit 1\n",  # silence codex warning
         }
         for path, content in container_files.items():
-            await locki.run_in_vm(
+            locki.run_in_vm(
                 ["incus", "exec", wt_id, "--", "bash", "-c", f"mkdir -p $(dirname {path}) && cat >{path}"],
                 f"Writing {pathlib.PurePosixPath(path).name}",
                 input=content.encode(),
             )
 
         host_ip = (
-            (
-                await locki.run_in_vm(
-                    ["bash", "-c", "getent hosts host.lima.internal | awk '{print $1}' | head -1"],
-                    "Resolving host IP",
-                    check=False,
-                )
+            locki.run_in_vm(
+                ["bash", "-c", "getent hosts host.lima.internal | awk '{print $1}' | head -1"],
+                "Resolving host IP",
+                check=False,
             )
             .stdout.decode()
             .strip()
         )
 
-        await locki.run_in_vm(
+        locki.run_in_vm(
             [
                 "incus",
                 "exec",
@@ -280,7 +280,7 @@ async def shell_cmd(
         )
 
     for cmd, msg in setup_commands or []:
-        await locki.run_in_vm(["incus", "exec", wt_id, "--", *cmd], msg)
+        locki.run_in_vm(["incus", "exec", wt_id, "--", *cmd], msg)
 
     # Start SSH proxy (sshd) for git/gh command forwarding
     ssh_dir = locki.LOCKI_HOME / "ssh"
@@ -317,7 +317,7 @@ async def shell_cmd(
         try:
             os.kill(int(pid_file.read_text().strip()), 0)
             sshd_running = True
-        except ProcessLookupError, ValueError, PermissionError:
+        except (ProcessLookupError, ValueError, PermissionError):
             pass
     sshd_path = shutil.which("sshd")
     if sshd_path is None:
@@ -357,69 +357,76 @@ async def shell_cmd(
                     "--rcfile",
                     shlex.quote("<(mise activate bash)"),
                 ]
-                + (["-c", shlex.quote(command)] if command else [])
-                + (["--", *(shlex.quote(a) for a in ctx.args)] if ctx.args else [])
+                + ([*(shlex.quote(a) for a in ctx.args)] if ctx.args else [])
             ),
         ],
     )
 
 
-async def claude_cmd(
-    ctx: typer.Context,
-    branch: typing.Annotated[str | None, typer.Argument(help="Branch name")] = None,
-):
+@click.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
+@click.argument("branch", required=False)
+@click.pass_context
+def claude_cmd(ctx, branch):
     """Run Claude in the sandbox."""
-    ctx.setup_commands = [
-        (["mise", "install", "nodejs@24"], "Installing Node.js"),
-        (
-            ["mise", "exec", "nodejs@24", "--", "mise", "install", "npm:@anthropic-ai/claude-code@latest"],
-            "Installing Claude Code CLI",
-        ),
-    ]
-    await shell_cmd(
+    ctx.args = ["-c", 'exec mise exec nodejs@24 npm:@anthropic-ai/claude-code@latest -- claude --dangerously-skip-permissions "$@"', "--", *ctx.args]
+    _shell(
         ctx=ctx,
         branch=branch,
-        command='exec mise exec nodejs@24 npm:@anthropic-ai/claude-code@latest -- claude --dangerously-skip-permissions "$@"',
+        setup_commands=[
+            (["mise", "install", "nodejs@24"], "Installing Node.js"),
+            (
+                ["mise", "exec", "nodejs@24", "--", "mise", "install", "npm:@anthropic-ai/claude-code@latest"],
+                "Installing Claude Code CLI",
+            ),
+        ],
     )
 
 
-async def gemini_cmd(
-    ctx: typer.Context,
-    branch: typing.Annotated[str | None, typer.Argument(help="Branch name")] = None,
-):
+@click.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
+@click.argument("branch", required=False)
+@click.pass_context
+def gemini_cmd(ctx, branch):
     """Run Gemini in the sandbox."""
-    ctx.setup_commands = [
-        (["mise", "install", "nodejs@24"], "Installing Node.js"),
-        (
-            ["mise", "exec", "nodejs@24", "--", "mise", "install", "npm:@google/gemini-cli@latest"],
-            "Installing Gemini CLI",
-        ),
-    ]
-    await shell_cmd(
-        ctx=ctx, branch=branch, command='exec mise exec nodejs@24 npm:@google/gemini-cli@latest -- gemini --yolo "$@"'
+    ctx.args = ["-c", 'exec mise exec nodejs@24 npm:@google/gemini-cli@latest -- gemini --yolo "$@"', "--", *ctx.args]
+    _shell(
+        ctx=ctx,
+        branch=branch,
+        setup_commands=[
+            (["mise", "install", "nodejs@24"], "Installing Node.js"),
+            (
+                ["mise", "exec", "nodejs@24", "--", "mise", "install", "npm:@google/gemini-cli@latest"],
+                "Installing Gemini CLI",
+            ),
+        ],
     )
 
 
-async def codex_cmd(
-    ctx: typer.Context,
-    branch: typing.Annotated[str | None, typer.Argument(help="Branch name")] = None,
-):
+@click.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
+@click.argument("branch", required=False)
+@click.pass_context
+def codex_cmd(ctx, branch):
     """Run Codex in the sandbox."""
-    ctx.setup_commands = [
-        (["mise", "install", "nodejs@24"], "Installing Node.js"),
-        (["mise", "exec", "nodejs@24", "--", "mise", "install", "npm:@openai/codex@latest"], "Installing Codex CLI"),
-    ]
-    await shell_cmd(
-        ctx=ctx, branch=branch, command='exec mise exec nodejs@24 npm:@openai/codex@latest -- codex --yolo "$@"'
+    ctx.args = ["-c", 'exec mise exec nodejs@24 npm:@openai/codex@latest -- codex --yolo "$@"', "--", *ctx.args]
+    _shell(
+        ctx=ctx,
+        branch=branch,
+        setup_commands=[
+            (["mise", "install", "nodejs@24"], "Installing Node.js"),
+            (["mise", "exec", "nodejs@24", "--", "mise", "install", "npm:@openai/codex@latest"], "Installing Codex CLI"),
+        ],
     )
 
 
-async def opencode_cmd(
-    ctx: typer.Context,
-    branch: typing.Annotated[str | None, typer.Argument(help="Branch name")] = None,
-):
+@click.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
+@click.argument("branch", required=False)
+@click.pass_context
+def opencode_cmd(ctx, branch):
     """Run OpenCode in the sandbox."""
-    ctx.setup_commands = [
-        (["mise", "use", "-g", "github:anomalyco/opencode"], "Installing OpenCode CLI"),
-    ]
-    await shell_cmd(ctx=ctx, branch=branch, command='exec opencode "$@"')
+    ctx.args = ["-c", 'exec opencode "$@"', "--", *ctx.args]
+    _shell(
+        ctx=ctx,
+        branch=branch,
+        setup_commands=[
+            (["mise", "use", "-g", "github:anomalyco/opencode"], "Installing OpenCode CLI"),
+        ],
+    )
