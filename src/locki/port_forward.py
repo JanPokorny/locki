@@ -28,37 +28,13 @@ def _parse_port_spec(spec: str) -> tuple[int, int]:
     raise click.BadParameter(f"Invalid port spec '{spec}'. Use 'port', 'host_port:container_port', or ':container_port'.")
 
 
-def _looks_like_port(arg: str) -> bool:
-    """Return True if arg looks like a port spec rather than a branch name."""
-    return arg.startswith(":") or arg.split(":")[0].isdigit()
-
-
 @click.command(context_settings={"allow_extra_args": True})
+@click.option("-b", "--branch", default=None, help="Branch name.")
 @click.option("--clear", is_flag=True, help="Remove all existing port forwards before adding new ones.")
 @click.pass_context
-def port_forward_cmd(ctx, clear):
+def port_forward_cmd(ctx, branch, clear):
     """Forward ports from the host to a branch's container."""
-    # Parse raw args: [branch] [port_spec]...
-    # First arg is a branch name unless it looks like a port spec.
-    args = ctx.args
-    branch = None
-    port_specs: list[str] = []
-    for i, arg in enumerate(args):
-        if i == 0 and not _looks_like_port(arg):
-            branch = arg
-        else:
-            port_specs.append(arg)
-
-    if branch:
-        wt_path = locki.find_worktree_for_branch(branch)
-        if wt_path is None:
-            logger.error("No worktree found for branch '%s'.", branch)
-            sys.exit(1)
-    else:
-        wt_path = locki.current_worktree()
-        if wt_path is None:
-            logger.error("No branch specified and not inside a locki worktree.")
-            sys.exit(1)
+    _, wt_path = locki.resolve_branch(branch)
     wt_id = wt_path.relative_to(locki.WORKTREES_HOME).parts[0]
 
     # Ensure container is running
@@ -69,10 +45,10 @@ def port_forward_cmd(ctx, clear):
     )
     lines = result.stdout.decode().strip()
     if wt_id not in lines:
-        logger.error("Container for branch not found. Run 'locki shell' first to create it.")
+        logger.error("Container for branch not found. Run 'locki x' first to create it.")
         sys.exit(1)
     if "RUNNING" not in lines:
-        logger.error("Container is not running. Run 'locki shell' first to start it.")
+        logger.error("Container is not running. Run 'locki x' first to start it.")
         sys.exit(1)
 
     if clear:
@@ -88,14 +64,14 @@ def port_forward_cmd(ctx, clear):
                     ["incus", "config", "device", "remove", wt_id, name],
                     f"Removing {name}",
                 )
-        if not port_specs:
+        if not ctx.args:
             return
 
-    if not port_specs:
-        logger.error("No ports specified. Usage: locki port-forward [branch] port[:port]...")
+    if not ctx.args:
+        logger.error("No ports specified. Usage: locki port-forward -b <branch> port[:port]...")
         sys.exit(1)
 
-    for spec in port_specs:
+    for spec in ctx.args:
         host_port, container_port = _parse_port_spec(spec)
         if host_port < 1024:
             logger.error("Host port %d is not allowed (must be >= 1024).", host_port)

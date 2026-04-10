@@ -13,9 +13,9 @@ logger = logging.getLogger(__name__)
 
 
 @click.command()
-@click.argument("branch", required=False)
+@click.option("-b", "--branch", default=None, help="Branch name.")
 @click.option("--force", "-f", is_flag=True, help="Skip safety checks.")
-@click.option("--branch", "-b", "delete_branch", is_flag=True, help="Also delete the branch.")
+@click.option("--delete-branch", is_flag=True, help="Also delete the git branch.")
 def remove_cmd(branch, force, delete_branch):
     """Remove a branch's worktree and container."""
     if branch:
@@ -78,21 +78,10 @@ def remove_cmd(branch, force, delete_branch):
 
 
 @click.command()
-@click.argument("branch", required=False)
+@click.option("-b", "--branch", default=None, help="Branch name.")
 def stop_cmd(branch):
     """Stop a branch's container without removing it."""
-    if branch:
-        wt_path = locki.find_worktree_for_branch(branch)
-    else:
-        wt_path = locki.current_worktree()
-        if wt_path is None:
-            logger.error("No branch specified and not inside a locki worktree.")
-            sys.exit(1)
-
-    if wt_path is None:
-        logger.info("No locki-managed worktree found for '%s', nothing to do.", branch)
-        return
-
+    _, wt_path = locki.resolve_branch(branch)
     wt_id = wt_path.relative_to(locki.WORKTREES_HOME).parts[0]
     locki.run_in_vm(
         ["incus", "stop", wt_id],

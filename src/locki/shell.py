@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import pathlib
+import random
 import re
 import secrets
 import shlex
@@ -21,20 +22,78 @@ from locki.utils import run_command
 
 logger = logging.getLogger(__name__)
 
+_MALE_NAMES = [
+    "aksel", "amund", "anders", "arne", "arvid", "asbjorn", "asgeir", "audun", "bard", "bersi",
+    "birger", "bjarni", "bjorn", "bragi", "brand", "egil", "erik", "eyvind", "finn", "floki",
+    "frode", "gardar", "gisli", "gorm", "grettir", "grimm", "gudmund", "gunnar", "guthorm",
+    "hakon", "haldor", "halfdan", "hallvard", "halsten", "harald", "havard", "helgi", "hemming",
+    "hermod", "hjalmar", "hoskuld", "hrolf", "ingjald", "ingvar", "ivar", "jansen", "jorgen",
+    "karl", "ketil", "kirk", "knut", "kolbein", "leif", "ljot", "magnus", "naddod", "njal",
+    "norman", "olaf", "orvar", "osgood", "ottar", "ragnar", "ragnvald", "rayner", "roderick",
+    "roger", "rollo", "rurik", "rutland", "saxe", "sigmund", "sigurd", "sigvald", "skarde",
+    "skorri", "skuli", "snorri", "starkad", "steinar", "sten", "styrbjorn", "sune", "svein",
+    "sven", "thorfinn", "thormod", "thorsten", "thorvald", "toki", "torbjorn", "torfi",
+    "torstein", "torvald", "tryggvi", "ulf", "vagn", "vemund", "vidar", "viggo",
+]
+_FEMALE_NAMES = [
+    "alfhild", "alva", "anneli", "annika", "arnbjorg", "asdis", "aslaug", "asta", "astrid",
+    "aud", "bergljot", "birgitta", "borghild", "brynhild", "dagny", "dahlia", "dalla", "disa",
+    "edda", "embla", "erika", "erna", "freya", "frida", "geira", "gertrud", "gudrid", "gudrun",
+    "gunhild", "gunnvor", "gyda", "hallgerd", "hallveig", "helga", "herdis", "hervor", "hilda",
+    "hjordis", "hrefna", "idonea", "idun", "inga", "ingibjorg", "ingrid", "jofrid", "jorid",
+    "jorunn", "kara", "katla", "lagertha", "liv", "nanna", "oda", "oddny", "ragnfrid",
+    "ragnhild", "ran", "rayna", "revna", "runa", "saeunn", "sassa", "shelby", "sif", "sigfrid",
+    "sigrid", "solveig", "steinunn", "sunniva", "svanhild", "thordis", "thorhild", "thorgerd",
+    "thurid", "thyra", "tora", "torborg", "torunn", "unn", "vala", "valdis", "valkyrie",
+    "vigdis", "vigga", "ylva", "yrsa",
+]
+_NEUTRAL_NAMES = [
+    "agnar", "ari", "aslak", "bertil", "birk", "bo", "bodil", "brok", "bui", "crosby", "dag",
+    "dagmar", "darby", "ebbe", "eilif", "einar", "esben", "eyolf", "folke", "geir", "gro",
+    "hauk", "heid", "hreidar", "kai", "keld", "loki", "nanne", "njord", "orm", "randi", "roald",
+    "rune", "saga", "sindri", "skald", "skai", "skjold", "sondre", "storm", "sverre", "thrain",
+    "torkel", "tove", "tyr", "ull", "valdimar", "vigg", "whitby",
+]
 
-@click.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
-@click.argument("branch", required=False)
+
+def _viking_name() -> str:
+    """Generate a Viking-style name: <name>-<father>(sson|sdottir)-<number>."""
+    is_male = random.choice([True, False])
+    name = random.choice((_MALE_NAMES if is_male else _FEMALE_NAMES) + _NEUTRAL_NAMES)
+    father = random.choice(_MALE_NAMES + _NEUTRAL_NAMES)
+    suffix = "sson" if is_male else "sdottir"
+    number = random.randint(1, 99)
+    return f"{name}-{father}{suffix}-{number}"
+
+
+@click.command("exec | x", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
+@click.option("-b", "--branch", default=None, help="Branch name to work on.")
 @click.pass_context
-def shell_cmd(ctx, branch):
-    """Open a shell in the per-branch container."""
-    # Click may consume -c as branch when no branch is given; fix up.
-    if branch is not None and branch.startswith("-"):
-        ctx.args = [branch, *ctx.args]
-        branch = None
-    _shell(ctx, branch, setup_commands=[])
+def exec_cmd(ctx, branch):
+    """Run a command in the per-branch sandbox container.
 
+    \b
+    Examples:
+      locki x bash                    # interactive shell
+      locki x claude                  # run Claude Code
+      locki x -b my-feature bash      # specify branch
+      locki x bash -c "echo hello"    # run a one-liner
+    """
+    if not branch:
+        wt_path = locki.current_worktree()
+        if wt_path is None:
+            # In root repo, auto-generate a Viking branch name (avoid existing branches)
+            existing = subprocess.run(
+                ["git", "-C", str(locki.git_root()), "branch", "--list", "--all", "--format=%(refname:short)"],
+                capture_output=True, text=True,
+            ).stdout.splitlines()
+            existing_set = {b.strip().removeprefix("origin/") for b in existing}
+            for _ in range(100):
+                branch = _viking_name()
+                if branch not in existing_set:
+                    break
+            click.echo(f"Creating a new branch '{branch}'", err=True)
 
-def _shell(ctx, branch, setup_commands):
     locki.git_root()  # fail fast if not in a git repo
 
     locki.LOCKI_HOME.mkdir(exist_ok=True)
@@ -241,6 +300,30 @@ def _shell(ctx, branch, setup_commands):
             "/opt/locki/bin/git": proxy_stub,
             "/opt/locki/bin/gh": proxy_stub,
             "/opt/locki/bin/bwrap": "#!/bin/sh\nexit 1\n",  # silence codex warning
+            "/etc/bashrc.d/locki-mise.sh": 'eval "$(mise activate bash)"\n',
+            "/opt/locki/bin/claude": textwrap.dedent("""\
+                #!/bin/bash
+                mise install nodejs@24 >&2
+                mise exec nodejs@24 -- mise install npm:@anthropic-ai/claude-code@latest >&2
+                exec mise exec nodejs@24 npm:@anthropic-ai/claude-code@latest -- claude --dangerously-skip-permissions "$@"
+            """),
+            "/opt/locki/bin/gemini": textwrap.dedent("""\
+                #!/bin/bash
+                mise install nodejs@24 >&2
+                mise exec nodejs@24 -- mise install npm:@google/gemini-cli@latest >&2
+                exec mise exec nodejs@24 npm:@google/gemini-cli@latest -- gemini --yolo "$@"
+            """),
+            "/opt/locki/bin/codex": textwrap.dedent("""\
+                #!/bin/bash
+                mise install nodejs@24 >&2
+                mise exec nodejs@24 -- mise install npm:@openai/codex@latest >&2
+                exec mise exec nodejs@24 npm:@openai/codex@latest -- codex --yolo "$@"
+            """),
+            "/opt/locki/bin/opencode": textwrap.dedent("""\
+                #!/bin/bash
+                mise use -g github:anomalyco/opencode >&2
+                exec opencode "$@"
+            """),
         }
         for path, content in container_files.items():
             locki.run_in_vm(
@@ -280,9 +363,6 @@ def _shell(ctx, branch, setup_commands):
             ],
             "Configuring container environment",
         )
-
-    for cmd, msg in setup_commands or []:
-        locki.run_in_vm(["incus", "exec", wt_id, "--", *cmd], msg)
 
     # Start SSH proxy (sshd) for git/gh command forwarding
     ssh_dir = locki.LOCKI_HOME / "ssh"
@@ -345,90 +425,16 @@ def _shell(ctx, branch, setup_commands):
             "--",
             "bash",
             "-c",
-            " ".join(
-                [
-                    "sudo",
-                    "incus",
-                    "exec",
-                    shlex.quote(wt_id),
-                    "--cwd",
-                    shlex.quote(str(wt_path)),
-                    *(f"--env={env}=${env}" for env in forwarded_env),
-                    "--",
-                    "bash",
-                    "--rcfile",
-                    shlex.quote("<(mise activate bash)"),
-                ]
-                + ([*(shlex.quote(a) for a in ctx.args)] if ctx.args else [])
-            ),
-        ],
-    )
-
-
-@click.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
-@click.argument("branch", required=False)
-@click.pass_context
-def claude_cmd(ctx, branch):
-    """Run Claude in the sandbox."""
-    ctx.args = ["-c", 'exec mise exec nodejs@24 npm:@anthropic-ai/claude-code@latest -- claude --dangerously-skip-permissions "$@"', "--", *ctx.args]
-    _shell(
-        ctx=ctx,
-        branch=branch,
-        setup_commands=[
-            (["mise", "install", "nodejs@24"], "Installing Node.js"),
-            (
-                ["mise", "exec", "nodejs@24", "--", "mise", "install", "npm:@anthropic-ai/claude-code@latest"],
-                "Installing Claude Code CLI",
-            ),
-        ],
-    )
-
-
-@click.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
-@click.argument("branch", required=False)
-@click.pass_context
-def gemini_cmd(ctx, branch):
-    """Run Gemini in the sandbox."""
-    ctx.args = ["-c", 'exec mise exec nodejs@24 npm:@google/gemini-cli@latest -- gemini --yolo "$@"', "--", *ctx.args]
-    _shell(
-        ctx=ctx,
-        branch=branch,
-        setup_commands=[
-            (["mise", "install", "nodejs@24"], "Installing Node.js"),
-            (
-                ["mise", "exec", "nodejs@24", "--", "mise", "install", "npm:@google/gemini-cli@latest"],
-                "Installing Gemini CLI",
-            ),
-        ],
-    )
-
-
-@click.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
-@click.argument("branch", required=False)
-@click.pass_context
-def codex_cmd(ctx, branch):
-    """Run Codex in the sandbox."""
-    ctx.args = ["-c", 'exec mise exec nodejs@24 npm:@openai/codex@latest -- codex --yolo "$@"', "--", *ctx.args]
-    _shell(
-        ctx=ctx,
-        branch=branch,
-        setup_commands=[
-            (["mise", "install", "nodejs@24"], "Installing Node.js"),
-            (["mise", "exec", "nodejs@24", "--", "mise", "install", "npm:@openai/codex@latest"], "Installing Codex CLI"),
-        ],
-    )
-
-
-@click.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
-@click.argument("branch", required=False)
-@click.pass_context
-def opencode_cmd(ctx, branch):
-    """Run OpenCode in the sandbox."""
-    ctx.args = ["-c", 'exec opencode "$@"', "--", *ctx.args]
-    _shell(
-        ctx=ctx,
-        branch=branch,
-        setup_commands=[
-            (["mise", "use", "-g", "github:anomalyco/opencode"], "Installing OpenCode CLI"),
+            " ".join([
+                "sudo",
+                "incus",
+                "exec",
+                shlex.quote(wt_id),
+                "--cwd",
+                shlex.quote(str(wt_path)),
+                *(f"--env={env}=${env}" for env in forwarded_env),
+                "--",
+                *((shlex.quote(a) for a in ctx.args) if ctx.args else ["bash"]),
+            ]),
         ],
     )

@@ -170,6 +170,21 @@ def current_worktree() -> pathlib.Path | None:
     return WORKTREES_HOME / cwd.relative_to(WORKTREES_HOME).parts[0]
 
 
+def resolve_branch(branch: str | None) -> tuple[str, pathlib.Path]:
+    """Resolve a branch name to (branch, worktree_path). Errors if unresolvable."""
+    if branch:
+        wt_path = find_worktree_for_branch(branch)
+        if wt_path is None:
+            logger.error("No worktree found for branch '%s'.", branch)
+            sys.exit(1)
+        return branch, wt_path
+    wt_path = current_worktree()
+    if wt_path is None:
+        logger.error("No branch specified and not inside a locki worktree.")
+        sys.exit(1)
+    return wt_path.relative_to(WORKTREES_HOME).parts[0], wt_path
+
+
 def find_worktree_for_branch(branch: str) -> pathlib.Path | None:
     """Return the worktree path for a branch managed by Locki, or None."""
     result = run_command(
@@ -193,15 +208,11 @@ def find_worktree_for_branch(branch: str) -> pathlib.Path | None:
 # Register commands (imported here to avoid circular imports)
 from locki.port_forward import port_forward_cmd  # noqa: E402
 from locki.safe_cmd import safe_cmd  # noqa: E402
-from locki.shell import claude_cmd, codex_cmd, gemini_cmd, opencode_cmd, shell_cmd  # noqa: E402
+from locki.shell import exec_cmd  # noqa: E402
 from locki.vm import vm_app  # noqa: E402
 from locki.worktree import remove_cmd, status_cmd, stop_cmd  # noqa: E402
 
-app.add_command(shell_cmd, "shell | sh | bash")
-app.add_command(claude_cmd, "claude")
-app.add_command(gemini_cmd, "gemini")
-app.add_command(codex_cmd, "codex")
-app.add_command(opencode_cmd, "opencode")
+app.add_command(exec_cmd, "exec | x")
 app.add_command(port_forward_cmd, "port-forward | pf")
 app.add_command(remove_cmd, "remove | rm | delete")
 app.add_command(stop_cmd, "stop")

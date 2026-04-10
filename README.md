@@ -65,7 +65,7 @@ claude "fix issue #42"
 <td>
 
 ```sh
-locki claude fix-42 -- "fix issue #42"
+locki x claude "fix issue #42"
 # ...go make a cup of tea
 # ...drink tea 🍵
 # ...look, the PR is ready
@@ -102,18 +102,24 @@ Case study: [Kagenti ADK](https://github.com/kagenti/adk) uses Locki to run a fu
 
 1. Install using your preferred manager: `uv tool install locki` or `pipx install locki`. ([Use uv](https://docs.astral.sh/uv/getting-started/installation/) if unsure.)
 1. If you're on Linux, also install [OpenSSH](https://repology.org/project/openssh/versions) (usually preinstalled) and [QEMU](https://www.qemu.org/download/#linux).
-1. `cd` to your Git repository and run: `locki claude my-feature-branch`
+1. `cd` to your Git repository and run: `locki x claude`
 
     <small>
 
-    (Arg is branch name, existing or new. Replace `claude` with `gemini`, `codex`, `opencode`, or `shell`.)
+    (`locki x` runs a command sandboxed: alternatively use `gemini`, `codex` or `opencode`.)
 
     </small>
 1. First start takes longer, wait a few minutes for the VM to boot.
 1. Follow prompts to log in to the AI CLI. Login will be persisted across sandboxes.
 1. Build! Your agent is already instructed on how to behave in the sandbox. 
 1. Once happy, commit and push your changes. Ask the agent, or do this manually for more control.
-1. After merging the branch, clean up: `locki rm my-feature-branch` -- or just delete the worktree from your IDE.
+1. After merging the branch, just delete the worktree from your IDE and Locki will clean up the sandbox.
+
+    <small>
+
+    (Or do it manually with: `locki rm -b <branch-name>`)
+
+    </small>
 
 &nbsp;
 
@@ -135,9 +141,13 @@ Case study: [Kagenti ADK](https://github.com/kagenti/adk) uses Locki to run a fu
 
 - Editors like VSCode show worktrees in the sidebar, useful as a quick UI for reviewing and modifying changes. *(⚠️ VSCode 1.115.0 is [bugged](https://github.com/microsoft/vscode/issues/308820?reload=1) and does not show worktrees. [Downgrading to 1.114.0 is simple.](https://code.visualstudio.com/updates/v1_114))*
 
+- The unified `locki x` (or `locki exec`) command runs anything in the sandbox. Use it like a prefix: `locki x bash`, `locki x claude`, `locki x -b my-branch git status`. Without `-b`, it uses the current worktree if in one, otherwise creates a new one.
+
 - Locki sandboxes provide [Mise](https://mise.jdx.dev) for tool version management -- replacing `nvm`, `rbenv`, `brew` etc. with a single tool. To make your agents' (and humans') lives easier, optionally <small>(ask your agent to)</small> create `mise.toml` with tool versions and project tasks.
 
 - Want to use custom AI configuration in the VM -- instructions, skills, MCP servers, ...? Sandboxes share a home folder accessible at `~/.locki/home` on host. For example, you can run `cp ~/.claude/CLAUDE.md ~/.locki/home/.claude/CLAUDE.md` to copy your custom instructions for use in sandboxes.
+
+- Forward ports from a sandbox to your host: `locki pf -b my-branch 8080` or `locki pf -b my-branch :3000` for a random host port. Use `--clear` to remove all forwards.
 
 - Using Git hooks? Locki worktrees are automatically configured to run these inside the sandbox, even if you run `git` from outside. You won't be surprised by the `.venv` containing incompatible binaries.
 

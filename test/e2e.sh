@@ -72,19 +72,20 @@ cd "$REPO"
 echo
 echo "Testing cold start + parallel VM creation..."
 
-cold_start=$(timed locki shell 'feat/auth_v2.0' -c "echo 1") || true
+cold_start=$(timed locki x -b 'feat/auth_v2.0' echo 1) || true
 echo "  cold start: ${cold_start}s"
 
 # branch b in parallel with a (VM already exists, but tests lock waiting)
-assert_output "locki shell b runs" "2" locki shell 'fix-login_bug.3' -c "echo 2"
+assert_output "locki x b runs" "2" locki x -b 'fix-login_bug.3' echo 2
 
 # ── cache persistence across invocations ─────────────────────────────────────
 
 echo
 echo "Testing cache persistence..."
 
-assert_ok "write to cache" locki shell 'feat/auth_v2.0' -c "mkdir -p /var/cache/locki && echo 42 > /var/cache/locki/test"
-assert_ok "cached file persists" locki shell 'feat/auth_v2.0' -c "test -f /var/cache/locki/test"
+locki x -b 'feat/auth_v2.0' mkdir -p /var/cache/locki
+assert_ok "write to cache" bash -c "echo 42 | locki x -b 'feat/auth_v2.0' tee /var/cache/locki/test >/dev/null"
+assert_ok "cached file persists" locki x -b 'feat/auth_v2.0' test -f /var/cache/locki/test
 
 # ── hook execution in guest ──────────────────────────────────────────────────
 
@@ -112,13 +113,13 @@ assert_output "hook copied correct content" "42" cat "$WORKTREE/hook-proof"
 echo
 echo "Testing proxied git commands..."
 
-assert_ok    "git status works"              locki shell 'feat/auth_v2.0' -c "git status"
-assert_ok    "git log works"                 locki shell 'feat/auth_v2.0' -c "git log --oneline"
-assert_ok    "git diff works"                locki shell 'feat/auth_v2.0' -c "git diff"
-assert_ok    "git show works"                locki shell 'feat/auth_v2.0' -c "git show"
-assert_fail  "git checkout is blocked"       locki shell 'feat/auth_v2.0' -c "git checkout main"
-assert_fail  "git reset is blocked"          locki shell 'feat/auth_v2.0' -c "git reset --hard"
-assert_fail  "short flags are blocked"       locki shell 'feat/auth_v2.0' -c "git commit -m test"
+assert_ok    "git status works"              locki x -b 'feat/auth_v2.0' git status
+assert_ok    "git log works"                 locki x -b 'feat/auth_v2.0' git log --oneline
+assert_ok    "git diff works"                locki x -b 'feat/auth_v2.0' git diff
+assert_ok    "git show works"                locki x -b 'feat/auth_v2.0' git show
+assert_fail  "git checkout is blocked"       locki x -b 'feat/auth_v2.0' git checkout main
+assert_fail  "git reset is blocked"          locki x -b 'feat/auth_v2.0' git reset --hard
+assert_fail  "short flags are blocked"       locki x -b 'feat/auth_v2.0' git commit -m test
 
 # ── git commit from sandbox ─────────────────────────────────────────────────
 
@@ -126,13 +127,17 @@ echo
 echo "Testing git commit from sandbox..."
 
 WORKTREE_A=$(git worktree list --porcelain | grep -B2 "branch refs/heads/feat/auth_v2.0" | head -1 | sed 's/worktree //')
-locki shell 'feat/auth_v2.0' -c "echo test-content > $WORKTREE_A/commit-test.txt && git add --all && git commit --message='simple commit'"
+echo test-content | locki x -b 'feat/auth_v2.0' tee "$WORKTREE_A/commit-test.txt" >/dev/null
+locki x -b 'feat/auth_v2.0' git add --all
+locki x -b 'feat/auth_v2.0' git commit --message='simple commit'
 assert_output "simple commit landed" "simple commit" git -C "$WORKTREE_A" log -1 --format=%s
 
 # Multi-line commit message (newlines triggered $'...' quoting bug)
-locki shell 'feat/auth_v2.0' -c "echo more > $WORKTREE_A/commit-test2.txt && git add --all && git commit --message='multi line
+echo more | locki x -b 'feat/auth_v2.0' tee "$WORKTREE_A/commit-test2.txt" >/dev/null
+locki x -b 'feat/auth_v2.0' git add --all
+locki x -b 'feat/auth_v2.0' git commit --message='multi line
 
-second paragraph'"
+second paragraph'
 assert_output "multi-line commit subject" "multi line" git -C "$WORKTREE_A" log -1 --format=%s
 assert_output "multi-line commit body" "second paragraph" git -C "$WORKTREE_A" log -1 --format=%b
 
@@ -149,7 +154,9 @@ echo "Signed-off-by: Test Bot <test@example.com>" >> "$1"
 HOOK
 chmod +x "$HOOKS_DIR/commit-msg"
 
-locki shell 'feat/auth_v2.0' -c "echo hook-msg-test > $WORKTREE_A/hook-msg-file.txt && git add --all && git commit --message='test hook message'"
+echo hook-msg-test | locki x -b 'feat/auth_v2.0' tee "$WORKTREE_A/hook-msg-file.txt" >/dev/null
+locki x -b 'feat/auth_v2.0' git add --all
+locki x -b 'feat/auth_v2.0' git commit --message='test hook message'
 assert_output "commit-msg hook appended trailer" "Signed-off-by: Test Bot" git -C "$WORKTREE_A" log -1 --format=%b
 assert_output "original message preserved" "test hook message" git -C "$WORKTREE_A" log -1 --format=%s
 
@@ -169,8 +176,8 @@ git -C "$TMPDIR_ROOT/pusher" push -u origin 'dependabot/pip/apps/some-long-serve
 # Verify the branch doesn't exist locally yet
 assert_fail "remote branch not local yet" git -C "$REPO" rev-parse --verify 'refs/heads/dependabot/pip/apps/some-long-server-name/pip-security-4d376cd218'
 
-# locki shell should fetch and create the branch from remote
-assert_ok "locki fetches remote branch" locki shell 'dependabot/pip/apps/some-long-server-name/pip-security-4d376cd218' -c "echo ok"
+# locki x should fetch and create the branch from remote
+assert_ok "locki fetches remote branch" locki x -b 'dependabot/pip/apps/some-long-server-name/pip-security-4d376cd218' echo ok
 
 # Check the branch was created from the remote (has the remote commit)
 REMOTE_ONLY_WT=$(git -C "$REPO" worktree list --porcelain | grep -B2 "branch refs/heads/dependabot/pip/apps/some-long-server-name/pip-security-4d376cd218" | head -1 | sed 's/worktree //')
@@ -181,7 +188,7 @@ assert_output "branch has remote commit" "remote commit" git -C "$REMOTE_ONLY_WT
 echo
 echo "Testing warm start..."
 
-warm_start=$(timed locki shell 'release_v1.0-rc#1' -c "echo 3") || true
+warm_start=$(timed locki x -b 'release_v1.0-rc#1' echo 3) || true
 echo "  warm start: ${warm_start}s"
 
 # ── hot start (existing container) ───────────────────────────────────────────
@@ -189,7 +196,7 @@ echo "  warm start: ${warm_start}s"
 echo
 echo "Testing hot start..."
 
-hot_start=$(timed locki shell 'release_v1.0-rc#1' -c "echo 4") || true
+hot_start=$(timed locki x -b 'release_v1.0-rc#1' echo 4) || true
 echo "  hot start: ${hot_start}s"
 
 # ── container isolation ──────────────────────────────────────────────────────
@@ -197,8 +204,8 @@ echo "  hot start: ${hot_start}s"
 echo
 echo "Testing container isolation..."
 
-assert_ok "write secret in branch a" locki shell 'feat/auth_v2.0' -c "echo secret > /tmp/a-only"
-assert_fail "branch b can't see branch a's /tmp" locki shell 'fix-login_bug.3' -c "test -f /tmp/a-only"
+assert_ok "write secret in branch a" bash -c "echo secret | locki x -b 'feat/auth_v2.0' tee /tmp/a-only >/dev/null"
+assert_fail "branch b can't see branch a's /tmp" locki x -b 'fix-login_bug.3' test -f /tmp/a-only
 
 # ── custom image via locki.toml ──────────────────────────────────────────────
 
@@ -211,7 +218,7 @@ aarch64 = "images:ubuntu/24.04"
 x86_64 = "images:ubuntu/24.04"
 TOML
 
-assert_output "custom image container runs ubuntu" "Ubuntu" locki shell '@user+hotfix%2!weird,name' -c "cat /etc/os-release"
+assert_output "custom image container runs ubuntu" "Ubuntu" locki x -b '@user+hotfix%2!weird,name' cat /etc/os-release
 rm -f "$REPO/locki.toml"
 
 # ── port forwarding ─────────────────────────────────────────────────────────
@@ -220,13 +227,13 @@ echo
 echo "Testing port forwarding..."
 
 # Install ncat in the container (locki-base doesn't include it)
-locki shell 'fix-login_bug.3' -c "dnf install -y nmap-ncat >/dev/null 2>&1"
+locki x -b 'fix-login_bug.3' dnf install -y nmap-ncat
 
 # Start a persistent listener inside the container
-locki shell 'fix-login_bug.3' -c "nohup bash -c 'while true; do echo pf-ok | ncat -l 9111; done' &>/dev/null &"
+locki x -b 'fix-login_bug.3' bash -c "nohup bash -c 'while true; do echo pf-ok | ncat -l 9111; done' &>/dev/null &"
 
 # Forward host 9111 -> container 9111
-assert_ok    "port-forward adds device" locki port-forward 'fix-login_bug.3' 9111
+assert_ok    "port-forward adds device" locki port-forward -b 'fix-login_bug.3' 9111
 
 # Wait for Lima to detect and forward the new listening port
 pf_ok=false
@@ -239,26 +246,38 @@ done
 if $pf_ok; then pass "port-forward is reachable"; else fail "port-forward is reachable (timed out after 120s)"; fi
 
 # Clear all forwards
-assert_ok    "port-forward --clear removes device" locki port-forward 'fix-login_bug.3' --clear
+assert_ok    "port-forward --clear removes device" locki port-forward -b 'fix-login_bug.3' --clear
 sleep 3
 assert_fail  "cleared forward is unreachable" bash -c "nc -w2 localhost 9111"
 
 # Random host port with :container_port syntax
-random_output=$(locki port-forward 'fix-login_bug.3' :9222 2>/dev/null)
+random_output=$(locki port-forward -b 'fix-login_bug.3' :9222 2>/dev/null)
 random_host_port=$(echo "$random_output" | grep -oE '^[0-9]+')
 if [[ "$random_host_port" -ge 1024 ]]; then pass ":port assigns random host port >= 1024"; else fail ":port assigns random host port >= 1024 (got '$random_host_port')"; fi
 assert_output ":port output shows container port" ":9222" echo "$random_output"
-assert_ok    ":port forward cleaned up" locki port-forward 'fix-login_bug.3' --clear
+assert_ok    ":port forward cleaned up" locki port-forward -b 'fix-login_bug.3' --clear
 
 # Reject privileged ports
-assert_fail  "port < 1024 rejected" locki port-forward 'fix-login_bug.3' 80
+assert_fail  "port < 1024 rejected" locki port-forward -b 'fix-login_bug.3' 80
+
+# ── auto-generated branch ───────────────────────────────────────────────────
+
+echo
+echo "Testing auto-generated branch..."
+
+auto_output=$(locki x echo auto-ok 2>&1)
+assert_output "auto branch runs command" "auto-ok" echo "$auto_output"
+assert_output "auto branch name printed" "Creating a new branch '" echo "$auto_output"
+# Viking name format: <name>-<father>(sson|sdottir)-<number>
+auto_branch=$(echo "$auto_output" | sed -n "s/.*Creating a new branch '\([^']*\)'.*/\1/p")
+if [[ "$auto_branch" =~ ^[a-z]+-[a-z]+(sson|sdottir)-[0-9]+$ ]]; then pass "auto branch has Viking name format"; else fail "auto branch has Viking name format (got '$auto_branch')"; fi
 
 # ── worktree cleanup ─────────────────────────────────────────────────────────
 
 echo
 echo "Testing worktree removal..."
 
-assert_ok "locki remove works" locki remove --force 'feat/auth_v2.0'
+assert_ok "locki remove works" locki remove -b 'feat/auth_v2.0' --force
 assert_fail "removed worktree dir is gone" test -d "$WORKTREE"
 
 # ── summary ──────────────────────────────────────────────────────────────────
