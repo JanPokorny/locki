@@ -9,21 +9,24 @@ import click
 _required = bool               # --flag=<non-empty value>
 _flag = {None, ""}        # optional boolean flag (--flag or absent, no value)
 
+_diff_flags = {"staged": _flag, "name_only": _flag, "stat": _flag, "name_status": _flag}
+_log_flags = {"oneline": _flag, "format": ..., "max_count": ...}
+
 RULES = [
     ("git", "status"),
-    ("git", "diff", {"staged": _flag}),
-    ("git", "diff", str, {"staged": _flag}),
-    ("git", "diff", str, str, {"staged": _flag}),
+    ("git", "diff", _diff_flags),
+    ("git", "diff", str, _diff_flags),
+    ("git", "diff", str, str, _diff_flags),
     ("git", "add", {"all": _flag}),
     ("git", "add", str, ...),
     ("git", "commit", {"message": _required, "signoff": _flag}),
     ("git", "push"),
     ("git", "fetch"),
-    ("git", "log", {"oneline": _flag}),
-    ("git", "log", str, {"oneline": _flag}),
+    ("git", "log", _log_flags),
+    ("git", "log", str, _log_flags),
     ("git", "show"),
     ("git", "show", str),
-    ("git", "restore", str, {"staged": _flag, "source": ...}),
+    ("git", "restore", str, ..., {"staged": _flag, "source": ...}),
     ("git", "switch", str),
     ("git", "switch", {"create": _required}),
     ("git", "stash", "push", {"message": ...}),
@@ -35,7 +38,7 @@ RULES = [
     ("git", "stash", "apply", str),
     ("git", "stash", "drop"),
     ("git", "stash", "drop", str),
-    ("gh", "pr", "create", {"title": _required, "body": ..., "base": ...}),
+    ("gh", "pr", "create", {"title": _required, "body": ..., "base": ..., "draft": _flag, "fill": _flag, "reviewer": ..., "label": ..., "assignee": ..., "head": ...}),
     ("gh", "pr", "view"),
     ("gh", "pr", "view", str.isdigit),
     ("gh", "pr", "list"),
