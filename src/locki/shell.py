@@ -305,6 +305,18 @@ def exec_cmd(ctx, branch):
             "/opt/locki/bin/git": proxy_stub,
             "/opt/locki/bin/gh": proxy_stub,
             "/opt/locki/bin/bwrap": "#!/bin/sh\nexit 1\n",  # silence codex warning
+            "/opt/locki/bin/dnf": textwrap.dedent("""\
+                #!/bin/bash
+                set -euo pipefail
+                real_dnf=$(PATH=$(echo "$PATH" | tr : '\\n' | grep -vx /opt/locki/bin | paste -sd:) command -v dnf)
+                if [ -z "$real_dnf" ]; then echo "dnf: not found" >&2; exit 127; fi
+                "$real_dnf" install -y \\
+                  https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm \\
+                  https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm \\
+                  2>/dev/null || true
+                rm -f /opt/locki/bin/dnf
+                exec "$real_dnf" "$@"
+            """),
             "/etc/bashrc.d/locki-mise.sh": 'eval "$(mise activate bash)"\n',
             "/opt/locki/bin/claude": textwrap.dedent("""\
                 #!/bin/bash
@@ -360,7 +372,15 @@ def exec_cmd(ctx, branch):
                 textwrap.dedent(f"""\
                     hostnamectl set-hostname locki 2>/dev/null || echo locki > /etc/hostname
                     for bin in /opt/locki/bin/*; do chmod +x "$bin"; done
-                    command -v mise || curl -fsSL https://mise.run | sh || true
+                    if ! command -v mise &>/dev/null; then
+                      if command -v dnf &>/dev/null; then dnf -y copr enable jdxcode/mise && dnf -y install mise
+                      elif command -v apt &>/dev/null; then apt update -y && apt install -y mise
+                      elif command -v pacman &>/dev/null; then pacman -Sy --noconfirm mise
+                      elif command -v apk &>/dev/null; then apk add mise
+                      elif command -v zypper &>/dev/null; then zypper --non-interactive install mise
+                      else curl -fsSL https://mise.run | sh
+                      fi
+                    fi
                     mkdir -p /etc/dnf && echo -e "cachedir=/var/cache/locki/dnf\\nkeepcache=1" >> /etc/dnf/dnf.conf || true
                     mkdir -p /etc/apt/apt.conf.d && printf 'Dir::Cache "/var/cache/locki/apt/cache";\\nDir::State "/var/cache/locki/apt/state";\\n' > /etc/apt/apt.conf.d/99local-cache || true
                     echo '{host_ip} host.lima.internal' >> /etc/hosts

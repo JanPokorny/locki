@@ -118,11 +118,6 @@ provision:
       incus launch images:fedora/43 locki-base-builder
       incus exec locki-base-builder -- bash -euxo pipefail -c '
       	curl --retry 10 --retry-all-errors https://mirrors.fedoraproject.org  # network takes a few seconds to connect
-      	dnf install -y \
-      	  https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm \
-      	  https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm
-      	dnf -y copr enable jdxcode/mise
-      	dnf -y install mise
       '
       incus stop locki-base-builder
       incus publish locki-base-builder --alias locki-base
