@@ -1,6 +1,5 @@
 import getpass
 import importlib.resources
-import json
 import logging
 import os
 import pathlib
@@ -12,7 +11,6 @@ import shutil
 import string
 import subprocess
 import sys
-import textwrap
 
 import click
 
@@ -64,105 +62,6 @@ def _viking_name() -> str:
     suffix = "sson" if is_male else "sdottir"
     number = random.randint(1, 99)
     return f"{name}-{father}{suffix}-{number}"
-
-
-def _container_setup_script(agents_md: str, proxy_stub: str, worktrees_home: str) -> str:
-    """Build a single bash script that writes all container files and configures the environment."""
-
-    def _heredoc(path: str, content: str) -> str:
-        if not content.endswith("\n"):
-            content += "\n"
-        return f"cat > {path} << '__LOCKI_EOF__'\n{content}__LOCKI_EOF__\n"
-
-    gemini_settings = json.dumps(
-        {"security": {"folderTrust": {"enabled": False}}, "tools": {"sandbox": False}}
-    )
-    codex_config = textwrap.dedent(f"""\
-        approval_policy = "never"
-        sandbox_mode = "danger-full-access"
-        cli_auth_credentials_store = "file"
-        developer_instructions = "/etc/codex/AGENTS.md"
-        projects.{json.dumps(worktrees_home)}.trust_level = "trusted"
-    """)
-
-    files = {
-        "/etc/claude-code/CLAUDE.md": agents_md,
-        "/etc/gemini-cli/GEMINI.md": agents_md,
-        "/etc/gemini-cli/settings.json": gemini_settings,
-        "/etc/codex/config.toml": codex_config,
-        "/etc/codex/AGENTS.md": agents_md,
-        "/etc/opencode/AGENTS.md": agents_md,
-        "/opt/locki/bin/git": proxy_stub,
-        "/opt/locki/bin/gh": proxy_stub,
-        "/opt/locki/bin/bwrap": "#!/bin/sh\nexit 1\n",
-        "/opt/locki/bin/dnf": textwrap.dedent("""\
-            #!/bin/bash
-            set -euo pipefail
-            mkdir -p /etc/dnf
-            echo -e "cachedir=/var/cache/locki/dnf\\nkeepcache=1" >> /etc/dnf/dnf.conf
-            /bin/dnf install -y \\
-              https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm \\
-              https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm \\
-              2>/dev/null || true
-            rm -f /opt/locki/bin/dnf
-            exec /bin/dnf "$@"
-        """),
-        "/opt/locki/bin/apt": textwrap.dedent("""\
-            #!/bin/bash
-            set -euo pipefail
-            mkdir -p /etc/apt/apt.conf.d
-            printf 'Dir::Cache "/var/cache/locki/apt/cache";\\nDir::State "/var/cache/locki/apt/state";\\n' > /etc/apt/apt.conf.d/99local-cache
-            rm -f /opt/locki/bin/apt
-            exec /bin/apt "$@"
-        """),
-        "/etc/bashrc.d/locki-mise.sh": 'eval "$(mise activate bash)"\n',
-        "/opt/locki/bin/claude": textwrap.dedent("""\
-            #!/bin/bash
-            mise install nodejs@24 >&2
-            mise exec nodejs@24 -- mise install npm:@anthropic-ai/claude-code@latest >&2
-            exec mise exec nodejs@24 npm:@anthropic-ai/claude-code@latest -- claude --dangerously-skip-permissions "$@"
-        """),
-        "/opt/locki/bin/gemini": textwrap.dedent("""\
-            #!/bin/bash
-            mise install nodejs@24 >&2
-            mise exec nodejs@24 -- mise install npm:@google/gemini-cli@latest >&2
-            exec mise exec nodejs@24 npm:@google/gemini-cli@latest -- gemini --yolo "$@"
-        """),
-        "/opt/locki/bin/codex": textwrap.dedent("""\
-            #!/bin/bash
-            mise install nodejs@24 >&2
-            mise exec nodejs@24 -- mise install npm:@openai/codex@latest >&2
-            exec mise exec nodejs@24 npm:@openai/codex@latest -- codex --yolo "$@"
-        """),
-        "/opt/locki/bin/opencode": textwrap.dedent("""\
-            #!/bin/bash
-            mise use -g github:anomalyco/opencode >&2
-            exec opencode "$@"
-        """),
-    }
-
-    parts = [
-        "set -euxo pipefail\n",
-        "mkdir -p /etc/claude-code /etc/gemini-cli /etc/codex /etc/opencode /opt/locki/bin /etc/bashrc.d\n",
-    ]
-    for path, content in files.items():
-        parts.append(_heredoc(path, content))
-    parts.append(textwrap.dedent("""\
-        chmod +x /opt/locki/bin/*
-        hostnamectl set-hostname locki 2>/dev/null || echo locki > /etc/hostname
-        if ! command -v mise &>/dev/null; then
-          if [ -x /bin/dnf ]; then /bin/dnf -y copr enable jdxcode/mise && /bin/dnf -y install mise
-          elif [ -x /bin/apt ]; then /bin/apt update -y && /bin/apt install -y mise
-          elif [ -x /bin/pacman ]; then /bin/pacman -Sy --noconfirm mise
-          elif [ -x /bin/apk ]; then /bin/apk add mise
-          elif [ -x /bin/zypper ]; then /bin/zypper --non-interactive install mise
-          else curl -fsSL https://mise.run | sh
-          fi
-        fi
-        echo '192.168.5.2 host.lima.internal' >> /etc/hosts
-    """))
-
-    return "".join(parts)
 
 
 @click.command("exec | x", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
@@ -381,13 +280,11 @@ def exec_cmd(ctx, branch):
             "Starting container",
         )
 
-        proxy_stub = (importlib.resources.files("locki") / "data" / "proxy-stub.sh").read_text()
-        agents_md = (importlib.resources.files("locki") / "data" / "AGENTS.md").read_text()
-        setup_script = _container_setup_script(agents_md, proxy_stub, str(locki.WORKTREES_HOME))
+        setup_script = (importlib.resources.files("locki") / "data" / "container-setup.sh").read_bytes()
         locki.run_in_vm(
-            ["incus", "exec", wt_id, "--", "bash"],
+            ["incus", "exec", wt_id, "--env", f"LOCKI_WORKTREES_HOME={locki.WORKTREES_HOME}", "--", "/bin/sh"],
             "Configuring container",
-            input=setup_script.encode(),
+            input=setup_script,
         )
 
     # Start SSH proxy (sshd) for git/gh command forwarding
