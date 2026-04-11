@@ -28,11 +28,43 @@ def _parse_port_spec(spec: str) -> tuple[int, int]:
     raise click.BadParameter(f"Invalid port spec '{spec}'. Use 'port', 'host_port:container_port', or ':container_port'.")
 
 
+def _list_forwards(wt_id: str):
+    """Print all active port forwards for a container."""
+    result = locki.run_in_vm(
+        ["incus", "config", "device", "list", wt_id, "--format=csv"],
+        "Listing devices",
+        quiet=True,
+    )
+    for line in result.stdout.decode().splitlines():
+        name = line.strip().split(",")[0].strip()
+        if not name.startswith("port-fwd-"):
+            continue
+        dev_result = locki.run_in_vm(
+            ["incus", "config", "device", "get", wt_id, name, "listen"],
+            f"Reading {name}",
+            check=False,
+            quiet=True,
+        )
+        listen = dev_result.stdout.decode().strip()
+        dev_result = locki.run_in_vm(
+            ["incus", "config", "device", "get", wt_id, name, "connect"],
+            f"Reading {name}",
+            check=False,
+            quiet=True,
+        )
+        connect = dev_result.stdout.decode().strip()
+        # listen=tcp:0.0.0.0:8080  connect=tcp:127.0.0.1:3000
+        host_port = listen.rsplit(":", 1)[-1] if listen else "?"
+        container_port = connect.rsplit(":", 1)[-1] if connect else "?"
+        print(f"{host_port}:{container_port}")
+
+
 @click.command(context_settings={"allow_extra_args": True})
 @click.option("-b", "--branch", default=None, help="Branch name.")
 @click.option("--clear", is_flag=True, help="Remove all existing port forwards before adding new ones.")
+@click.option("--list", "list_forwards", is_flag=True, help="List active port forwards.")
 @click.pass_context
-def port_forward_cmd(ctx, branch, clear):
+def port_forward_cmd(ctx, branch, clear, list_forwards):
     """Forward ports from the host to a branch's container."""
     _, wt_path = locki.resolve_branch(branch)
     wt_id = wt_path.relative_to(locki.WORKTREES_HOME).parts[0]
@@ -64,12 +96,8 @@ def port_forward_cmd(ctx, branch, clear):
                     ["incus", "config", "device", "remove", wt_id, name],
                     f"Removing {name}",
                 )
-        if not ctx.args:
+        if not ctx.args and not list_forwards:
             return
-
-    if not ctx.args:
-        logger.error("No ports specified. Usage: locki port-forward -b <branch> port[:port]...")
-        sys.exit(1)
 
     for spec in ctx.args:
         host_port, container_port = _parse_port_spec(spec)
@@ -91,4 +119,11 @@ def port_forward_cmd(ctx, branch, clear):
             ],
             f"Forwarding host port {host_port} -> container port {container_port}",
         )
-        print(f"{host_port}:{container_port}")
+        if not list_forwards:
+            print(f"{host_port}:{container_port}")
+
+    if list_forwards:
+        _list_forwards(wt_id)
+    elif not ctx.args and not clear:
+        logger.error("No ports specified. Usage: locki port-forward -b <branch> [--list] [--clear] [port[:port]...]")
+        sys.exit(1)

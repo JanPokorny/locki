@@ -201,6 +201,11 @@ def exec_cmd(ctx, branch):
                 ["git", "-C", str(wt_path), "config", "--worktree", "core.hooksPath", str(hooks_dir)],
                 "Configuring per-worktree hooks",
             )
+
+            run_command(
+                ["git", "-C", str(wt_path), "config", "--worktree", "push.autoSetupRemote", "true"],
+                "Configuring auto push for new branches",
+            )
     else:
         wt_path = locki.current_worktree()
         if wt_path is None:
