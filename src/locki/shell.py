@@ -1,5 +1,6 @@
 import getpass
 import importlib.resources
+import json
 import logging
 import os
 import pathlib
@@ -11,6 +12,7 @@ import shutil
 import string
 import subprocess
 import sys
+import tempfile
 
 import click
 
@@ -114,27 +116,32 @@ def exec_cmd(ctx, branch):
         )
 
     with locki._file_lock("vm", "Waiting for VM to start"):
-        run_command(
-            [
-                locki.limactl(),
-                "--tty=false",
-                "create",
-                str(importlib.resources.files("locki").joinpath("data/locki.yaml")),
-                "--mount-writable",
-                "--name=locki",
+        vm_setup = (importlib.resources.files("locki") / "data" / "vm-setup.sh").read_text()
+        lima_config = json.dumps({
+            "minimumLimaVersion": "2.0.0",
+            "base": ["template:fedora"],
+            "containerd": {"system": False, "user": False},
+            "mounts": [
+                {"location": "~/.locki/worktrees", "writable": True},
+                {"location": "~/.locki/home", "mountPoint": "/root/.locki/home", "writable": True},
             ],
-            "Preparing VM",
-            env={"LIMA_HOME": str(locki.LIMA_HOME)},
-            cwd="/",
-            check=False,
-        )
+            "provision": [{"mode": "system", "script": vm_setup}],
+        })
+        lima_fd, lima_yaml = tempfile.mkstemp(suffix=".yaml")
+        try:
+            os.write(lima_fd, lima_config.encode())
+            os.close(lima_fd)
+            run_command(
+                [locki.limactl(), "--tty=false", "create", lima_yaml, "--mount-writable", "--name=locki"],
+                "Preparing VM",
+                env={"LIMA_HOME": str(locki.LIMA_HOME)},
+                cwd="/",
+                check=False,
+            )
+        finally:
+            os.unlink(lima_yaml)
         run_command(
-            [
-                locki.limactl(),
-                "--tty=false",
-                "start",
-                "locki",
-            ],
+            [locki.limactl(), "--tty=false", "start", "locki"],
             "Starting VM",
             env={"LIMA_HOME": str(locki.LIMA_HOME)},
             cwd="/",
