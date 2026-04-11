@@ -1,17 +1,11 @@
 #!/bin/sh
-# Container setup script for locki sandboxes.
-# Piped via stdin to /bin/sh inside the container to write config files,
-# install shims, and prepare the environment in a single round-trip.
-#
-# Required environment variable:
-#   LOCKI_WORKTREES_HOME  path to the shared worktrees directory
 set -eux
 
 mkdir -p /etc/claude-code /etc/gemini-cli /etc/codex /etc/opencode \
          /opt/locki/bin /etc/bashrc.d
 
-# -- Agent instructions (written once, copied to all tool config dirs) ---------
-cat > /etc/claude-code/CLAUDE.md << '__LOCKI_EOF__'
+tee /etc/claude-code/CLAUDE.md /etc/gemini-cli/GEMINI.md \
+    /etc/codex/AGENTS.md /etc/opencode/AGENTS.md > /dev/null << '__LOCKI_EOF__'
 You are running inside a locki sandbox VM. This is an ephemeral environment designed to keep the main machine safe from malfunctioning agents. The folder is a fresh worktree: before delving into your task, start by setting up the environment. Check project metadata (`mise.toml`, `.tool-versions`, `.nvmrc`, `pyproject.toml`, etc.), CI definitions (`.github/workflows/*.yaml`, etc.) or docs (`README.md`, `CONTRIBUTING.md`, `*.md`, `docs/*`, etc.) to determine needed tools and their versions, and setup commands. If there is `mise.toml`, run `mise install` to set up all tools. Otherwise manually enable specific tool versions using e.g.: `mise use -g python@3.12.1`, `mise use -g node@22`, `mise use -g jq`, falling back to OS package manager if `mise` does not have the tool (`dnf` with RPM Fusion by default, unless running on a custom image).
 
 `git` and `gh` are available but restricted to a safe subset of commands (enforced by the host). Only long flags (`--flag` or `--flag=value`) are accepted; short flags (`-x`) are rejected. Allowed commands:
@@ -21,16 +15,11 @@ You are running inside a locki sandbox VM. This is an ephemeral environment desi
   gh pr create [--title=<t>] [--body=<b>] [--base=<b>] [--head=<h>] [--draft] [--fill] [--reviewer=<r>] [--label=<l>] [--assignee=<a>] | gh pr view/list/diff/status | gh run view/list | gh issue view/list
 Any other git/gh invocation will be rejected by the proxy.
 __LOCKI_EOF__
-cp /etc/claude-code/CLAUDE.md /etc/gemini-cli/GEMINI.md
-cp /etc/claude-code/CLAUDE.md /etc/codex/AGENTS.md
-cp /etc/claude-code/CLAUDE.md /etc/opencode/AGENTS.md
 
-# -- Gemini CLI settings -------------------------------------------------------
 cat > /etc/gemini-cli/settings.json << '__LOCKI_EOF__'
 {"security": {"folderTrust": {"enabled": false}}, "tools": {"sandbox": false}}
 __LOCKI_EOF__
 
-# -- Codex config (unquoted heredoc so $LOCKI_WORKTREES_HOME expands) ----------
 cat > /etc/codex/config.toml << __LOCKI_EOF__
 approval_policy = "never"
 sandbox_mode = "danger-full-access"
@@ -39,7 +28,6 @@ developer_instructions = "/etc/codex/AGENTS.md"
 projects."$LOCKI_WORKTREES_HOME".trust_level = "trusted"
 __LOCKI_EOF__
 
-# -- Git/Gh proxy shim (written once, copied) ---------------------------------
 cat > /opt/locki/bin/git << '__LOCKI_EOF__'
 #!/bin/bash
 cmd=$(basename "$0")
@@ -52,13 +40,11 @@ exec ssh -F /root/.ssh/locki-ssh-config locki-proxy -- "$q"
 __LOCKI_EOF__
 cp /opt/locki/bin/git /opt/locki/bin/gh
 
-# -- bwrap stub (disables codex's own sandboxing) ------------------------------
 cat > /opt/locki/bin/bwrap << '__LOCKI_EOF__'
 #!/bin/sh
 exit 1
 __LOCKI_EOF__
 
-# -- dnf JIT shim (RPM Fusion + cache config on first use) --------------------
 cat > /opt/locki/bin/dnf << '__LOCKI_EOF__'
 #!/bin/bash
 set -euo pipefail
@@ -72,7 +58,6 @@ rm -f /opt/locki/bin/dnf
 exec /bin/dnf "$@"
 __LOCKI_EOF__
 
-# -- apt JIT shim (cache config on first use) ---------------------------------
 cat > /opt/locki/bin/apt << '__LOCKI_EOF__'
 #!/bin/bash
 set -euo pipefail
@@ -82,12 +67,10 @@ rm -f /opt/locki/bin/apt
 exec /bin/apt "$@"
 __LOCKI_EOF__
 
-# -- mise activation -----------------------------------------------------------
 cat > /etc/bashrc.d/locki-mise.sh << '__LOCKI_EOF__'
 eval "$(mise activate bash)"
 __LOCKI_EOF__
 
-# -- AI tool launcher shims ---------------------------------------------------
 cat > /opt/locki/bin/claude << '__LOCKI_EOF__'
 #!/bin/bash
 mise install nodejs@24 >&2
@@ -115,7 +98,6 @@ mise use -g github:anomalyco/opencode >&2
 exec opencode "$@"
 __LOCKI_EOF__
 
-# -- System configuration -----------------------------------------------------
 chmod +x /opt/locki/bin/*
 hostnamectl set-hostname locki 2>/dev/null || echo locki > /etc/hostname
 
