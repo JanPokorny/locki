@@ -226,7 +226,7 @@ rm -f "$REPO/locki.toml"
 echo
 echo "Testing port forwarding..."
 
-# Install ncat in the container (locki-base doesn't include it)
+# Install ncat in the container (base image doesn't include it)
 locki x -b 'fix-login_bug.3' dnf install -y nmap-ncat
 
 # Start a persistent listener inside the container

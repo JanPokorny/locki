@@ -110,18 +110,6 @@ provision:
               source: /root/.locki/home
               type: disk
       EOF
-  - mode: system
-    script: |
-      #!/bin/bash
-      set -euxo pipefail
-      if incus image list --format csv | grep -q locki-base; then exit 0; fi
-      incus launch images:fedora/43 locki-base-builder
-      incus exec locki-base-builder -- bash -euxo pipefail -c '
-      	curl --retry 10 --retry-all-errors https://mirrors.fedoraproject.org  # network takes a few seconds to connect
-      '
-      incus stop locki-base-builder
-      incus publish locki-base-builder --alias locki-base
-      incus delete locki-base-builder
   - mode: data
     content: |
       #!/usr/bin/env python3
@@ -216,16 +204,3 @@ provision:
       systemctl daemon-reload
       systemctl enable --now locki-cleanup.timer
 
-probes:
-  - mode: readiness
-    description: locki-base image to be built
-    script: |
-      #!/bin/bash
-      set -euxo pipefail
-      if ! timeout 900s bash -c "until sudo incus image list --format csv | grep -q locki-base; do sleep 5; done"; then
-        echo >&2 "locki-base image was not built"
-        exit 1
-      fi
-    hint: |
-      The locki-base container image was not built during provisioning.
-      Check the VM provisioning logs for errors.
