@@ -372,7 +372,8 @@ def exec_cmd(ctx, branch):
                 textwrap.dedent(f"""\
                     hostnamectl set-hostname locki 2>/dev/null || echo locki > /etc/hostname
                     for bin in /opt/locki/bin/*; do chmod +x "$bin"; done
-                    if ! command -v mise &>/dev/null; then
+                    if ! command -v mise &>/dev/null; then (
+                      PATH=${{PATH#/opt/locki/bin:}}
                       if command -v dnf &>/dev/null; then dnf -y copr enable jdxcode/mise && dnf -y install mise
                       elif command -v apt &>/dev/null; then apt update -y && apt install -y mise
                       elif command -v pacman &>/dev/null; then pacman -Sy --noconfirm mise
@@ -380,7 +381,7 @@ def exec_cmd(ctx, branch):
                       elif command -v zypper &>/dev/null; then zypper --non-interactive install mise
                       else curl -fsSL https://mise.run | sh
                       fi
-                    fi
+                    ) fi
                     mkdir -p /etc/dnf && echo -e "cachedir=/var/cache/locki/dnf\\nkeepcache=1" >> /etc/dnf/dnf.conf || true
                     mkdir -p /etc/apt/apt.conf.d && printf 'Dir::Cache "/var/cache/locki/apt/cache";\\nDir::State "/var/cache/locki/apt/state";\\n' > /etc/apt/apt.conf.d/99local-cache || true
                     echo '{host_ip} host.lima.internal' >> /etc/hosts
