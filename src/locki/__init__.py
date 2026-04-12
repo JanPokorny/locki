@@ -10,9 +10,8 @@ import subprocess
 import sys
 
 import click
-from halo import Halo
 
-from locki.utils import run_command, setup_logging
+from locki.utils import Spinner, run_command, setup_logging
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -124,7 +123,7 @@ def _file_lock(name: str, wait_message: str):
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
-            with Halo(text=wait_message, spinner="dots", stream=sys.stderr):
+            with Spinner(wait_message, stream=sys.stderr):
                 fcntl.flock(fd, fcntl.LOCK_EX)
         yield
     finally:

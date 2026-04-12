@@ -3,12 +3,63 @@ import logging
 import os
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
-from halo import Halo
-
 LOG_DIR = Path.home() / ".locki" / "logs"
+
+_DOTS = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+
+class Spinner:
+    """Minimal terminal spinner: braille dots on stderr."""
+
+    def __init__(self, text: str, stream=None):
+        self._text = text
+        self._stream = stream or sys.stderr
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def _spin(self):
+        i = 0
+        while not self._stop.wait(0.08):
+            self._stream.write(f"\r{_DOTS[i % len(_DOTS)]} {self._text}")
+            self._stream.flush()
+            i += 1
+
+    def _clear_line(self):
+        self._stream.write("\r\033[2K")
+        self._stream.flush()
+
+    def start(self):
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._spin, daemon=True)
+        self._thread.start()
+        return self
+
+    def stop(self):
+        self._stop.set()
+        if self._thread:
+            self._thread.join()
+            self._thread = None
+        self._clear_line()
+
+    def succeed(self, text: str):
+        self.stop()
+        self._stream.write(f"\r\033[32m\u2714\033[0m {text}\n")
+        self._stream.flush()
+
+    def fail(self, text: str):
+        self.stop()
+        self._stream.write(f"\r\033[31m\u2716\033[0m {text}\n")
+        self._stream.flush()
+
+    def __enter__(self):
+        return self.start()
+
+    def __exit__(self, *_):
+        self.stop()
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +124,7 @@ def run_command(
     logger.debug("Command: %s", command)
     spinner = None
     if not quiet:
-        spinner = Halo(text=message, spinner="dots", stream=sys.stderr)
+        spinner = Spinner(message, stream=sys.stderr)
         spinner.start()
 
     try:

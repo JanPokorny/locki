@@ -6,7 +6,6 @@ readme = "README.md"
 requires-python = ">=3.14,<3.15"
 dependencies = [
     "click>=8.1",
-    "halo>=0.0.31",
     "pydantic>=2.12.5",
 ]
 

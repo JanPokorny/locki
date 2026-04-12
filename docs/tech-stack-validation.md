@@ -101,9 +101,7 @@ boilerplate. Click is the pragmatic choice.
 
 ---
 
-## Halo (terminal spinners) -- Replace
-
-**Alternative: Rich**
+## Halo (terminal spinners) -- Replaced with custom Spinner
 
 Halo's last release was **November 2020** (v0.0.31). It is effectively
 abandoned:
@@ -116,20 +114,13 @@ abandoned:
 - **Thread safety concerns.** Halo runs the spinner on a background thread
   with no robust cleanup. In a tool that calls `os.execvp()` (as Locki does),
   an active spinner thread during exec is undefined behavior.
-- **No Windows support** (falls back to a basic line spinner).
 
-`rich` (by Textualize, actively maintained) provides `console.status()` as a
-direct spinner replacement. It's a context manager, handles cleanup properly,
-and works cross-platform. The migration is mechanical: replace `Halo(text=...,
-spinner="dots")` with `Console().status(message)`.
-
-Rich is a heavier dependency (~5MB vs Halo's ~50KB), but it also replaces the
-need for manual ANSI escape code handling if you ever want richer output
-(tables, syntax highlighting, progress bars). For a tool whose audience is
-developers, Rich is standard infrastructure.
-
-**Recommendation: Replace Halo with Rich.** This is the only dependency in the
-stack with active maintenance/compatibility risk.
+**Resolution:** Replaced with a ~40-line `Spinner` class in `utils.py`. The
+actual API surface used was tiny (`.start()`, `.succeed()`, `.fail()`, context
+manager), and the implementation is just a daemon thread cycling braille dots
+with ANSI line-clearing. Rich was considered but rejected as disproportionate
+(~5MB dependency for a spinner). The custom implementation has zero external
+dependencies and uses `threading.Event` for clean shutdown.
 
 ---
 
@@ -282,7 +273,7 @@ for Python tooling. No reason to use YAML, JSON, or INI.
 | Python (language) | Good fit | No |
 | Python >=3.14,<3.15 | Too restrictive | Widen to `>=3.11` |
 | Click | Good fit | No |
-| **Halo** | **Replace** | **Migrate to Rich** |
+| ~~Halo~~ custom Spinner | Replaced | Done |
 | Pydantic | Acceptable | No |
 | uv + uv_build | Good fit | No |
 | Ruff | Good fit | No |
@@ -291,11 +282,10 @@ for Python tooling. No reason to use YAML, JSON, or INI.
 | Fedora 43 | Good fit | No |
 | TOML | Good fit | No |
 
-**Two actionable items:**
+**One remaining actionable item:**
 
-1. **Replace Halo with Rich** -- the only dependency with active
-   maintenance/compatibility risk. Halo is abandoned (5+ years) and has known
-   deprecation warnings on modern Python.
+1. ~~**Replace Halo with Rich**~~ Done -- replaced with a custom ~40-line
+   `Spinner` class with zero dependencies.
 
 2. **Widen `requires-python`** -- the codebase needs 3.11 at minimum, not 3.14.
    The current pin unnecessarily excludes the majority of Python users.
