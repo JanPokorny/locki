@@ -238,7 +238,7 @@ assert_ok    "port-forward adds device" locki port-forward -b 'fix-login_bug.3' 
 # Wait for Lima to detect and forward the new listening port
 pf_ok=false
 for i in $(seq 1 10); do
-    if result=$(nc -w2 localhost 9111 2>/dev/null) && [[ "$result" == *"pf-ok"* ]]; then
+    if result=$(nc -4 -w2 localhost 9111 2>/dev/null) && [[ "$result" == *"pf-ok"* ]]; then
         pf_ok=true; break
     fi
     sleep 1
@@ -248,7 +248,7 @@ if $pf_ok; then pass "port-forward is reachable"; else fail "port-forward is rea
 # Clear all forwards
 assert_ok    "port-forward --clear removes device" locki port-forward -b 'fix-login_bug.3' --clear
 sleep 3
-assert_fail  "cleared forward is unreachable" bash -c "nc -w2 localhost 9111"
+assert_fail  "cleared forward is unreachable" bash -c "nc -4 -w2 localhost 9111"
 
 # Random host port with :container_port syntax
 random_output=$(locki port-forward -b 'fix-login_bug.3' :9222 2>/dev/null)
