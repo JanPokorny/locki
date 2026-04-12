@@ -91,14 +91,7 @@ mkdir -p /etc/dnf /var/cache/locki/dnf && printf "cachedir=/var/cache/locki/dnf\
 # MARK: Networking
 hostnamectl set-hostname locki 2>/dev/null || echo locki > /etc/hostname
 echo '192.168.5.2 host.lima.internal' >> /etc/hosts
-if command -v curl >/dev/null 2>&1; then
-  curl -so /dev/null --retry 10 --retry-all-errors https://mirrors.fedoraproject.org
-elif command -v wget >/dev/null 2>&1; then
-  wget -qO /dev/null -t 11 --waitretry=1 https://mirrors.fedoraproject.org
-else
-  echo "Error: neither curl nor wget found" >&2
-  exit 1
-fi
+timeout 30s sh -c 'while ! getent hosts mirrors.fedoraproject.org >/dev/null 2>&1; do sleep 1; done'
 
 # MARK: Mise
 if ! test -x /usr/local/bin/mise; then
@@ -136,20 +129,24 @@ if ! test -x /usr/local/bin/mise; then
     esac
 
     tmpdir=$(mktemp -d)
-    trap "rm -rf ${tmpdir@Q}" EXIT
+    trap "rm -rf \"$tmpdir\"" EXIT
+    mise_file="mise-v$mise_version-linux-$arch.$ext"
+    mise_url="https://mise.jdx.dev/v$mise_version/$mise_file"
     if command -v curl >/dev/null 2>&1; then
-      curl -fsSL -o "$tmpdir/mise-v${mise_version}-linux-${arch}.${ext}" "https://mise.jdx.dev/v${mise_version}/mise-v${mise_version}-linux-${arch}.${ext}"
+      curl -fsSL -o "$tmpdir/$mise_file" "$mise_url"
     elif command -v wget >/dev/null 2>&1; then
-      wget -qO "$tmpdir/mise-v${mise_version}-linux-${arch}.${ext}" "https://mise.jdx.dev/v${mise_version}/mise-v${mise_version}-linux-${arch}.${ext}"
+      wget -qO "$tmpdir/$mise_file" "$mise_url"
+    elif command -v python3 >/dev/null 2>&1; then
+      python3 -c "from urllib.request import urlretrieve,install_opener,build_opener;o=build_opener();o.addheaders=[('User-Agent','curl/8')];install_opener(o);urlretrieve('$mise_url','$tmpdir/$mise_file')"
     else
-      echo "Error: neither curl nor wget found" >&2
+      echo "Error: no HTTP client found (need curl, wget, or python3)" >&2
       exit 1
     fi
-    if [ "$(sha256sum "$tmpdir/mise-v${mise_version}-linux-${arch}.${ext}" | cut -d' ' -f1)" != "$checksum" ]; then echo "checksum mismatch" >&2; exit 1; fi
+    if [ "$(sha256sum "$tmpdir/$mise_file" | cut -d' ' -f1)" != "$checksum" ]; then echo "checksum mismatch" >&2; exit 1; fi
 
     mkdir -p "/var/cache/mise-install/mise-v${mise_version}-linux-${arch}"
     cd "/var/cache/mise-install/mise-v${mise_version}-linux-${arch}"
-    if [ "$ext" = "tar.zst" ]; then zstd -d -c "$tmpdir/mise-v${mise_version}-linux-${arch}.${ext}" | tar -xf -; else tar -xf "$tmpdir/mise-v${mise_version}-linux-${arch}.${ext}"; fi
+    if [ "$ext" = "tar.zst" ]; then zstd -d -c "$tmpdir/$mise_file" | tar -xf -; else tar -xf "$tmpdir/$mise_file"; fi
   fi
 
   ln -sf "/var/cache/mise-install/mise-v${mise_version}-linux-${arch}/mise/bin/mise" /usr/local/bin/mise

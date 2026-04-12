@@ -237,13 +237,13 @@ assert_ok    "port-forward adds device" locki port-forward -b 'fix-login_bug.3' 
 
 # Wait for Lima to detect and forward the new listening port
 pf_ok=false
-for i in $(seq 1 24); do
+for i in $(seq 1 10); do
     if result=$(nc -w2 localhost 9111 2>/dev/null) && [[ "$result" == *"pf-ok"* ]]; then
         pf_ok=true; break
     fi
-    sleep 5
+    sleep 1
 done
-if $pf_ok; then pass "port-forward is reachable"; else fail "port-forward is reachable (timed out after 120s)"; fi
+if $pf_ok; then pass "port-forward is reachable"; else fail "port-forward is reachable (timed out after 10s)"; fi
 
 # Clear all forwards
 assert_ok    "port-forward --clear removes device" locki port-forward -b 'fix-login_bug.3' --clear

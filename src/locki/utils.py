@@ -6,48 +6,42 @@ import subprocess
 import sys
 import threading
 import time
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 
 LOG_DIR = Path.home() / ".locki" / "logs"
 
 
-class Spinner:
-    """Minimal terminal spinner: random Norse runes on stderr."""
+@contextmanager
+def spinner(text: str):
+    stop = threading.Event()
+    start = time.time()
 
-    def __init__(self, text: str):
-        self._text = text
-        self._stop = threading.Event()
-        self._thread: threading.Thread | None = None
+    def _spin():
+        while not stop.wait(0.2):
+            sys.stderr.write(f"\r{random.choice('ᚠᚢᚦᚨᚱᚲᚷᚹᚺᚾᛁᛃᛇᛈᛉᛊᛋᛏᛒᛖᛗᛚᛜᛝᛟᛞ')} {text}")
+            sys.stderr.flush()
 
-    def __enter__(self):
-        self._stop.clear()
+    def _duration() -> str:
+        elapsed = int(time.time() - start)
+        if elapsed < 5:
+            return ""
+        s = f" ({elapsed}s)" if elapsed < 60 else f" ({elapsed // 60}m{elapsed % 60}s)"
+        return f"\033[2m{s}\033[0m"
 
-        def spin():
-            while not self._stop.wait(0.2):
-                sys.stderr.write(f"\r{random.choice('ᚠᚢᚦᚨᚱᚲᚷᚹᚺᚾᛁᛃᛇᛈᛉᛊᛋᛏᛒᛖᛗᛚᛜᛝᛟᛞ')} {self._text}")
-                sys.stderr.flush()
-
-        self._thread = threading.Thread(target=spin, daemon=True)
-        self._thread.start()
-        return self
-
-    def __exit__(self, *_):
-        self._stop.set()
-        if self._thread:
-            self._thread.join()
-            self._thread = None
-        sys.stderr.write("\r\033[2K")
-        sys.stderr.flush()
-
-    def succeed(self, text: str):
-        self.__exit__()
-        sys.stderr.write(f"\r\033[32m\u2714\033[0m {text}\n")
-        sys.stderr.flush()
-
-    def fail(self, text: str):
-        self.__exit__()
-        sys.stderr.write(f"\r\033[31m\u2716\033[0m {text}\n")
+    thread = threading.Thread(target=_spin, daemon=True)
+    thread.start()
+    try:
+        yield
+        stop.set()
+        thread.join()
+        sys.stderr.write(f"\r\033[2K\033[32m\u2714\033[0m {text}{_duration()}\n")
+    except BaseException:
+        stop.set()
+        thread.join()
+        sys.stderr.write(f"\r\033[2K\033[31m\u2716\033[0m {text}{_duration()}\n")
+        raise
+    finally:
         sys.stderr.flush()
 
 
@@ -112,10 +106,8 @@ def run_command(
     quiet: bool = False,
 ) -> subprocess.CompletedProcess[bytes]:
     logger.debug("Command: %s", command)
-    spinner = None
-    with (spinner := Spinner(message)) if not quiet else nullcontext():
+    with spinner(message) if not quiet else nullcontext():
         try:
-            start_time = time.time()
             result = subprocess.run(
                 command,
                 stdin=subprocess.DEVNULL if input is None else None,
@@ -130,18 +122,10 @@ def run_command(
             if check and result.returncode != 0:
                 raise subprocess.CalledProcessError(result.returncode, command, result.stdout, result.stderr)
 
-            elapsed = int(time.time() - start_time)
-            duration = "" if elapsed < 5 else f" ({elapsed}s)" if elapsed < 60 else f" ({elapsed // 60}m{elapsed % 60}s)"
-            if spinner:
-                spinner.succeed(f"{message}{duration}")
             return result
         except FileNotFoundError:
-            if spinner:
-                spinner.fail(message)
             logger.error("%s is not installed. Please install it first.", command[0])
             sys.exit(1)
         except subprocess.CalledProcessError:
-            if spinner:
-                spinner.fail(message)
             _print_log_tail()
             raise
