@@ -29,7 +29,6 @@
   
   ![](https://badgen.net/badge/_/macOS%20%E2%9C%94/green?icon=apple&label)
   ![](https://badgen.net/badge/_/Linux%20%E2%9C%94/green?icon=linux&label)
-  ![](https://badgen.net/badge/_/pipx%20install%20locki/3776AB?icon=python&label)
   ![](https://badgen.net/badge/_/uv%20tool%20install%20locki/DE5FE9?icon=uv&label)
   
 </div>
@@ -100,7 +99,7 @@ Case study: [Kagenti ADK](https://github.com/kagenti/adk) uses Locki to run a fu
 
 ## How to install and use Locki?
 
-1. Install using your preferred manager: `uv tool install locki` or `pipx install locki`. ([Use uv](https://docs.astral.sh/uv/getting-started/installation/) if unsure.)
+1. Install: `uv tool install locki`. ([Install uv](https://docs.astral.sh/uv/getting-started/installation/) first if you don't have it.)
 1. If you're on Linux, also install [OpenSSH](https://repology.org/project/openssh/versions) (usually preinstalled) and [QEMU](https://www.qemu.org/download/#linux).
 1. `cd` to your Git repository and run: `locki x claude`
 
