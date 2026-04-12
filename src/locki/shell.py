@@ -12,7 +12,7 @@ import shutil
 import string
 import subprocess
 import sys
-import textwrap
+import tempfile
 
 import click
 
@@ -116,27 +116,32 @@ def exec_cmd(ctx, branch):
         )
 
     with locki._file_lock("vm", "Waiting for VM to start"):
-        run_command(
-            [
-                locki.limactl(),
-                "--tty=false",
-                "create",
-                str(importlib.resources.files("locki").joinpath("data/locki.yaml")),
-                "--mount-writable",
-                "--name=locki",
+        vm_setup = (importlib.resources.files("locki") / "data" / "vm-setup.sh").read_text()
+        lima_config = json.dumps({
+            "minimumLimaVersion": "2.0.0",
+            "base": ["template:fedora"],
+            "containerd": {"system": False, "user": False},
+            "mounts": [
+                {"location": "~/.locki/worktrees", "writable": True},
+                {"location": "~/.locki/home", "mountPoint": "/root/.locki/home", "writable": True},
             ],
-            "Preparing VM",
-            env={"LIMA_HOME": str(locki.LIMA_HOME)},
-            cwd="/",
-            check=False,
-        )
+            "provision": [{"mode": "system", "script": vm_setup}],
+        })
+        lima_fd, lima_yaml = tempfile.mkstemp(suffix=".yaml")
+        try:
+            os.write(lima_fd, lima_config.encode())
+            os.close(lima_fd)
+            run_command(
+                [locki.limactl(), "--tty=false", "create", lima_yaml, "--mount-writable", "--name=locki"],
+                "Preparing VM",
+                env={"LIMA_HOME": str(locki.LIMA_HOME)},
+                cwd="/",
+                check=False,
+            )
+        finally:
+            os.unlink(lima_yaml)
         run_command(
-            [
-                locki.limactl(),
-                "--tty=false",
-                "start",
-                "locki",
-            ],
+            [locki.limactl(), "--tty=false", "start", "locki"],
             "Starting VM",
             env={"LIMA_HOME": str(locki.LIMA_HOME)},
             cwd="/",
@@ -282,109 +287,11 @@ def exec_cmd(ctx, branch):
             "Starting container",
         )
 
-        proxy_stub = (importlib.resources.files("locki") / "data" / "proxy-stub.sh").read_text()
-        agents_md = (importlib.resources.files("locki") / "data" / "AGENTS.md").read_text()
-        container_files = {
-            "/etc/claude-code/CLAUDE.md": agents_md,
-            "/etc/gemini-cli/GEMINI.md": agents_md,
-            "/etc/gemini-cli/settings.json": json.dumps(
-                {
-                    "security": {"folderTrust": {"enabled": False}},
-                    "tools": {"sandbox": False},
-                }
-            ),
-            "/etc/codex/config.toml": textwrap.dedent(f"""\
-                approval_policy = "never"
-                sandbox_mode = "danger-full-access"
-                cli_auth_credentials_store = "file"
-                developer_instructions = "/etc/codex/AGENTS.md"
-                projects.{json.dumps(str(locki.WORKTREES_HOME))}.trust_level = "trusted"
-            """),
-            "/etc/codex/AGENTS.md": agents_md,
-            "/etc/opencode/AGENTS.md": agents_md,
-            "/opt/locki/bin/git": proxy_stub,
-            "/opt/locki/bin/gh": proxy_stub,
-            "/opt/locki/bin/bwrap": "#!/bin/sh\nexit 1\n",  # silence codex warning
-            "/opt/locki/bin/dnf": textwrap.dedent("""\
-                #!/bin/bash
-                set -euo pipefail
-                /bin/dnf install -y \\
-                  https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm \\
-                  https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm \\
-                  2>/dev/null || true
-                rm -f /opt/locki/bin/dnf
-                exec /bin/dnf "$@"
-            """),
-            "/etc/bashrc.d/locki-mise.sh": 'eval "$(mise activate bash)"\n',
-            "/opt/locki/bin/claude": textwrap.dedent("""\
-                #!/bin/bash
-                mise install nodejs@24 >&2
-                mise exec nodejs@24 -- mise install npm:@anthropic-ai/claude-code@latest >&2
-                exec mise exec nodejs@24 npm:@anthropic-ai/claude-code@latest -- claude --dangerously-skip-permissions "$@"
-            """),
-            "/opt/locki/bin/gemini": textwrap.dedent("""\
-                #!/bin/bash
-                mise install nodejs@24 >&2
-                mise exec nodejs@24 -- mise install npm:@google/gemini-cli@latest >&2
-                exec mise exec nodejs@24 npm:@google/gemini-cli@latest -- gemini --yolo "$@"
-            """),
-            "/opt/locki/bin/codex": textwrap.dedent("""\
-                #!/bin/bash
-                mise install nodejs@24 >&2
-                mise exec nodejs@24 -- mise install npm:@openai/codex@latest >&2
-                exec mise exec nodejs@24 npm:@openai/codex@latest -- codex --yolo "$@"
-            """),
-            "/opt/locki/bin/opencode": textwrap.dedent("""\
-                #!/bin/bash
-                mise use -g github:anomalyco/opencode >&2
-                exec opencode "$@"
-            """),
-        }
-        for path, content in container_files.items():
-            locki.run_in_vm(
-                ["incus", "exec", wt_id, "--", "bash", "-c", f"mkdir -p $(dirname {path}) && cat >{path}"],
-                f"Writing {pathlib.PurePosixPath(path).name}",
-                input=content.encode(),
-            )
-
-        host_ip = (
-            locki.run_in_vm(
-                ["bash", "-c", "getent hosts host.lima.internal | awk '{print $1}' | head -1"],
-                "Resolving host IP",
-                check=False,
-            )
-            .stdout.decode()
-            .strip()
-        )
-
+        setup_script = (importlib.resources.files("locki") / "data" / "container-setup.sh").read_bytes()
         locki.run_in_vm(
-            [
-                "incus",
-                "exec",
-                wt_id,
-                "--",
-                "bash",
-                "-euxo",
-                "pipefail",
-                "-c",
-                textwrap.dedent(f"""\
-                    hostnamectl set-hostname locki 2>/dev/null || echo locki > /etc/hostname
-                    for bin in /opt/locki/bin/*; do chmod +x "$bin"; done
-                    if ! command -v mise &>/dev/null; then
-                      if [ -x /bin/dnf ]; then /bin/dnf -y copr enable jdxcode/mise && /bin/dnf -y install mise
-                      elif [ -x /bin/apt ]; then /bin/apt update -y && /bin/apt install -y mise
-                      elif [ -x /bin/pacman ]; then /bin/pacman -Sy --noconfirm mise
-                      elif [ -x /bin/apk ]; then /bin/apk add mise
-                      elif [ -x /bin/zypper ]; then /bin/zypper --non-interactive install mise
-                      else curl -fsSL https://mise.run | sh
-                      fi
-                    fi
-                    mkdir -p /etc/dnf && echo -e "cachedir=/var/cache/locki/dnf\\nkeepcache=1" >> /etc/dnf/dnf.conf || true
-                    mkdir -p /etc/apt/apt.conf.d && printf 'Dir::Cache "/var/cache/locki/apt/cache";\\nDir::State "/var/cache/locki/apt/state";\\n' > /etc/apt/apt.conf.d/99local-cache || true
-                    echo '{host_ip} host.lima.internal' >> /etc/hosts
-                """),
-            ],
-            "Configuring container environment",
+            ["incus", "exec", wt_id, "--env", f"LOCKI_WORKTREES_HOME={locki.WORKTREES_HOME}", "--", "/bin/sh"],
+            "Configuring container",
+            input=setup_script,
         )
 
     # Start SSH proxy (sshd) for git/gh command forwarding
