@@ -1,11 +1,10 @@
 #!/bin/sh
 set -eux
 
-mkdir -p /etc/claude-code /etc/gemini-cli /etc/codex /etc/opencode \
-         /opt/locki/bin /etc/bashrc.d
+# MARK: AI CLIs
 
-tee /etc/claude-code/CLAUDE.md /etc/gemini-cli/GEMINI.md \
-    /etc/codex/AGENTS.md /etc/opencode/AGENTS.md > /dev/null << '__LOCKI_EOF__'
+mkdir -p /etc/claude-code /etc/gemini-cli /etc/codex /etc/opencode /opt/locki/bin
+tee /etc/claude-code/CLAUDE.md /etc/gemini-cli/GEMINI.md /etc/codex/AGENTS.md /etc/opencode/AGENTS.md > /dev/null << '__LOCKI_EOF__'
 You are running inside a locki sandbox VM. This is an ephemeral environment designed to keep the main machine safe from malfunctioning agents. The folder is a fresh worktree: before delving into your task, start by setting up the environment. Check project metadata (`mise.toml`, `.tool-versions`, `.nvmrc`, `pyproject.toml`, etc.), CI definitions (`.github/workflows/*.yaml`, etc.) or docs (`README.md`, `CONTRIBUTING.md`, `*.md`, `docs/*`, etc.) to determine needed tools and their versions, and setup commands. If there is `mise.toml`, run `mise install` to set up all tools. Otherwise manually enable specific tool versions using e.g.: `mise use -g python@3.12.1`, `mise use -g node@22`, `mise use -g jq`, falling back to OS package manager if `mise` does not have the tool (`dnf` with RPM Fusion by default, unless running on a custom image).
 
 `git` and `gh` are available but restricted to a safe subset of commands (enforced by the host). Only long flags (`--flag` or `--flag=value`) are accepted; short flags (`-x`) are rejected. Allowed commands:
@@ -28,7 +27,9 @@ developer_instructions = "/etc/codex/AGENTS.md"
 projects."$LOCKI_WORKTREES_HOME".trust_level = "trusted"
 __LOCKI_EOF__
 
-cat > /opt/locki/bin/git << '__LOCKI_EOF__'
+# MARK: Executable shims
+
+tee /opt/locki/bin/git /opt/locki/bin/gh > /dev/null << '__LOCKI_EOF__'
 #!/bin/bash
 cmd=$(basename "$0")
 set -- "$(pwd)" "$cmd" "$@"
@@ -38,7 +39,6 @@ for arg in "$@"
 done
 exec ssh -F /root/.ssh/locki-ssh-config locki-proxy -- "$q"
 __LOCKI_EOF__
-cp /opt/locki/bin/git /opt/locki/bin/gh
 
 cat > /opt/locki/bin/bwrap << '__LOCKI_EOF__'
 #!/bin/sh
@@ -48,27 +48,12 @@ __LOCKI_EOF__
 cat > /opt/locki/bin/dnf << '__LOCKI_EOF__'
 #!/bin/bash
 set -euo pipefail
-mkdir -p /etc/dnf
-echo -e "cachedir=/var/cache/locki/dnf\nkeepcache=1" >> /etc/dnf/dnf.conf
 /bin/dnf install -y \
   https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm \
   https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm \
   2>/dev/null || true
 rm -f /opt/locki/bin/dnf
 exec /bin/dnf "$@"
-__LOCKI_EOF__
-
-cat > /opt/locki/bin/apt << '__LOCKI_EOF__'
-#!/bin/bash
-set -euo pipefail
-mkdir -p /etc/apt/apt.conf.d
-printf 'Dir::Cache "/var/cache/locki/apt/cache";\nDir::State "/var/cache/locki/apt/state";\n' > /etc/apt/apt.conf.d/99local-cache
-rm -f /opt/locki/bin/apt
-exec /bin/apt "$@"
-__LOCKI_EOF__
-
-cat > /etc/bashrc.d/locki-mise.sh << '__LOCKI_EOF__'
-eval "$(mise activate bash)"
 __LOCKI_EOF__
 
 cat > /opt/locki/bin/claude << '__LOCKI_EOF__'
@@ -94,21 +79,80 @@ __LOCKI_EOF__
 
 cat > /opt/locki/bin/opencode << '__LOCKI_EOF__'
 #!/bin/bash
-mise use -g github:anomalyco/opencode >&2
-exec opencode "$@"
+exec mise exec github:anomalyco/opencode -- opencode "$@"
 __LOCKI_EOF__
 
 chmod +x /opt/locki/bin/*
-hostnamectl set-hostname locki 2>/dev/null || echo locki > /etc/hostname
 
-if ! command -v mise >/dev/null 2>&1; then
-  if [ -x /bin/dnf ]; then /bin/dnf -y copr enable jdxcode/mise && /bin/dnf -y install mise
-  elif [ -x /bin/apt ]; then /bin/apt update -y && /bin/apt install -y mise
-  elif [ -x /bin/pacman ]; then /bin/pacman -Sy --noconfirm mise
-  elif [ -x /bin/apk ]; then /bin/apk add mise
-  elif [ -x /bin/zypper ]; then /bin/zypper --non-interactive install mise
-  else curl -fsSL https://mise.run | sh
-  fi
+# MARK: Caching
+mkdir -p /etc/apt/apt.conf.d /var/cache/locki/apt/cache /var/cache/locki/apt/state && printf 'Dir::Cache "/var/cache/locki/apt/cache";\nDir::State "/var/cache/locki/apt/state";\n' > /etc/apt/apt.conf.d/99local-cache
+mkdir -p /etc/dnf /var/cache/locki/dnf && printf "cachedir=/var/cache/locki/dnf\nkeepcache=1" >> /etc/dnf/dnf.conf
+
+# MARK: Networking
+hostnamectl set-hostname locki 2>/dev/null || echo locki > /etc/hostname
+echo '192.168.5.2 host.lima.internal' >> /etc/hosts
+if command -v curl >/dev/null 2>&1; then
+  curl -so /dev/null --retry 10 --retry-all-errors https://mirrors.fedoraproject.org
+elif command -v wget >/dev/null 2>&1; then
+  wget -qO /dev/null -t 11 --waitretry=1 https://mirrors.fedoraproject.org
+else
+  echo "Error: neither curl nor wget found" >&2
+  exit 1
 fi
 
-echo '192.168.5.2 host.lima.internal' >> /etc/hosts
+# MARK: Mise
+if ! test -x /usr/local/bin/mise; then
+  mise_version="2026.4.10"
+
+  musl=""
+  if ldd /bin/ls 2>/dev/null | grep musl; then musl="-musl"; fi
+
+  arch=$(uname -m)
+  case "$arch" in
+    x86_64)        arch="x64$musl";;
+    aarch64|arm64) arch="arm64$musl";;
+    armv7l)        arch="armv7$musl";;
+    *) echo "unsupported architecture: $arch" >&2; exit 1;;
+  esac
+
+  if ! test -d "/var/cache/mise-install/mise-v${mise_version}-linux-${arch}"; then
+    ext="tar.gz"
+    if command -v zstd >/dev/null 2>&1 && tar --version 2>/dev/null | grep -q '1\.\(3[1-9]\|[4-9][0-9]\)'; then ext="tar.zst"; fi
+
+    case "$arch.$ext" in
+      x64.tar.gz)         checksum="78e91794c9139ab787c9a4de5e9e63a56d65b16bce60912884cb09f7114f7275";;
+      x64-musl.tar.gz)    checksum="6a5fe535fd05e6ac7c525c70a1e05d9b1489ad735a6259c5ff29c7aeb4904b44";;
+      arm64.tar.gz)       checksum="03ebfb523239e4f202b19983d0a435e06edae7217694d61b08580ad6afa7a6b4";;
+      arm64-musl.tar.gz)  checksum="20876268118bb54471fd3701143f902f48272e59830eeaa2cb06e73012580236";;
+      armv7.tar.gz)       checksum="62bf362b179f413fef579d2286a412e6a3578c88ea7fc6213ba1e3d7855ffc35";;
+      armv7-musl.tar.gz)  checksum="1e91aef81d2939e7205ce6750464c7aee3a62f0f3692694b071dc90ade84d154";;
+      x64.tar.zst)        checksum="d6e9cde12a4b4f38a34d5f9172e1efa4d3522f55b5ce1d42006262b61cf06aa6";;
+      x64-musl.tar.zst)   checksum="ac16b3864753836eae7cd9d02ae392abfa4c8a07a65e868217991b820449adb3";;
+      arm64.tar.zst)      checksum="3ea02ac3c1354ba69a4d5cebb1416c505206080cfdf58b6019929cc5981e44b8";;
+      arm64-musl.tar.zst) checksum="e9180302e01e2586c32f97004022cf924cd39f46b9853679e979efdabc4187a8";;
+      armv7.tar.zst)      checksum="22fcc17029fb7bb55bce84d59ef977a9c2508a31f24a0fe5f2f8ec6b82fbb035";;
+      armv7-musl.tar.zst) checksum="42b35313752b4bbdebb80e6e830947647312c21008615aaa46fa0aea1a207a6f";;
+      *) echo "no checksum for linux-$arch.$ext" >&2; exit 1;;
+    esac
+
+    tmpdir=$(mktemp -d)
+    trap "rm -rf ${tmpdir@Q}" EXIT
+    if command -v curl >/dev/null 2>&1; then
+      curl -fsSL -o "$tmpdir/mise-v${mise_version}-linux-${arch}.${ext}" "https://mise.jdx.dev/v${mise_version}/mise-v${mise_version}-linux-${arch}.${ext}"
+    elif command -v wget >/dev/null 2>&1; then
+      wget -qO "$tmpdir/mise-v${mise_version}-linux-${arch}.${ext}" "https://mise.jdx.dev/v${mise_version}/mise-v${mise_version}-linux-${arch}.${ext}"
+    else
+      echo "Error: neither curl nor wget found" >&2
+      exit 1
+    fi
+    if [ "$(sha256sum "$tmpdir/mise-v${mise_version}-linux-${arch}.${ext}" | cut -d' ' -f1)" != "$checksum" ]; then echo "checksum mismatch" >&2; exit 1; fi
+
+    mkdir -p "/var/cache/mise-install/mise-v${mise_version}-linux-${arch}"
+    cd "/var/cache/mise-install/mise-v${mise_version}-linux-${arch}"
+    if [ "$ext" = "tar.zst" ]; then zstd -d -c "$tmpdir/mise-v${mise_version}-linux-${arch}.${ext}" | tar -xf -; else tar -xf "$tmpdir/mise-v${mise_version}-linux-${arch}.${ext}"; fi
+  fi
+
+  ln -sf "/var/cache/mise-install/mise-v${mise_version}-linux-${arch}/mise/bin/mise" /usr/local/bin/mise
+fi
+mkdir -p /etc/bashrc.d
+/usr/local/bin/mise activate bash >/etc/bashrc.d/mise.sh

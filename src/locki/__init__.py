@@ -123,7 +123,7 @@ def _file_lock(name: str, wait_message: str):
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
-            with Spinner(wait_message, stream=sys.stderr):
+            with Spinner(wait_message):
                 fcntl.flock(fd, fcntl.LOCK_EX)
         yield
     finally:

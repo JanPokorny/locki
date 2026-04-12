@@ -6,59 +6,50 @@ import subprocess
 import sys
 import threading
 import time
+from contextlib import nullcontext
 from pathlib import Path
 
 LOG_DIR = Path.home() / ".locki" / "logs"
-
-_RUNES = "ᚠᚢᚦᚨᚱᚲᚷᚹᚺᚾᛁᛃᛇᛈᛉᛊᛋᛏᛒᛖᛗᛚᛜᛝᛟᛞ"
 
 
 class Spinner:
     """Minimal terminal spinner: random Norse runes on stderr."""
 
-    def __init__(self, text: str, stream=None):
+    def __init__(self, text: str):
         self._text = text
-        self._stream = stream or sys.stderr
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
-    def _spin(self):
-        while not self._stop.wait(0.08):
-            self._stream.write(f"\r{random.choice(_RUNES)} {self._text}")
-            self._stream.flush()
-
-    def _clear_line(self):
-        self._stream.write("\r\033[2K")
-        self._stream.flush()
-
-    def start(self):
+    def __enter__(self):
         self._stop.clear()
-        self._thread = threading.Thread(target=self._spin, daemon=True)
+
+        def spin():
+            while not self._stop.wait(0.2):
+                sys.stderr.write(f"\r{random.choice('ᚠᚢᚦᚨᚱᚲᚷᚹᚺᚾᛁᛃᛇᛈᛉᛊᛋᛏᛒᛖᛗᛚᛜᛝᛟᛞ')} {self._text}")
+                sys.stderr.flush()
+
+        self._thread = threading.Thread(target=spin, daemon=True)
         self._thread.start()
         return self
 
-    def stop(self):
+    def __exit__(self, *_):
         self._stop.set()
         if self._thread:
             self._thread.join()
             self._thread = None
-        self._clear_line()
+        sys.stderr.write("\r\033[2K")
+        sys.stderr.flush()
 
     def succeed(self, text: str):
-        self.stop()
-        self._stream.write(f"\r\033[32m\u2714\033[0m {text}\n")
-        self._stream.flush()
+        self.__exit__()
+        sys.stderr.write(f"\r\033[32m\u2714\033[0m {text}\n")
+        sys.stderr.flush()
 
     def fail(self, text: str):
-        self.stop()
-        self._stream.write(f"\r\033[31m\u2716\033[0m {text}\n")
-        self._stream.flush()
+        self.__exit__()
+        sys.stderr.write(f"\r\033[31m\u2716\033[0m {text}\n")
+        sys.stderr.flush()
 
-    def __enter__(self):
-        return self.start()
-
-    def __exit__(self, *_):
-        self.stop()
 
 logger = logging.getLogger(__name__)
 
@@ -122,45 +113,35 @@ def run_command(
 ) -> subprocess.CompletedProcess[bytes]:
     logger.debug("Command: %s", command)
     spinner = None
-    if not quiet:
-        spinner = Spinner(message, stream=sys.stderr)
-        spinner.start()
-
-    try:
-        start_time = time.time()
-        result = subprocess.run(
-            command,
-            stdin=subprocess.DEVNULL if input is None else None,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            env={**os.environ, **(env or {})},
-            cwd=cwd,
-            input=input,
-        )
-        if result.stdout:
+    with (spinner := Spinner(message)) if not quiet else nullcontext():
+        try:
+            start_time = time.time()
+            result = subprocess.run(
+                command,
+                stdin=subprocess.DEVNULL if input is None else None,
+                capture_output=True,
+                env={**os.environ, **(env or {})},
+                cwd=cwd,
+                input=input,
+            )
             logger.debug("%s", result.stdout.decode(errors="replace").rstrip())
-        if result.stderr:
             logger.debug("%s", result.stderr.decode(errors="replace").rstrip())
 
-        if check and result.returncode != 0:
-            raise subprocess.CalledProcessError(
-                result.returncode, command, result.stdout, result.stderr
-            )
+            if check and result.returncode != 0:
+                raise subprocess.CalledProcessError(result.returncode, command, result.stdout, result.stderr)
 
-        elapsed = int(time.time() - start_time)
-        duration = (
-            "" if elapsed < 5 else f" ({elapsed}s)" if elapsed < 60 else f" ({elapsed // 60}m{elapsed % 60}s)"
-        )
-        if spinner:
-            spinner.succeed(f"{message}{duration}")
-        return result
-    except FileNotFoundError:
-        if spinner:
-            spinner.fail(message)
-        logger.error("%s is not installed. Please install it first.", command[0])
-        sys.exit(1)
-    except subprocess.CalledProcessError:
-        if spinner:
-            spinner.fail(message)
-        _print_log_tail()
-        raise
+            elapsed = int(time.time() - start_time)
+            duration = "" if elapsed < 5 else f" ({elapsed}s)" if elapsed < 60 else f" ({elapsed // 60}m{elapsed % 60}s)"
+            if spinner:
+                spinner.succeed(f"{message}{duration}")
+            return result
+        except FileNotFoundError:
+            if spinner:
+                spinner.fail(message)
+            logger.error("%s is not installed. Please install it first.", command[0])
+            sys.exit(1)
+        except subprocess.CalledProcessError:
+            if spinner:
+                spinner.fail(message)
+            _print_log_tail()
+            raise
