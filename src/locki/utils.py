@@ -1,6 +1,7 @@
 import datetime
 import logging
 import os
+import random
 import subprocess
 import sys
 import threading
@@ -9,11 +10,11 @@ from pathlib import Path
 
 LOG_DIR = Path.home() / ".locki" / "logs"
 
-_DOTS = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+_RUNES = "ᚠᚢᚦᚨᚱᚲᚷᚹᚺᚾᛁᛃᛇᛈᛉᛊᛋᛏᛒᛖᛗᛚᛜᛝᛟᛞ"
 
 
 class Spinner:
-    """Minimal terminal spinner: braille dots on stderr."""
+    """Minimal terminal spinner: random Norse runes on stderr."""
 
     def __init__(self, text: str, stream=None):
         self._text = text
@@ -22,11 +23,9 @@ class Spinner:
         self._thread: threading.Thread | None = None
 
     def _spin(self):
-        i = 0
         while not self._stop.wait(0.08):
-            self._stream.write(f"\r{_DOTS[i % len(_DOTS)]} {self._text}")
+            self._stream.write(f"\r{random.choice(_RUNES)} {self._text}")
             self._stream.flush()
-            i += 1
 
     def _clear_line(self):
         self._stream.write("\r\033[2K")
