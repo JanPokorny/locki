@@ -89,7 +89,7 @@ Others run either: \
 *b)* OS-level jail (Landlock, Bubblewrap, etc.): not isolated (ports collide, image tags get overwritten, etc.) \
 *c)* OCI container / microVM: limited support for background services (i.e. no `systemd`), containers, Kubernetes, ...
 
-**Locki** runs Incus containers (full OS) inside a single shared VM. While the VM layer isolates host from AI mischief, Incus containers are a lightweight layer on top to isolate sandboxes from each other. Spawn a real non-micro OS in <10s and run anything in it.
+**Locki** runs Incus containers (full OS) inside a single shared VM. While the VM layer isolates host from AI mischief, Incus containers are a lightweight layer on top to isolate sandboxes from each other. Spawn a real non-micro OS in <5s and run anything in it.
 
 Furthermore, Locki protects your Git history from tampering while still allowing safe operations like commits to the worktree branch. Be able to fall back on earlier commits when an agent goes haywire, while not giving up the convenience of arriving at a fully baked pull request.
 
