@@ -189,8 +189,8 @@ def _handle_stash_pop_apply_drop(wt_id: str, positionals: list[str]):
 
 
 @click.command(hidden=True)
-def safe_cmd():
-    """SSH forced command: validate and execute an allowed git/gh command."""
+def self_service_cmd():
+    """SSH forced command: validate and execute an allowed self-service command."""
     import locki
 
     cmd = os.environ.get("SSH_ORIGINAL_COMMAND", "")

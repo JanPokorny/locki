@@ -311,7 +311,7 @@ def exec_cmd(ctx, branch):
     auth_keys = ssh_dir / "authorized_keys"
     locki_bin = shutil.which("locki") or f"{sys.executable} -m locki"
     auth_keys.write_text(
-        f'command="HOME={shlex.quote(str(pathlib.Path.home()))} {locki_bin} safe-cmd",no-port-forwarding,no-X11-forwarding,no-agent-forwarding '
+        f'command="HOME={shlex.quote(str(pathlib.Path.home()))} {locki_bin} self-service",no-port-forwarding,no-X11-forwarding,no-agent-forwarding '
         f"{client_key.with_suffix('.pub').read_text().strip()}\n"
     )
     auth_keys.chmod(0o600)
@@ -329,7 +329,7 @@ def exec_cmd(ctx, branch):
             pass
     sshd_path = shutil.which("sshd")
     if sshd_path is None:
-        logger.warning("sshd was not found on the host. Safe git/gh proxy is disabled in this sandbox.")
+        logger.warning("sshd was not found on the host. Self-service proxy is disabled in this sandbox.")
     elif not sshd_running:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.bind(("127.0.0.1", 0))

@@ -5,19 +5,15 @@ set -eux
 
 mkdir -p /etc/claude-code /etc/gemini-cli /etc/codex /etc/opencode /opt/locki/bin
 tee /etc/claude-code/CLAUDE.md /etc/gemini-cli/GEMINI.md /etc/codex/AGENTS.md /etc/opencode/AGENTS.md > /dev/null << '__LOCKI_EOF__'
-You are running inside a locki sandbox VM. This is an ephemeral environment designed to keep the main machine safe from malfunctioning agents. The folder is a fresh worktree: before delving into your task, start by setting up the environment. Check project metadata (`mise.toml`, `.tool-versions`, `.nvmrc`, `pyproject.toml`, etc.), CI definitions (`.github/workflows/*.yaml`, etc.) or docs (`README.md`, `CONTRIBUTING.md`, `*.md`, `docs/*`, etc.) to determine needed tools and their versions, and setup commands. If there is `mise.toml`, run `mise install` to set up all tools. Otherwise manually enable specific tool versions using e.g.: `mise use -g python@3.12.1`, `mise use -g node@22`, `mise use -g jq`, falling back to OS package manager if `mise` does not have the tool (`dnf` with RPM Fusion by default, unless running on a custom image).
+You are running inside a locki sandbox VM. This is an ephemeral environment designed to keep the main machine safe from malfunctioning agents. The folder is a fresh worktree: before delving into your task, start by setting up the environment. Check project metadata (`mise.toml`, `.tool-versions`, `.nvmrc`, `pyproject.toml`, etc.), CI definitions (`.github/workflows/*.yaml`, etc.) or docs (`README.md`, `CONTRIBUTING.md`, `*.md`, `docs/*`, etc.) to determine needed tools and their versions, and setup commands. If there is `mise.toml`, run `mise install` to set up all tools. Otherwise manually enable specific tool versions using e.g.: `mise use -g python@3.12.1`, `mise use -g node@22`, `mise use -g jq`, falling back to OS package manager if `mise` does not have the tool (`dnf` by default, unless running on a custom image). Docker is pre-installed.
 
-`git` and `gh` are available but restricted to a safe subset of commands (enforced by the host). Only long flags (`--flag` or `--flag=value`) are accepted; short flags (`-x`) are rejected. Allowed commands:
+Some commands execute on the host using a self-service proxy. Run them as usual, non-matches will be rejected. Only long flags are accepted. Available commands:
   git status | diff [--staged] [--name-only] [--stat] [--name-status] [ref [ref]] | add [--all] [file ...] | commit --message=<msg> | push | fetch | log [--oneline] [--format=<fmt>] [--max-count=<n>] [ref] | show [ref] | restore [--staged] [--source=ref] <file ...>
-  git switch <branch> | switch --create=<branch>  (only the initial branch and sub-branches under it)
+  git switch <branch> | switch --create=<branch>  (where <branch> can be the initial branch or any branch name with the initial branch name + / as a prefix)
   git stash push [--message=<msg>] | stash list | stash pop [ref] | stash apply [ref] | stash drop [ref]  (stashes are branch-scoped)
   gh pr create [--title=<t>] [--body=<b>] [--base=<b>] [--head=<h>] [--draft] [--fill] [--reviewer=<r>] [--label=<l>] [--assignee=<a>] | gh pr view/list/diff/status | gh run view/list | gh issue view/list
-  locki port-forward :<container_port> [:<port2> ...]  (forwards container ports to random free host ports)
-Any other git/gh/locki invocation will be rejected by the proxy.
+  locki port-forward :<container_port> [:<port2> ...]  (When you start a web server, API, or any service the user should access, forward the port to host. The output shows `<host_port>:<container_port>`. Give the user a full URL with the host-side port, e.g. `http://localhost:<host_port>`.)
 
-Docker is pre-installed and ready to use.
-
-When you start a web server, API, or any service the user should access, forward the port to host by running `locki port-forward :<port>`. The output shows `<host_port>:<container_port>`. Give the user a full URL with the host-side port, e.g. `http://localhost:<host_port>`.
 __LOCKI_EOF__
 
 cat > /etc/gemini-cli/settings.json << '__LOCKI_EOF__'

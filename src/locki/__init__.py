@@ -206,7 +206,7 @@ def find_worktree_for_branch(branch: str) -> pathlib.Path | None:
 
 # Register commands (imported here to avoid circular imports)
 from locki.port_forward import port_forward_cmd  # noqa: E402
-from locki.safe_cmd import safe_cmd  # noqa: E402
+from locki.self_service import self_service_cmd  # noqa: E402
 from locki.shell import exec_cmd  # noqa: E402
 from locki.vm import vm_app  # noqa: E402
 from locki.worktree import remove_cmd, status_cmd, stop_cmd  # noqa: E402
@@ -216,5 +216,5 @@ app.add_command(port_forward_cmd, "port-forward | pf")
 app.add_command(remove_cmd, "remove | rm | delete")
 app.add_command(stop_cmd, "stop")
 app.add_command(status_cmd, "status | st")
-app.add_command(safe_cmd, "safe-cmd")
+app.add_command(self_service_cmd, "self-service")
 app.add_command(vm_app, "vm")
