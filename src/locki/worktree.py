@@ -1,4 +1,4 @@
-import json as json_module
+import json
 import logging
 import pathlib
 import shutil
@@ -105,7 +105,8 @@ def status_cmd(show_all):
             check=False,
             quiet=True,
         )
-        for vm in json_module.loads(result.stdout.decode()):
+        for line in result.stdout.decode().splitlines():
+            vm = json.loads(line)
             if vm.get("name") == "locki":
                 vm_status = vm.get("status", "unknown").lower()
     except Exception:
