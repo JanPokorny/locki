@@ -88,6 +88,7 @@ chmod +x /opt/locki/bin/*
 # MARK: Caching
 mkdir -p /etc/apt/apt.conf.d /var/cache/locki/apt/cache /var/cache/locki/apt/state && printf 'Dir::Cache "/var/cache/locki/apt/cache";\nDir::State "/var/cache/locki/apt/state";\n' > /etc/apt/apt.conf.d/99local-cache
 mkdir -p /etc/dnf /var/cache/locki/dnf && printf "cachedir=/var/cache/locki/dnf\nkeepcache=1" >> /etc/dnf/dnf.conf
+ln -s $HOME/.cache /var/cache/locki
 
 # MARK: Networking
 hostnamectl set-hostname locki 2>/dev/null || echo locki > /etc/hostname
