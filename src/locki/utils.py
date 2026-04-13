@@ -29,7 +29,7 @@ def spinner(text: str):
         if elapsed < 5:
             return ""
         s = f" ({elapsed}s)" if elapsed < 60 else f" ({elapsed // 60}m{elapsed % 60}s)"
-        return click.style(s, fg="gray")
+        return click.style(s, dim=True)
 
     thread = threading.Thread(target=_spin, daemon=True)
     thread.start()
