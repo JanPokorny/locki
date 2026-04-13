@@ -66,11 +66,6 @@ mise exec nodejs@24 -- mise install npm:@openai/codex@latest >&2
 exec mise exec nodejs@24 npm:@openai/codex@latest -- codex --yolo "$@"
 __LOCKI_EOF__
 
-cat > /opt/locki/bin/opencode << '__LOCKI_EOF__'
-#!/bin/sh
-exec mise exec github:anomalyco/opencode -- opencode "$@"
-__LOCKI_EOF__
-
 command -v docker || cat > /opt/locki/bin/docker << '__LOCKI_EOF__'
 #!/bin/sh
 rm -f "$(readlink -f "$0")"
@@ -83,6 +78,22 @@ fi
 systemctl enable --now docker
 exec docker "$@"
 __LOCKI_EOF__
+
+for pair in \
+  "aqua:fish-shell/fish-shell=fish" \
+  "kubectl=kubectl" \
+  "k9s=k9s" \
+  "jq=jq" \
+  "yq=yq" \
+  "github:anomalyco/opencode=opencode" \
+; do
+  pkg="${pair%%=*}"
+  cmd="${pair##*=}"
+  cat > "/opt/locki/bin/$cmd" << EOF
+#!/bin/sh
+exec mise x $pkg -- $cmd "\$@"
+EOF
+done
 
 chmod +x /opt/locki/bin/*
 
