@@ -9,6 +9,8 @@ import time
 from contextlib import contextmanager, nullcontext
 from pathlib import Path
 
+import click
+
 LOG_DIR = Path.home() / ".locki" / "logs"
 
 
@@ -27,7 +29,7 @@ def spinner(text: str):
         if elapsed < 5:
             return ""
         s = f" ({elapsed}s)" if elapsed < 60 else f" ({elapsed // 60}m{elapsed % 60}s)"
-        return f"\033[2m{s}\033[0m"
+        return click.format(s, fg="gray")
 
     thread = threading.Thread(target=_spin, daemon=True)
     thread.start()
@@ -35,11 +37,11 @@ def spinner(text: str):
         yield
         stop.set()
         thread.join()
-        sys.stderr.write(f"\r\033[2K\033[32m\u2714\033[0m {text}{_duration()}\n")
+        click.echo(f"\r{click.style("ᛟ", fg="green")} {text}{_duration()}", err=True)
     except BaseException:
         stop.set()
         thread.join()
-        sys.stderr.write(f"\r\033[2K\033[31m\u2716\033[0m {text}{_duration()}\n")
+        click.echo(f"\r{click.style("ᛞ", fg="red")} {text}{_duration()}", err=True)
         raise
     finally:
         sys.stderr.flush()
@@ -53,7 +55,7 @@ _log_file_path: Path | None = None
 class _StderrFormatter(logging.Formatter):
     def format(self, record):
         if record.levelno >= logging.ERROR:
-            return f"ERROR: {record.getMessage()}"
+            return f"{click.format("ERROR", fg="red")}: {record.getMessage()}"
         return record.getMessage()
 
 
