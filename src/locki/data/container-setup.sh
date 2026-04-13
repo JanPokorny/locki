@@ -12,7 +12,12 @@ You are running inside a locki sandbox VM. This is an ephemeral environment desi
   git switch <branch> | switch --create=<branch>  (only the initial branch and sub-branches under it)
   git stash push [--message=<msg>] | stash list | stash pop [ref] | stash apply [ref] | stash drop [ref]  (stashes are branch-scoped)
   gh pr create [--title=<t>] [--body=<b>] [--base=<b>] [--head=<h>] [--draft] [--fill] [--reviewer=<r>] [--label=<l>] [--assignee=<a>] | gh pr view/list/diff/status | gh run view/list | gh issue view/list
-Any other git/gh invocation will be rejected by the proxy.
+  locki port-forward :<container_port> [:<port2> ...]  (forwards container ports to random free host ports)
+Any other git/gh/locki invocation will be rejected by the proxy.
+
+Docker is pre-installed and ready to use.
+
+When you start a web server, API, or any service the user should access, forward the port to host by running `locki port-forward :<port>`. The output shows `<host_port>:<container_port>`. Give the user a full URL with the host-side port, e.g. `http://localhost:<host_port>`.
 __LOCKI_EOF__
 
 cat > /etc/gemini-cli/settings.json << '__LOCKI_EOF__'
@@ -29,7 +34,7 @@ __LOCKI_EOF__
 
 # MARK: Executable shims
 
-tee /opt/locki/bin/git /opt/locki/bin/gh > /dev/null << '__LOCKI_EOF__'
+tee /opt/locki/bin/git /opt/locki/bin/gh /opt/locki/bin/locki > /dev/null << '__LOCKI_EOF__'
 #!/bin/sh
 cmd=$(basename "$0")
 set -- "$(pwd)" "$cmd" "$@"
@@ -88,7 +93,7 @@ chmod +x /opt/locki/bin/*
 # MARK: Caching
 mkdir -p /etc/apt/apt.conf.d /var/cache/locki/apt/cache /var/cache/locki/apt/state && printf 'Dir::Cache "/var/cache/locki/apt/cache";\nDir::State "/var/cache/locki/apt/state";\n' > /etc/apt/apt.conf.d/99local-cache
 mkdir -p /etc/dnf /var/cache/locki/dnf && printf "cachedir=/var/cache/locki/dnf\nkeepcache=1" >> /etc/dnf/dnf.conf
-ln -s $HOME/.cache /var/cache/locki
+ln -sfn /var/cache/locki $HOME/.cache
 
 # MARK: Networking
 hostnamectl set-hostname locki 2>/dev/null || echo locki > /etc/hostname

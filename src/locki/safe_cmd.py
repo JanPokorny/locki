@@ -50,6 +50,7 @@ RULES = [
     ("gh", "issue", "view"),
     ("gh", "issue", "view", str.isdigit),
     ("gh", "issue", "list"),
+    ("locki", "port-forward", lambda s: s.startswith(":") and s[1:].isdigit(), ...),
 ]
 
 
@@ -251,5 +252,7 @@ def safe_cmd():
         _handle_stash_list(wt_id)
     elif exe == "git" and positionals[:1] == ["stash"] and len(positionals) >= 2 and positionals[1] in ("pop", "apply", "drop"):
         _handle_stash_pop_apply_drop(wt_id, [exe, *positionals])
+    elif exe == "locki":
+        os.execvp(sys.executable, [sys.executable, "-m", "locki", *argv[1:]])
     else:
         os.execvp(exe, [exe, *argv[1:]])
