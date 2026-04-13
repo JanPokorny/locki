@@ -105,7 +105,7 @@ Case study: [Kagenti ADK](https://github.com/kagenti/adk) uses Locki to run a fu
 
     <small>
 
-    (`locki x` runs a command sandboxed: alternatively use `gemini`, `codex` or `opencode`.)
+    (`locki x` runs any command sandboxed. In addition to `claude`, also `gemini`, `codex`, and `opencode` are preinstalled. Use `locki x` alone to open a shell, where you can use `mise` and `dnf` to install anything you want.)
 
     </small>
 1. First start takes longer, wait a few minutes for the VM to boot.
@@ -138,29 +138,30 @@ Case study: [Kagenti ADK](https://github.com/kagenti/adk) uses Locki to run a fu
 
 ## Pro-tips for power users
 
-- Editors like VSCode show worktrees in the sidebar, useful as a quick UI for reviewing and modifying changes. *(⚠️ VSCode 1.115.0 is [bugged](https://github.com/microsoft/vscode/issues/308820?reload=1) and does not show worktrees. [Downgrading to 1.114.0 is simple.](https://code.visualstudio.com/updates/v1_114))*
+- By default, each invocation of `locki x` creates a new branch, worktree and sandbox when used from the root checkout. `cd` to a worktree folder (`~/.locki/worktrees/...`) to operate on it instead. Add `-b <branch>` to use an existing branch, reusing any existing worktree/sandbox. Generated branch name is printed during sandbox creation, pass it with `-b` to return to the existing sandbox.
 
-- The unified `locki x` (or `locki exec`) command runs anything in the sandbox. Use it like a prefix: `locki x bash`, `locki x claude`, `locki x -b my-branch git status`. Without `-b`, it uses the current worktree if in one, otherwise creates a new one.
+- Editors like VSCode show worktrees in the sidebar, useful as a quick UI for reviewing and modifying changes. *(⚠️ VSCode 1.115.0 is [bugged](https://github.com/microsoft/vscode/issues/308820?reload=1) and requires setting `"git.detectWorktrees": true` for this to work.)*
 
 - Locki sandboxes provide [Mise](https://mise.jdx.dev) for tool version management -- replacing `nvm`, `rbenv`, `brew` etc. with a single tool. To make your agents' (and humans') lives easier, optionally <small>(ask your agent to)</small> create `mise.toml` with tool versions and project tasks.
 
 - Want to use custom AI configuration in the VM -- instructions, skills, MCP servers, ...? Sandboxes share a home folder accessible at `~/.locki/home` on host. For example, you can run `cp ~/.claude/CLAUDE.md ~/.locki/home/.claude/CLAUDE.md` to copy your custom instructions for use in sandboxes.
 
-- Forward ports from a sandbox to your host: `locki pf -b my-branch 8080` or `locki pf -b my-branch :3000` for a random host port. Use `--clear` to remove all forwards.
+- Forward ports from a sandbox to your host: `locki pf -b my-branch 8080` or `locki pf -b my-branch :3000` for a random host port. Use `--clear` to remove all forwards. Agent in sandbox can forward via self-service, just ask them.
 
-- Using Git hooks? Locki worktrees are automatically configured to run these inside the sandbox, even if you run `git` from outside. You won't be surprised by the `.venv` containing incompatible binaries.
+- Using Git hooks? Locki worktrees are automatically configured to run these inside the sandbox, even if you run `git` from outside. You won't be surprised by a `.venv` or `node_modules` containing incompatible binaries.
 
 - Something is broken? Try `locki vm delete` -- it will preserve your worktrees and settings in `~/.locki`, but the VM will be recreated from scratch on next run.
 
-- Want a different OS in the sandbox? Create a `locki.toml` file referencing either [an available OS image](https://images.linuxcontainers.org/) like `Fedora/43`, or a local Incus rootfs tarball. Example:
+- Sandboxes run on Fedora 43. Want a different OS? Create a `locki.toml` file referencing either [an available OS image](https://images.linuxcontainers.org/), or a local Incus rootfs tarball by path. Example:
 
-```toml
-# locki.toml
-
-[incus_image]
-aarch64 = "./apps/microshift-vm/dist/aarch64/microshift-vm-aarch64.incus.tar.gz"
-x86_64 = "./apps/microshift-vm/dist/x86_64/microshift-vm-x86_64.incus.tar.gz"
-```
+  ```toml
+  # locki.toml
+  
+  [incus_image]
+  aarch64 = "ubuntu/questing"
+  x86_64 = "ubuntu/questing"
+  ```
+  <small>(Since containers share a binary cache, it is not recommended to mix `musl` distros (like Alpine) with regular ones.)
 
 &nbsp;
 
