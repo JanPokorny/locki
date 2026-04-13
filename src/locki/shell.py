@@ -9,6 +9,7 @@ import re
 import secrets
 import shlex
 import shutil
+import socket
 import string
 import subprocess
 import sys
@@ -307,9 +308,6 @@ def exec_cmd(ctx, branch):
         subprocess.run(
             ["ssh-keygen", "-t", "ed25519", "-f", str(client_key), "-N", ""], check=True, capture_output=True
         )
-    ssh_config_dst = client_ssh_dir / "locki-ssh-config"
-    ssh_config_template = (importlib.resources.files("locki") / "data" / "locki-ssh-config").read_text()
-    ssh_config_dst.write_text(ssh_config_template + f"    User {getpass.getuser()}\n")
     auth_keys = ssh_dir / "authorized_keys"
     locki_bin = shutil.which("locki") or f"{sys.executable} -m locki"
     auth_keys.write_text(
@@ -318,24 +316,34 @@ def exec_cmd(ctx, branch):
     )
     auth_keys.chmod(0o600)
     pid_file = ssh_dir / "sshd.pid"
-    (ssh_dir / "sshd_config").write_text(
-        f"Port 7890\nListenAddress 0.0.0.0\nHostKey {host_key}\n"
-        f"AuthorizedKeysFile {auth_keys}\nPidFile {pid_file}\n"
-        f"PasswordAuthentication no\nPubkeyAuthentication yes\n"
-        f"StrictModes no\nUsePAM no\nLogLevel ERROR\n"
-    )
     sshd_running = False
+    ssh_port = 0
     if pid_file.exists():
         try:
             os.kill(int(pid_file.read_text().strip()), 0)
             sshd_running = True
-        except (ProcessLookupError, ValueError, PermissionError):
+            match = re.search(r"^Port (\d+)", (ssh_dir / "sshd_config").read_text(), re.MULTILINE)
+            if match:
+                ssh_port = int(match.group(1))
+        except (ProcessLookupError, ValueError, PermissionError, FileNotFoundError):
             pass
     sshd_path = shutil.which("sshd")
     if sshd_path is None:
         logger.warning("sshd was not found on the host. Safe git/gh proxy is disabled in this sandbox.")
     elif not sshd_running:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("127.0.0.1", 0))
+            ssh_port = s.getsockname()[1]
+        (ssh_dir / "sshd_config").write_text(
+            f"Port {ssh_port}\nListenAddress 0.0.0.0\nHostKey {host_key}\n"
+            f"AuthorizedKeysFile {auth_keys}\nPidFile {pid_file}\n"
+            f"PasswordAuthentication no\nPubkeyAuthentication yes\n"
+            f"StrictModes no\nUsePAM no\nLogLevel ERROR\n"
+        )
         subprocess.Popen([sshd_path, "-f", str(ssh_dir / "sshd_config")], start_new_session=True)
+    ssh_config_dst = client_ssh_dir / "locki-ssh-config"
+    ssh_config_template = (importlib.resources.files("locki") / "data" / "locki-ssh-config").read_text()
+    ssh_config_dst.write_text(ssh_config_template + f"    Port {ssh_port}\n    User {getpass.getuser()}\n")
 
     forwarded_env = {"TERM", "COLORTERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION", "LANG", "SSH_TTY"}
 

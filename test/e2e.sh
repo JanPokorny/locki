@@ -40,13 +40,12 @@ timed() {
 # Use /tmp directly to keep paths short — Lima needs UNIX_PATH_MAX < 104 for sockets
 # Resolve symlinks (macOS: /tmp -> /private/tmp) to avoid path mismatches
 TMPDIR_ROOT=$(cd "$(mktemp -d /tmp/locki-e2e.XXXX)" && pwd -P)
-# Kill any stale sshd on port 7890 from previous runs
-lsof -ti :7890 | xargs kill 2>/dev/null || true
-cleanup() { lsof -ti :7890 | xargs kill 2>/dev/null || true; rm -rf "$TMPDIR_ROOT"; }
-trap cleanup EXIT
-
 export HOME="$TMPDIR_ROOT/h"
 mkdir -p "$HOME"
+kill_locki_sshd() { local pf="$HOME/.locki/ssh/sshd.pid"; [ -f "$pf" ] && kill "$(cat "$pf")" 2>/dev/null || true; }
+kill_locki_sshd
+cleanup() { kill_locki_sshd; rm -rf "$TMPDIR_ROOT"; }
+trap cleanup EXIT
 
 VENV="$TMPDIR_ROOT/v"
 REPO="$TMPDIR_ROOT/r"

@@ -1,6 +1,5 @@
 Host locki-proxy
     HostName host.lima.internal
-    Port 7890
     IdentityFile ~/.ssh/id_locki
     StrictHostKeyChecking no
     UserKnownHostsFile /dev/null
