@@ -29,7 +29,7 @@ def spinner(text: str):
         if elapsed < 5:
             return ""
         s = f" ({elapsed}s)" if elapsed < 60 else f" ({elapsed // 60}m{elapsed % 60}s)"
-        return click.format(s, fg="gray")
+        return click.style(s, fg="gray")
 
     thread = threading.Thread(target=_spin, daemon=True)
     thread.start()
@@ -55,7 +55,7 @@ _log_file_path: Path | None = None
 class _StderrFormatter(logging.Formatter):
     def format(self, record):
         if record.levelno >= logging.ERROR:
-            return f"{click.format("ERROR", fg="red")}: {record.getMessage()}"
+            return f"{click.style("ERROR", fg="red")}: {record.getMessage()}"
         return record.getMessage()
 
 
