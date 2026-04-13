@@ -249,7 +249,7 @@ def exec_cmd(ctx, branch):
                     cwd="/",
                 )
                 locki.run_in_vm(
-                    ["bash", "-c", f"incus image import /tmp/{tmp_name} --alias={tmp_name} && rm -f /tmp/{tmp_name}"],
+                    ["bash", "-c", f"out=$(incus image import /tmp/{tmp_name} --alias={tmp_name} 2>&1) || echo \"$out\" | grep -q 'already exists'; rm -f /tmp/{tmp_name}"],
                     "Importing container image",
                 )
                 image_ref = tmp_name
