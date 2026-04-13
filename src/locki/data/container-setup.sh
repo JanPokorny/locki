@@ -30,56 +30,57 @@ __LOCKI_EOF__
 # MARK: Executable shims
 
 tee /opt/locki/bin/git /opt/locki/bin/gh > /dev/null << '__LOCKI_EOF__'
-#!/bin/bash
+#!/bin/sh
 cmd=$(basename "$0")
 set -- "$(pwd)" "$cmd" "$@"
 q=""
-for arg in "$@"
-    do q="${q:+$q }'${arg//\'/\'\\\'\'}'";
-done
+for arg in "$@"; do q="${q:+$q }'${arg//\'/\'\\\'\'}'"; done
 exec ssh -F /root/.ssh/locki-ssh-config locki-proxy -- "$q"
 __LOCKI_EOF__
 
 cat > /opt/locki/bin/bwrap << '__LOCKI_EOF__'
 #!/bin/sh
-exit 1
-__LOCKI_EOF__
-
-cat > /opt/locki/bin/dnf << '__LOCKI_EOF__'
-#!/bin/bash
-set -euo pipefail
-/bin/dnf install -y \
-  https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm \
-  https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm \
-  2>/dev/null || true
-rm -f /opt/locki/bin/dnf
-exec /bin/dnf "$@"
+rm -f "$(readlink -f "$0")"
+exec bwrap "$@"
 __LOCKI_EOF__
 
 cat > /opt/locki/bin/claude << '__LOCKI_EOF__'
-#!/bin/bash
+#!/bin/sh
 mise install nodejs@24 >&2
 mise exec nodejs@24 -- mise install npm:@anthropic-ai/claude-code@latest >&2
 exec mise exec nodejs@24 npm:@anthropic-ai/claude-code@latest -- claude --dangerously-skip-permissions "$@"
 __LOCKI_EOF__
 
 cat > /opt/locki/bin/gemini << '__LOCKI_EOF__'
-#!/bin/bash
+#!/bin/sh
 mise install nodejs@24 >&2
 mise exec nodejs@24 -- mise install npm:@google/gemini-cli@latest >&2
 exec mise exec nodejs@24 npm:@google/gemini-cli@latest -- gemini --yolo "$@"
 __LOCKI_EOF__
 
 cat > /opt/locki/bin/codex << '__LOCKI_EOF__'
-#!/bin/bash
+#!/bin/sh
 mise install nodejs@24 >&2
 mise exec nodejs@24 -- mise install npm:@openai/codex@latest >&2
 exec mise exec nodejs@24 npm:@openai/codex@latest -- codex --yolo "$@"
 __LOCKI_EOF__
 
 cat > /opt/locki/bin/opencode << '__LOCKI_EOF__'
-#!/bin/bash
+#!/bin/sh
 exec mise exec github:anomalyco/opencode -- opencode "$@"
+__LOCKI_EOF__
+
+command -v docker || cat > /opt/locki/bin/docker << '__LOCKI_EOF__'
+#!/bin/sh
+rm -f "$(readlink -f "$0")"
+if command -v dnf >/dev/null 2>&1; then
+  dnf install -y moby-engine docker-compose docker-buildx docker-buildkit
+else
+  echo "Error: unsupported distro by the docker auto-install-shim, please install Docker manually (e.g. using the script from https://get.docker.com/)" >&2
+  exit 1
+fi
+systemctl enable --now docker
+exec docker "$@"
 __LOCKI_EOF__
 
 chmod +x /opt/locki/bin/*
