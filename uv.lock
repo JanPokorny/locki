@@ -3,7 +3,7 @@ revision = 3
 requires-python = ">=3.11, <3.15"
 
 [options]
-exclude-newer = "2026-04-06T10:27:03.749073Z"
+exclude-newer = "2026-04-06T10:54:14.373545Z"
 exclude-newer-span = "P7D"
 
 [options.exclude-newer-package]
@@ -42,7 +42,7 @@ wheels = [
 
 [[package]]
 name = "locki"
-version = "0.0.6"
+version = "0.0.7"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
