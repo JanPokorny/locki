@@ -10,7 +10,7 @@ _required = bool               # --flag=<non-empty value>
 _flag = {None, ""}        # optional boolean flag (--flag or absent, no value)
 
 _diff_flags = {"staged": _flag, "name_only": _flag, "stat": _flag, "name_status": _flag}
-_log_flags = {"oneline": _flag, "format": ..., "max_count": ...}
+_log_flags = {"oneline": _flag, "format": ..., "max_count": ..., "all": _flag}
 
 RULES = [
     ("git", "status"),
@@ -24,8 +24,8 @@ RULES = [
     ("git", "fetch"),
     ("git", "log", _log_flags),
     ("git", "log", str, _log_flags),
-    ("git", "show"),
-    ("git", "show", str),
+    ("git", "show", {"stat": _flag, "name_only": _flag, "name_status": _flag, "format": ...}),
+    ("git", "show", str, {"stat": _flag, "name_only": _flag, "name_status": _flag, "format": ...}),
     ("git", "restore", str, ..., {"staged": _flag, "source": ...}),
     ("git", "switch", str),
     ("git", "switch", {"create": _required}),
