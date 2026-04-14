@@ -21,7 +21,7 @@ def spinner(text: str):
 
     def _spin():
         while not stop.wait(0.2):
-            sys.stderr.write(f"\r{random.choice('ᚠᚢᚦᚨᚱᚲᚷᚹᚺᚾᛁᛃᛇᛈᛉᛊᛋᛏᛒᛖᛗᛚᛜᛝᛟᛞ')} {text}")
+            sys.stderr.write(f"\r{random.choice('ᚠᚢᚦᚨᚱᚲᚷᚹᚺᚾᛁᛃᛇᛈᛉᛊᛋᛏᛒᛖᛗᛚᛜᛝᛟᛞᚴ')} {text}")
             sys.stderr.flush()
 
     def _duration() -> str:

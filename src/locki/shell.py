@@ -80,6 +80,7 @@ def exec_cmd(ctx, branch):
       locki x -b my-feature bash      # specify branch
       locki x bash -c "echo hello"    # run a one-liner
     """
+    click.echo(f"{click.style('ᚠ', fg='magenta', bold=True)} Entering Locki sandbox.", err=True)
     if not branch:
         wt_path = locki.current_worktree()
         if wt_path is None:
@@ -351,8 +352,7 @@ def exec_cmd(ctx, branch):
     os.environ["LIMA_HOME"] = str(locki.LIMA_HOME)
     os.environ["LIMA_SHELLENV_ALLOW"] = ",".join(forwarded_env)
 
-    os.execvp(
-        locki.limactl(),
+    result = subprocess.run(
         [
             locki.limactl(),
             "shell",
@@ -377,3 +377,10 @@ def exec_cmd(ctx, branch):
             ]),
         ],
     )
+
+    click.echo()
+    click.echo(f"{click.style('ᛟ', fg='magenta', bold=True)} Exited Locki sandbox.", err=True)
+    click.echo(f"{click.style('ᛃ', fg='cyan', bold=True)} Return to this sandbox: {click.style(f'locki x -b {shlex.quote(branch)}', fg='green')}", err=True)
+    if resume_arg := {"claude": "-c", "gemini": "-r", "codex": "resume"}.get(ctx.args[0]):
+        click.echo(f"{click.style('ᛃ', fg='cyan', bold=True)} Continue conversation:  {click.style(f'locki x -b {shlex.quote(branch)} {ctx.args[0]} {resume_arg}', fg='green')}", err=True)
+    raise SystemExit(result.returncode)
