@@ -35,7 +35,9 @@ tee /opt/locki/bin/git /opt/locki/bin/gh /opt/locki/bin/locki > /dev/null << '__
 cmd=$(basename "$0")
 set -- "$(pwd)" "$cmd" "$@"
 q=""
-for arg in "$@"; do q="${q:+$q }'${arg//\'/\'\\\'\'}'"; done
+for arg in "$@"; do
+  q="${q:+$q }'$(printf '%s' "$arg" | sed "s/'/'\\\\''/g")'"
+done
 exec ssh -F /root/.ssh/locki-ssh-config locki-proxy -- "$q"
 __LOCKI_EOF__
 
