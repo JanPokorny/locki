@@ -73,8 +73,10 @@ for pair in \
 ; do
   pkg="${pair%%=*}"
   cmd="${pair##*=}"
-  cat > "/opt/locki/bin/$cmd" << EOF
+  bin="${cmd%% *}"
+  cat > "/opt/locki/bin/$bin" << EOF
 #!/bin/sh
+export MISE_STATUS_MESSAGE_MISSING_TOOLS=never
 exec mise x nodejs@24 -- mise x $pkg -- $cmd "\$@"
 EOF
 done
@@ -92,6 +94,7 @@ for pair in \
   cmd="${pair##*=}"
   cat > "/opt/locki/bin/$cmd" << EOF
 #!/bin/sh
+export MISE_STATUS_MESSAGE_MISSING_TOOLS=never
 exec mise x $pkg -- $cmd "\$@"
 EOF
 done
@@ -115,11 +118,11 @@ hostnamectl set-hostname locki 2>/dev/null || echo locki > /etc/hostname
 echo '192.168.5.2 host.lima.internal' >> /etc/hosts
 
 ## network is not available for a short while, wait for it
-timeout 30s sh -c 'while ! getent hosts mirrors.fedoraproject.org >/dev/null 2>&1; do sleep 1; done'
+timeout 30s sh -c 'while ! ping -c1 -W1 1.1.1.1 >/dev/null 2>&1; do sleep 1; done'
 
 # MARK: Mise
 
-if ! test -x /usr/local/bin/mise; then
+if ! command -v mise; then
   mise_version="2026.4.10"
 
   musl=""; if ldd /bin/ls 2>/dev/null | grep musl; then musl="-musl"; fi
@@ -162,14 +165,16 @@ if ! test -x /usr/local/bin/mise; then
     if [ "$ext" = "tar.zst" ]; then zstd -d -c "$tmpdir/$mise_file" | tar -xf -; else tar -xf "$tmpdir/$mise_file"; fi
   fi
 
+  chmod +x "/var/cache/mise-install/mise-v${mise_version}-linux-${arch}/mise/bin/mise"
   ln -sf "/var/cache/mise-install/mise-v${mise_version}-linux-${arch}/mise/bin/mise" /usr/local/bin/mise
+  chmod +x /usr/local/bin/mise
 fi
 
 mkdir -p /etc/bashrc.d
-/usr/local/bin/mise activate bash >/etc/bashrc.d/mise.sh
+mise activate bash >/etc/bashrc.d/mise.sh
 
 mkdir -p /etc/zshrc.d
-/usr/local/bin/mise activate zsh >/etc/zshrc.d/mise.sh
+mise activate zsh >/etc/zshrc.d/mise.sh
 
 mkdir -p /etc/fish/conf.d
-/usr/local/bin/mise activate fish >/etc/fish/conf.d/mise.fish
+mise activate fish >/etc/fish/conf.d/mise.fish

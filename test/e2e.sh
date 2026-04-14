@@ -22,9 +22,11 @@ assert_fail() {
 
 assert_output() {
     local desc="$1" expected="$2"; shift 2
-    local actual
-    actual=$("$@" 2>/dev/null) || true
-    if [[ "$actual" == *"$expected"* ]]; then pass "$desc"; else fail "$desc (expected '$expected', got '$actual')"; fi
+    local actual stderr_file
+    stderr_file=$(mktemp)
+    actual=$("$@" 2>"$stderr_file") || true
+    if [[ "$actual" == *"$expected"* ]]; then pass "$desc"; else fail "$desc (expected '$expected', got '$actual')"; cat "$stderr_file" >&2; fi
+    rm -f "$stderr_file"
 }
 
 timed() {
