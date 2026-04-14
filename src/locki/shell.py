@@ -95,7 +95,7 @@ def exec_cmd(ctx, branch):
                 branch = config.branch_prefix + _viking_name()
                 if branch not in existing_set:
                     break
-            click.echo(f"Creating a new branch '{branch}'", err=True)
+            click.echo(f"{click.style('ᚦ', fg='magenta', bold=True)} Created a new branch {click.style(branch, fg="green")}.", err=True)
 
     locki.git_root()  # fail fast if not in a git repo
 
