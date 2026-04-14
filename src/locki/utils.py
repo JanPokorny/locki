@@ -37,11 +37,11 @@ def spinner(text: str):
         yield
         stop.set()
         thread.join()
-        click.echo(f"\r{click.style("ᛟ", fg="green")} {text}{_duration()}", err=True)
+        click.echo(f"\r{click.style("ᛝ", fg="green")} {text.replace("ing ", "ed ", count=1)}{_duration()} ", err=True)
     except BaseException:
         stop.set()
         thread.join()
-        click.echo(f"\r{click.style("ᛞ", fg="red")} {text}{_duration()}", err=True)
+        click.echo(f"\r{click.style("ᛞ", fg="red")} {text.replace("ing ", "ed ", count=1)}{_duration()} ", err=True)
         raise
     finally:
         sys.stderr.flush()
