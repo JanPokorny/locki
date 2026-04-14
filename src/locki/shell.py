@@ -84,13 +84,14 @@ def exec_cmd(ctx, branch):
         wt_path = locki.current_worktree()
         if wt_path is None:
             # In root repo, auto-generate a Viking branch name (avoid existing branches)
+            config = load_config(locki.git_root())
             existing = subprocess.run(
                 ["git", "-C", str(locki.git_root()), "branch", "--list", "--all", "--format=%(refname:short)"],
                 capture_output=True, text=True,
             ).stdout.splitlines()
             existing_set = {b.strip().removeprefix("origin/") for b in existing}
             for _ in range(100):
-                branch = _viking_name()
+                branch = config.branch_prefix + _viking_name()
                 if branch not in existing_set:
                     break
             click.echo(f"Creating a new branch '{branch}'", err=True)
