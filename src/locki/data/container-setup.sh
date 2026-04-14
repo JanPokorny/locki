@@ -49,23 +49,17 @@ __LOCKI_EOF__
 
 cat > /opt/locki/bin/claude << '__LOCKI_EOF__'
 #!/bin/sh
-mise install nodejs@24 >&2
-mise exec nodejs@24 -- mise install npm:@anthropic-ai/claude-code@latest >&2
-exec mise exec nodejs@24 npm:@anthropic-ai/claude-code@latest -- claude --dangerously-skip-permissions "$@"
+exec mise x nodejs@24 -- mise x npm:@anthropic-ai/claude-code@latest -- claude --dangerously-skip-permissions "$@"
 __LOCKI_EOF__
 
 cat > /opt/locki/bin/gemini << '__LOCKI_EOF__'
 #!/bin/sh
-mise install nodejs@24 >&2
-mise exec nodejs@24 -- mise install npm:@google/gemini-cli@latest >&2
-exec mise exec nodejs@24 npm:@google/gemini-cli@latest -- gemini --yolo "$@"
+exec mise x nodejs@24 -- mise x npm:@google/gemini-cli@latest -- gemini --yolo "$@"
 __LOCKI_EOF__
 
 cat > /opt/locki/bin/codex << '__LOCKI_EOF__'
 #!/bin/sh
-mise install nodejs@24 >&2
-mise exec nodejs@24 -- mise install npm:@openai/codex@latest >&2
-exec mise exec nodejs@24 npm:@openai/codex@latest -- codex --yolo "$@"
+exec mise x nodejs@24 -- mise x npm:@openai/codex@latest -- codex --yolo "$@"
 __LOCKI_EOF__
 
 command -v docker || cat > /opt/locki/bin/docker << '__LOCKI_EOF__'
