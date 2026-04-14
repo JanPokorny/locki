@@ -80,7 +80,7 @@ def exec_cmd(ctx, branch):
       locki x -b my-feature bash      # specify branch
       locki x bash -c "echo hello"    # run a one-liner
     """
-    click.echo(f"{click.style('ᚠ', fg='magenta', bold=True)} Entering Locki sandbox.", err=True)
+    click.echo(f"{click.style('ᚠ', fg='magenta', bold=True)} Entering a Locki sandbox.", err=True)
     if not branch:
         wt_path = locki.current_worktree()
         if wt_path is None:
@@ -151,74 +151,73 @@ def exec_cmd(ctx, branch):
             check=False,
         )
 
-    if branch:
-        wt_path = locki.find_worktree_for_branch(branch)
-        if not wt_path:
-            run_command(
-                ["git", "-C", str(locki.git_root()), "worktree", "prune"],
-                "Pruning stale git worktrees",
-            )
-
-            repo_name = re.sub(r"[^a-z0-9-]", "-", locki.git_root().name.lower())
-            safe_branch = re.sub(r"[^a-z0-9-]", "-", branch.lower())
-            wt_id = f"{(f'{repo_name}--{safe_branch}'[:53].rstrip('-'))}--{''.join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(8))}"
-            wt_path = locki.WORKTREES_HOME / wt_id
-            wt_path.mkdir(parents=True, exist_ok=True)
-
-            run_command(
-                ["git", "-C", str(locki.git_root()), "fetch"],
-                "Fetching from remote",
-                check=False,
-            )
-
-            result = run_command(
-                ["git", "-C", str(locki.git_root()), "worktree", "add", str(wt_path), branch],
-                f"Creating worktree for '{branch}'",
-                check=False,
-            )
-            if result.returncode != 0:
-                run_command(
-                    ["git", "-C", str(locki.git_root()), "branch", branch],
-                    f"Creating branch '{branch}'",
-                )
-                run_command(
-                    ["git", "-C", str(locki.git_root()), "worktree", "add", str(wt_path), branch],
-                    f"Creating worktree for '{branch}'",
-                )
-
-            meta_dir = locki.WORKTREES_META / wt_id
-            meta_dir.mkdir(parents=True, exist_ok=True)
-            (meta_dir / ".git").write_text((wt_path / ".git").read_text())
-            (meta_dir / "branch").write_text(branch)
-            (meta_dir / "repo").write_text(str(locki.git_root()))
-
-            run_command(
-                ["git", "-C", str(locki.git_root()), "config", "extensions.worktreeConfig", "true"],
-                "Enabling per-worktree git config",
-            )
-
-            hooks_dir = locki.WORKTREES_META / wt_id / "hooks"
-            hooks_dir.mkdir(parents=True, exist_ok=True)
-            hook_script = (importlib.resources.files("locki") / "data" / "locki-hook.sh").read_bytes()
-            for name in locki.GIT_HOOKS:
-                hook_path = hooks_dir / name
-                hook_path.write_bytes(hook_script)
-                hook_path.chmod(0o755)
-
-            run_command(
-                ["git", "-C", str(wt_path), "config", "--worktree", "core.hooksPath", str(hooks_dir)],
-                "Configuring per-worktree hooks",
-            )
-
-            run_command(
-                ["git", "-C", str(wt_path), "config", "--worktree", "push.autoSetupRemote", "true"],
-                "Configuring auto push for new branches",
-            )
-    else:
-        wt_path = locki.current_worktree()
-        if wt_path is None:
-            print("No branch specified and not inside a locki worktree.", file=sys.stderr)
+    wt_path = locki.find_worktree_for_branch(branch) if branch else locki.current_worktree()
+    if not wt_path:  # branch was provided but does not exit
+        if not branch:
+            click.echo(f"{click.style('ᛞ', fg='red', bold=True)} No branch specified and not inside a Locki worktree.", file=sys.stderr)
             sys.exit(1)
+
+        run_command(
+            ["git", "-C", str(locki.git_root()), "worktree", "prune"],
+            "Pruning stale git worktrees",
+        )
+
+        repo_name = re.sub(r"[^a-z0-9-]", "-", locki.git_root().name.lower())
+        safe_branch = re.sub(r"[^a-z0-9-]", "-", branch.lower())
+        wt_id = f"{(f'{repo_name}--{safe_branch}'[:53].rstrip('-'))}--{''.join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(8))}"
+        wt_path = locki.WORKTREES_HOME / wt_id
+        wt_path.mkdir(parents=True, exist_ok=True)
+
+        run_command(
+            ["git", "-C", str(locki.git_root()), "fetch"],
+            "Fetching from remote",
+            check=False,
+        )
+
+        result = run_command(
+            ["git", "-C", str(locki.git_root()), "worktree", "add", str(wt_path), branch],
+            f"Creating worktree for {click.style(branch, fg='green')}",
+            check=False,
+        )
+        if result.returncode != 0:
+            run_command(
+                ["git", "-C", str(locki.git_root()), "branch", branch],
+                f"Creating branch {click.style(branch, fg='green')}",
+            )
+            run_command(
+                ["git", "-C", str(locki.git_root()), "worktree", "add", str(wt_path), branch],
+                f"Creating worktree for {click.style(branch, fg='green')}",
+            )
+
+        meta_dir = locki.WORKTREES_META / wt_id
+        meta_dir.mkdir(parents=True, exist_ok=True)
+        (meta_dir / ".git").write_text((wt_path / ".git").read_text())
+        (meta_dir / "branch").write_text(branch)
+        (meta_dir / "repo").write_text(str(locki.git_root()))
+
+        run_command(
+            ["git", "-C", str(locki.git_root()), "config", "extensions.worktreeConfig", "true"],
+            "Enabling per-worktree git config",
+        )
+
+        hooks_dir = locki.WORKTREES_META / wt_id / "hooks"
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        hook_script = (importlib.resources.files("locki") / "data" / "locki-hook.sh").read_bytes()
+        for name in locki.GIT_HOOKS:
+            hook_path = hooks_dir / name
+            hook_path.write_bytes(hook_script)
+            hook_path.chmod(0o755)
+
+        run_command(
+            ["git", "-C", str(wt_path), "config", "--worktree", "core.hooksPath", str(hooks_dir)],
+            "Configuring per-worktree hooks",
+        )
+
+        run_command(
+            ["git", "-C", str(wt_path), "config", "--worktree", "push.autoSetupRemote", "true"],
+            "Configuring auto push for new branches",
+        )
+
     wt_id = wt_path.relative_to(locki.WORKTREES_HOME).parts[0]
 
     config = load_config(locki.git_root())
@@ -381,6 +380,6 @@ def exec_cmd(ctx, branch):
     click.echo()
     click.echo(f"{click.style('ᛟ', fg='magenta', bold=True)} Exited Locki sandbox.", err=True)
     click.echo(f"{click.style('ᛃ', fg='cyan', bold=True)} Return to this sandbox: {click.style(f'locki x -b {shlex.quote(branch)}', fg='green')}", err=True)
-    if resume_arg := {"claude": "-c", "gemini": "-r", "codex": "resume"}.get(ctx.args[0]):
+    if ctx.args and (resume_arg := {"claude": "-c", "gemini": "-r", "codex": "resume"}.get(ctx.args[0])):
         click.echo(f"{click.style('ᛃ', fg='cyan', bold=True)} Continue conversation:  {click.style(f'locki x -b {shlex.quote(branch)} {ctx.args[0]} {resume_arg}', fg='green')}", err=True)
     raise SystemExit(result.returncode)
