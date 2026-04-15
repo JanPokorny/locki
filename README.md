@@ -126,7 +126,8 @@ Case study: [Kagenti ADK](https://github.com/kagenti/adk) uses Locki to run a fu
 
 - `locki x` opens an interactive picker to select an existing sandbox or create a new one. Use `locki x -n` to create a new sandbox non-interactively. Use `locki x -b <substring>` to match an existing sandbox by any part of its branch name (e.g. the branch name or the 8-char ID). `cd` to a worktree folder (`~/.locki/worktrees/...`) to operate on it directly.
 
-- Editors like VSCode show worktrees in the sidebar, useful as a quick UI for reviewing and modifying changes. *(⚠️ VSCode 1.115.0 is [bugged](https://github.com/microsoft/vscode/issues/308820?reload=1) and requires setting `"git.detectWorktrees": true` for this to work.)*
+- Editors like VSCode show worktrees in the sidebar, useful as a quick UI for reviewing and modifying changes.
+  *(⚠️ VSCode 1.115.0+ requires setting `"git.detectWorktrees": true` for this to work.)*
 
 - Locki sandboxes provide [Mise](https://mise.jdx.dev) for tool version management -- replacing `nvm`, `rbenv`, `brew` etc. with a single tool. To make your agents' (and humans') lives easier, optionally <small>(ask your agent to)</small> create `mise.toml` with tool versions and project tasks.
 
