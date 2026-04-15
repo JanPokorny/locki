@@ -109,9 +109,9 @@ def _gen_wt_id() -> str:
 
 @click.command("exec | x", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 @click.option("-b", "--branch", default=None, help="Substring match on existing sandbox branch.")
-@click.option("-n", "--new", "new_label", default=None, help="Create a new sandbox with the given label.")
+@click.option("-n", "--new", "new", is_flag=True, default=False, help="Create a new sandbox.")
 @click.pass_context
-def exec_cmd(ctx, branch, new_label):
+def exec_cmd(ctx, branch, new):
     """Run a command in the per-branch sandbox container.
 
     \b
@@ -119,14 +119,14 @@ def exec_cmd(ctx, branch, new_label):
       locki x bash                    # interactive shell (sandbox picker)
       locki x claude                  # run Claude Code
       locki x -b feat bash            # match sandbox by substring
-      locki x --new my-feat bash      # create new sandbox
+      locki x -n bash                 # create new sandbox
       locki x bash -c "echo hello"    # run a one-liner
     """
     click.echo(f"{click.style('ᚠ', fg='magenta', bold=True)} Entering a Locki sandbox.", err=True)
     wt_id: str | None = None
-    if new_label:
+    if new:
         wt_id = _gen_wt_id()
-        branch = f"{new_label}#locki-{wt_id}"
+        branch = f"default#locki-{wt_id}"
     elif branch:
         branch = match_sandbox_branch(branch)
     else:
