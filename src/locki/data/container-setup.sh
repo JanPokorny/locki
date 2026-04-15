@@ -78,26 +78,39 @@ for pair in \
   bin="${cmd%% *}"
   cat > "/opt/locki/bin/$bin" << EOF
 #!/bin/sh
+# use specific version if agent requested it, else latest
+version="\$(mise tool $pkg --requested | sed s/\\\\[none\\\\]/latest/g)"
+# run from root to avoid mise discovering mise.toml and triggering full install
+target="\$(pwd)"
+cd /  
 export MISE_STATUS_MESSAGE_MISSING_TOOLS=never
-exec mise x nodejs@24 -- mise x $pkg -- $cmd "\$@"
+exec mise x -C "\$target" nodejs@24 -- mise x $pkg@\$version -- $cmd "\$@"
 EOF
 done
 
 ## other auto-install shims
 for pair in \
   "aqua:fish-shell/fish-shell=fish" \
-  "kubectl=kubectl" \
-  "k9s=k9s" \
-  "jq=jq" \
-  "yq=yq" \
+  "fd=fd" \
   "github:anomalyco/opencode=opencode" \
+  "jq=jq" \
+  "k9s=k9s" \
+  "kubectl=kubectl" \
+  "rg=rg" \
+  "yq=yq" \
 ; do
   pkg="${pair%%=*}"
   cmd="${pair##*=}"
-  cat > "/opt/locki/bin/$cmd" << EOF
+  bin="${cmd%% *}"
+  cat > "/opt/locki/bin/$bin" << EOF
 #!/bin/sh
+# use specific version if agent requested it, else latest
+version="\$(mise tool $pkg --requested | sed s/\\\\[none\\\\]/latest/g)"
+# run from root to avoid mise discovering mise.toml and triggering full install
+target="\$(pwd)"
+cd /  
 export MISE_STATUS_MESSAGE_MISSING_TOOLS=never
-exec mise x $pkg -- $cmd "\$@"
+exec mise x -C "\$target" $pkg@\$version -- $cmd "\$@"
 EOF
 done
 
