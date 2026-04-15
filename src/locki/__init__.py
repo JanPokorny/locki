@@ -1,5 +1,6 @@
 import click
 
+from locki.ai import ai_cmd
 from locki.logging import setup_logging
 from locki.port_forward import port_forward_cmd
 from locki.self_service import self_service_cmd
@@ -12,6 +13,7 @@ setup_logging()
 app = click.group(
     cls=AliasGroup, help="AI sandboxing without the taste of sand, using a managed Lima VM with Incus containers."
 )(lambda: None)
+app.add_command(ai_cmd, "ai")
 app.add_command(exec_cmd, "exec | x")
 app.add_command(port_forward_cmd, "port-forward | pf")
 app.add_command(remove_cmd, "remove | rm | delete")
