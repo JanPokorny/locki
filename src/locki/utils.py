@@ -72,11 +72,14 @@ def spinner(text: str):
         yield
         stop.set()
         thread.join()
-        click.echo(f"\r{click.style("ᛝ", fg="green", bold=True)} {text.replace("ing ", "ed ", count=1)}{_duration()} ", err=True)
+        click.echo(
+            f"\r{click.style('ᛝ', fg='green', bold=True)} {text.replace('ing ', 'ed ', count=1)}{_duration()} ",
+            err=True,
+        )
     except BaseException:
         stop.set()
         thread.join()
-        click.echo(f"\r{click.style("ᛞ", fg="red", bold=True)} {text} failed{_duration()}", err=True)
+        click.echo(f"\r{click.style('ᛞ', fg='red', bold=True)} {text} failed{_duration()}", err=True)
         raise
     finally:
         sys.stderr.flush()
@@ -205,8 +208,9 @@ def current_worktree() -> pathlib.Path | None:
 
 
 def resolve_branch(branch: str | None) -> tuple[str, pathlib.Path]:
-    """Resolve a branch name to (branch, worktree_path). Errors if unresolvable."""
+    """Resolve a branch query to (branch, worktree_path). Errors if unresolvable."""
     if branch:
+        branch = match_sandbox_branch(branch)
         wt_path = find_worktree_for_branch(branch)
         if wt_path is None:
             logger.error("No worktree found for branch '%s'.", branch)
@@ -243,45 +247,38 @@ def list_locki_worktree_branches() -> list[str]:
     """Return branch names that have Locki-managed worktrees in the current repo."""
     result = subprocess.run(
         ["git", "-C", str(git_root()), "worktree", "list", "--porcelain"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     branches: list[str] = []
     current_path: pathlib.Path | None = None
     for line in result.stdout.splitlines():
         if line.startswith("worktree "):
             current_path = pathlib.Path(line.split(" ", 1)[1])
-        elif (
-            line.startswith("branch refs/heads/")
-            and current_path
-            and current_path.is_relative_to(WORKTREES_HOME)
-        ):
+        elif line.startswith("branch refs/heads/") and current_path and current_path.is_relative_to(WORKTREES_HOME):
             branches.append(line.removeprefix("branch refs/heads/"))
     return branches
 
 
-def list_local_branches() -> list[str]:
-    """Return all local branch names."""
-    result = subprocess.run(
-        ["git", "-C", str(git_root()), "branch", "--format=%(refname:short)"],
-        capture_output=True, text=True,
-    )
-    return [b.strip() for b in result.stdout.splitlines() if b.strip()]
+def match_sandbox_branch(query: str) -> str:
+    """Substring-match *query* against existing Locki worktree branches.
 
-
-def list_remote_branches() -> list[str]:
-    """Return remote branch names with the remote prefix stripped."""
-    result = subprocess.run(
-        ["git", "-C", str(git_root()), "branch", "-r", "--format=%(refname:short)"],
-        capture_output=True, text=True,
-    )
-    seen: set[str] = set()
-    branches: list[str] = []
-    for line in result.stdout.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        _, _, branch = line.partition("/")
-        if branch and branch != "HEAD" and branch not in seen:
-            seen.add(branch)
-            branches.append(branch)
-    return branches
+    Returns the unique match.  Exits with an error on zero or ambiguous matches.
+    """
+    wt_branches = list_locki_worktree_branches()
+    matches = [b for b in wt_branches if query in b]
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) == 0:
+        click.echo(
+            f"{click.style('ᛞ', fg='red', bold=True)} No sandbox branch matching {click.style(query, fg='yellow')!r}.",
+            err=True,
+        )
+    else:
+        click.echo(
+            f"{click.style('ᛞ', fg='red', bold=True)} Ambiguous match for {click.style(query, fg='yellow')!r}:",
+            err=True,
+        )
+        for m in sorted(matches):
+            click.echo(f"  {m}", err=True)
+    sys.exit(1)

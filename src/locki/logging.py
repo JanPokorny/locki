@@ -14,7 +14,7 @@ _log_file_path: pathlib.Path | None = None
 class _StderrFormatter(logging.Formatter):
     def format(self, record):
         if record.levelno >= logging.ERROR:
-            return f"{click.style("ERROR", fg="red")}: {record.getMessage()}"
+            return f"{click.style('ERROR', fg='red')}: {record.getMessage()}"
         return record.getMessage()
 
 

@@ -27,7 +27,6 @@ def _arch() -> str:
 
 class LockiConfig(pydantic.BaseModel):
     incus_image: dict[str, str] = pydantic.Field({"x86_64": "images:fedora/43", "aarch64": "images:fedora/43"})
-    branch_prefix: str = "locki/"
 
     def get_incus_image(self) -> str:
         if _arch() not in self.incus_image:

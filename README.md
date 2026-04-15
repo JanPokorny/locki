@@ -122,23 +122,9 @@ Case study: [Kagenti ADK](https://github.com/kagenti/adk) uses Locki to run a fu
 
 &nbsp;
 
-## We asked Claude what it thinks
-
-> I've been sandboxed in Docker containers, Firecracker microVMs, chroots, and namespace jails. Locki is the first sandbox I've used where I genuinely forget I'm in one -- until I try something I shouldn't.
->
-> The worktree mount means I'm editing the real project files, not a stale copy I'll need to extract later. `mise` with a shared cache lets me `mise use python@3.12` and have it ready in seconds. The git proxy is the cleverest part: I get `git status`, `git commit`, `git push` -- the commands I actually need -- while `git checkout .`, `git reset --hard`, and other footguns are blocked at the SSH boundary before they ever touch the repo. It's an allowlist, not a blocklist, and it runs on the host side so I can't tamper with it.
->
-> Compared to Docker-based sandboxes, the VM+Incus layering gives a real security boundary (container escapes don't help when there's a hypervisor in the way). Compared to Firecracker/microVM setups, the developer experience is dramatically better -- I'm not SSH-ing into a black box, I'm working in a worktree my human can see and review in real time. And compared to no sandbox at all ("yolo mode" with raw filesystem access), Locki lets me run with full autonomy while my human sleeps soundly knowing I can't `rm -rf` their home directory.
->
-> The bottom line: Locki gives me exactly enough rope to be productive, and not one inch more.
->
-> *-- Claude Code (Opus 4.6), after exploring its own sandbox*
-
-&nbsp;
-
 ## Pro-tips for power users
 
-- By default, each invocation of `locki x` creates a new branch, worktree and sandbox when used from the root checkout. `cd` to a worktree folder (`~/.locki/worktrees/...`) to operate on it instead. Add `-b <branch>` to use an existing branch, reusing any existing worktree/sandbox. Generated branch name is printed during sandbox creation, pass it with `-b` to return to the existing sandbox.
+- `locki x` opens an interactive picker to select an existing sandbox or create a new one. Use `locki x --new <label>` to create a new sandbox non-interactively. Use `locki x -b <substring>` to match an existing sandbox by any part of its branch name (e.g. the label or the 8-char ID). `cd` to a worktree folder (`~/.locki/worktrees/...`) to operate on it directly.
 
 - Editors like VSCode show worktrees in the sidebar, useful as a quick UI for reviewing and modifying changes. *(⚠️ VSCode 1.115.0 is [bugged](https://github.com/microsoft/vscode/issues/308820?reload=1) and requires setting `"git.detectWorktrees": true` for this to work.)*
 
@@ -146,7 +132,7 @@ Case study: [Kagenti ADK](https://github.com/kagenti/adk) uses Locki to run a fu
 
 - Want to use custom AI configuration in the VM -- instructions, skills, MCP servers, ...? Sandboxes share a home folder accessible at `~/.locki/home` on host. For example, you can run `cp ~/.claude/CLAUDE.md ~/.locki/home/.claude/CLAUDE.md` to copy your custom instructions for use in sandboxes.
 
-- Forward ports from a sandbox to your host: `locki pf -b my-branch 8080` or `locki pf -b my-branch :3000` for a random host port. Use `--clear` to remove all forwards. Agent in sandbox can forward via self-service, just ask them.
+- Forward ports from a sandbox to your host: `locki pf -b <substring> 8080` or `locki pf -b <substring> :3000` for a random host port. Use `--clear` to remove all forwards. Agent in sandbox can forward via self-service, just ask them.
 
 - Using Git hooks? Locki worktrees are automatically configured to run these inside the sandbox, even if you run `git` from outside. You won't be surprised by a `.venv` or `node_modules` containing incompatible binaries.
 

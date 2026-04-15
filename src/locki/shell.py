@@ -4,7 +4,6 @@ import json
 import logging
 import os
 import pathlib
-import random
 import re
 import secrets
 import shlex
@@ -24,9 +23,8 @@ from locki.utils import (
     find_worktree_for_branch,
     git_root,
     limactl,
-    list_local_branches,
     list_locki_worktree_branches,
-    list_remote_branches,
+    match_sandbox_branch,
     run_command,
     run_in_vm,
 )
@@ -104,132 +102,60 @@ GIT_HOOKS = [
 
 logger = logging.getLogger(__name__)
 
-_MALE_NAMES = [
-    "aksel", "amund", "anders", "arne", "arvid", "asbjorn", "asgeir", "audun", "bard", "bersi",
-    "birger", "bjarni", "bjorn", "bragi", "brand", "egil", "erik", "eyvind", "finn", "floki",
-    "frode", "gardar", "gisli", "gorm", "grettir", "grimm", "gudmund", "gunnar", "guthorm",
-    "hakon", "haldor", "halfdan", "hallvard", "halsten", "harald", "havard", "helgi", "hemming",
-    "hermod", "hjalmar", "hoskuld", "hrolf", "ingjald", "ingvar", "ivar", "jansen", "jorgen",
-    "karl", "ketil", "kirk", "knut", "kolbein", "leif", "ljot", "magnus", "naddod", "njal",
-    "norman", "olaf", "orvar", "osgood", "ottar", "ragnar", "ragnvald", "rayner", "roderick",
-    "roger", "rollo", "rurik", "rutland", "saxe", "sigmund", "sigurd", "sigvald", "skarde",
-    "skorri", "skuli", "snorri", "starkad", "steinar", "sten", "styrbjorn", "sune", "svein",
-    "sven", "thorfinn", "thormod", "thorsten", "thorvald", "toki", "torbjorn", "torfi",
-    "torstein", "torvald", "tryggvi", "ulf", "vagn", "vemund", "vidar", "viggo",
-]
-_FEMALE_NAMES = [
-    "alfhild", "alva", "anneli", "annika", "arnbjorg", "asdis", "aslaug", "asta", "astrid",
-    "aud", "bergljot", "birgitta", "borghild", "brynhild", "dagny", "dahlia", "dalla", "disa",
-    "edda", "embla", "erika", "erna", "freya", "frida", "geira", "gertrud", "gudrid", "gudrun",
-    "gunhild", "gunnvor", "gyda", "hallgerd", "hallveig", "helga", "herdis", "hervor", "hilda",
-    "hjordis", "hrefna", "idonea", "idun", "inga", "ingibjorg", "ingrid", "jofrid", "jorid",
-    "jorunn", "kara", "katla", "lagertha", "liv", "nanna", "oda", "oddny", "ragnfrid",
-    "ragnhild", "ran", "rayna", "revna", "runa", "saeunn", "sassa", "shelby", "sif", "sigfrid",
-    "sigrid", "solveig", "steinunn", "sunniva", "svanhild", "thordis", "thorhild", "thorgerd",
-    "thurid", "thyra", "tora", "torborg", "torunn", "unn", "vala", "valdis", "valkyrie",
-    "vigdis", "vigga", "ylva", "yrsa",
-]
-_NEUTRAL_NAMES = [
-    "agnar", "ari", "aslak", "bertil", "birk", "bo", "bodil", "brok", "bui", "crosby", "dag",
-    "dagmar", "darby", "ebbe", "eilif", "einar", "esben", "eyolf", "folke", "geir", "gro",
-    "hauk", "heid", "hreidar", "kai", "keld", "loki", "nanne", "njord", "orm", "randi", "roald",
-    "rune", "saga", "sindri", "skald", "skai", "skjold", "sondre", "storm", "sverre", "thrain",
-    "torkel", "tove", "tyr", "ull", "valdimar", "vigg", "whitby",
-]
 
-
-def _viking_name() -> str:
-    """Generate a Viking-style name: <name>-<father>(sson|sdottir)-<number>."""
-    is_male = random.choice([True, False])
-    name = random.choice((_MALE_NAMES if is_male else _FEMALE_NAMES) + _NEUTRAL_NAMES)
-    father = random.choice(_MALE_NAMES + _NEUTRAL_NAMES)
-    suffix = "sson" if is_male else "sdottir"
-    number = random.randint(1, 99)
-    return f"{name}-{father}{suffix}-{number}"
-
-
-def _select_branch_interactive() -> tuple[str, bool]:
-    """Show interactive fuzzy branch selector. Returns (branch_name, create_branch)."""
-    from InquirerPy import inquirer
-    from InquirerPy.base.control import Choice
-    from InquirerPy.separator import Separator
-
-    create_new_sentinel = "__create_new__"
-
-    wt_branches = list_locki_worktree_branches()
-    wt_set = set(wt_branches)
-    local_branches = list_local_branches()
-    local = sorted(set(local_branches) - wt_set)
-    remote = sorted(set(list_remote_branches()) - wt_set - set(local_branches))
-
-    choices: list = [Choice(value=create_new_sentinel, name="(create new)")]
-
-    if wt_branches:
-        choices.append(Separator("── Locki worktrees ──"))
-        for b in sorted(wt_branches):
-            choices.append(Choice(value=b, name=b))
-
-    if local:
-        choices.append(Separator("── Local branches ──"))
-        for b in local:
-            choices.append(Choice(value=b, name=b))
-
-    if remote:
-        choices.append(Separator("── Remote branches ──"))
-        for b in remote:
-            choices.append(Choice(value=b, name=b))
-
-    selected = inquirer.fuzzy(
-        message="Select a branch:",
-        choices=choices,
-    ).execute()
-
-    if selected == create_new_sentinel:
-        config = load_config(git_root())
-        existing = subprocess.run(
-            ["git", "-C", str(git_root()), "branch", "--list", "--all", "--format=%(refname:short)"],
-            capture_output=True, text=True,
-        ).stdout.splitlines()
-        existing_set = {b.strip().removeprefix("origin/") for b in existing}
-        default_name = ""
-        for _ in range(100):
-            default_name = config.branch_prefix + _viking_name()
-            if default_name not in existing_set:
-                break
-        branch = inquirer.text(
-            message="Branch name:",
-            default=default_name,
-        ).execute()
-        return branch, True
-
-    return selected, False
+def _gen_wt_id() -> str:
+    return "".join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(8))
 
 
 @click.command("exec | x", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
-@click.option("-b", "--branch", default=None, help="Branch name to work on.")
-@click.option("-c", "--create-branch", is_flag=True, help="Create the branch if it doesn't exist.")
+@click.option("-b", "--branch", default=None, help="Substring match on existing sandbox branch.")
+@click.option("-n", "--new", "new_label", default=None, help="Create a new sandbox with the given label.")
 @click.pass_context
-def exec_cmd(ctx, branch, create_branch):
+def exec_cmd(ctx, branch, new_label):
     """Run a command in the per-branch sandbox container.
 
     \b
     Examples:
-      locki x bash                    # interactive shell (branch picker)
+      locki x bash                    # interactive shell (sandbox picker)
       locki x claude                  # run Claude Code
-      locki x -b my-feature bash      # specify branch
-      locki x -c -b new-feat bash     # create branch & shell
+      locki x -b feat bash            # match sandbox by substring
+      locki x --new my-feat bash      # create new sandbox
       locki x bash -c "echo hello"    # run a one-liner
     """
     click.echo(f"{click.style('ᚠ', fg='magenta', bold=True)} Entering a Locki sandbox.", err=True)
-    if not branch:
+    wt_id: str | None = None
+    if new_label:
+        wt_id = _gen_wt_id()
+        branch = f"{new_label}#locki-{wt_id}"
+    elif branch:
+        branch = match_sandbox_branch(branch)
+    else:
         wt_path = current_worktree()
         if wt_path is None:
             if not sys.stdin.isatty():
-                click.echo(f"{click.style('ᛞ', fg='red', bold=True)} No branch specified. Use -b <branch> in non-interactive mode.", file=sys.stderr)
+                click.echo(
+                    f"{click.style('ᛞ', fg='red', bold=True)} No branch specified. Use -b <branch> in non-interactive mode.",
+                    file=sys.stderr,
+                )
                 sys.exit(1)
-            branch, create_branch = _select_branch_interactive()
-            if create_branch:
-                click.echo(f"{click.style('ᚦ', fg='magenta', bold=True)} Creating a new branch {click.style(branch, fg='green')}.", err=True)
+
+            from InquirerPy import inquirer
+            from InquirerPy.base.control import Choice
+
+            wt_branches = list_locki_worktree_branches()
+
+            choices = [Choice(value=None, name="(create new)")] + [Choice(value=b, name=b) for b in sorted(wt_branches)]
+
+            selected = inquirer.fuzzy(
+                message="Select a sandbox:",
+                choices=choices,
+            ).execute()
+
+            if selected is None:
+                wt_id = _gen_wt_id()
+                branch = f"default#locki-{wt_id}"
+            else:
+                branch = selected
 
     git_root()  # fail fast if not in a git repo
 
@@ -254,16 +180,18 @@ def exec_cmd(ctx, branch, create_branch):
 
     with file_lock("vm", "Waiting for VM to start"):
         vm_setup = (importlib.resources.files("locki") / "data" / "vm-setup.sh").read_text()
-        lima_config = json.dumps({
-            "minimumLimaVersion": "2.0.0",
-            "base": ["template:fedora"],
-            "containerd": {"system": False, "user": False},
-            "mounts": [
-                {"location": "~/.locki/worktrees", "writable": True},
-                {"location": "~/.locki/home", "mountPoint": "/root/.locki/home", "writable": True},
-            ],
-            "provision": [{"mode": "system", "script": vm_setup}],
-        })
+        lima_config = json.dumps(
+            {
+                "minimumLimaVersion": "2.0.0",
+                "base": ["template:fedora"],
+                "containerd": {"system": False, "user": False},
+                "mounts": [
+                    {"location": "~/.locki/worktrees", "writable": True},
+                    {"location": "~/.locki/home", "mountPoint": "/root/.locki/home", "writable": True},
+                ],
+                "provision": [{"mode": "system", "script": vm_setup}],
+            }
+        )
         lima_fd, lima_yaml = tempfile.mkstemp(suffix=".yaml")
         try:
             os.write(lima_fd, lima_config.encode())
@@ -288,7 +216,10 @@ def exec_cmd(ctx, branch, create_branch):
     wt_path = find_worktree_for_branch(branch) if branch else current_worktree()
     if not wt_path:  # branch was provided but does not exit
         if not branch:
-            click.echo(f"{click.style('ᛞ', fg='red', bold=True)} No branch specified and not inside a Locki worktree.", file=sys.stderr)
+            click.echo(
+                f"{click.style('ᛞ', fg='red', bold=True)} No branch specified and not inside a Locki worktree.",
+                file=sys.stderr,
+            )
             sys.exit(1)
 
         run_command(
@@ -296,38 +227,23 @@ def exec_cmd(ctx, branch, create_branch):
             "Pruning stale git worktrees",
         )
 
-        repo_name = re.sub(r"[^a-z0-9-]", "-", git_root().name.lower())
-        safe_branch = re.sub(r"[^a-z0-9-]", "-", branch.lower())
-        wt_id = f"{(f'{repo_name}--{safe_branch}'[:53].rstrip('-'))}--{''.join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(8))}"
+        if not wt_id:
+            wt_id = _gen_wt_id()
         wt_path = WORKTREES_HOME / wt_id
         wt_path.mkdir(parents=True, exist_ok=True)
 
-        result = run_command(
+        run_command(
+            ["git", "-C", str(git_root()), "branch", branch],
+            f"Creating branch {click.style(branch, fg='green')}",
+        )
+        run_command(
             ["git", "-C", str(git_root()), "worktree", "add", str(wt_path), branch],
             f"Creating worktree for {click.style(branch, fg='green')}",
-            check=False,
         )
-        if result.returncode != 0:
-            if not create_branch:
-                shutil.rmtree(wt_path, ignore_errors=True)
-                click.echo(
-                    f"{click.style('ᛞ', fg='red', bold=True)} Branch {click.style(branch, fg='yellow')} does not exist. Use -c to create it.",
-                    file=sys.stderr,
-                )
-                sys.exit(1)
-            run_command(
-                ["git", "-C", str(git_root()), "branch", branch],
-                f"Creating branch {click.style(branch, fg='green')}",
-            )
-            run_command(
-                ["git", "-C", str(git_root()), "worktree", "add", str(wt_path), branch],
-                f"Creating worktree for {click.style(branch, fg='green')}",
-            )
 
         locki_dir = wt_path / ".locki"
         locki_dir.mkdir(parents=True, exist_ok=True)
         (locki_dir / ".gitignore").write_text("*\n")
-        (locki_dir / "title").write_text("<no title generated yet>\n")
 
         meta_dir = WORKTREES_META / wt_id
         meta_dir.mkdir(parents=True, exist_ok=True)
@@ -390,7 +306,11 @@ def exec_cmd(ctx, branch, create_branch):
                     cwd="/",
                 )
                 run_in_vm(
-                    ["bash", "-c", f"out=$(incus image import /tmp/{tmp_name} --alias={tmp_name} 2>&1) || echo \"$out\" | grep -q 'already exists'; rm -f /tmp/{tmp_name}"],
+                    [
+                        "bash",
+                        "-c",
+                        f"out=$(incus image import /tmp/{tmp_name} --alias={tmp_name} 2>&1) || echo \"$out\" | grep -q 'already exists'; rm -f /tmp/{tmp_name}",
+                    ],
                     "Importing container image",
                 )
                 image_ref = tmp_name
@@ -467,7 +387,7 @@ def exec_cmd(ctx, branch, create_branch):
             match = re.search(r"^Port (\d+)", (ssh_dir / "sshd_config").read_text(), re.MULTILINE)
             if match:
                 ssh_port = int(match.group(1))
-        except (ProcessLookupError, ValueError, PermissionError, FileNotFoundError):
+        except ProcessLookupError, ValueError, PermissionError, FileNotFoundError:
             pass
     sshd_path = shutil.which("sshd")
     if sshd_path is None:
@@ -504,24 +424,33 @@ def exec_cmd(ctx, branch, create_branch):
             "--",
             "bash",
             "-c",
-            " ".join([
-                "sudo",
-                "incus",
-                "exec",
-                shlex.quote(wt_id),
-                "--cwd",
-                shlex.quote(str(wt_path)),
-                *(f"--env={k}={v}" for k, v in CONTAINER_ENV.items()),
-                *(f"--env={env}=${env}" for env in forwarded_env),
-                "--",
-                *((shlex.quote(a) for a in ctx.args) if ctx.args else ["bash"]),
-            ]),
+            " ".join(
+                [
+                    "sudo",
+                    "incus",
+                    "exec",
+                    shlex.quote(wt_id),
+                    "--cwd",
+                    shlex.quote(str(wt_path)),
+                    *(f"--env={k}={v}" for k, v in CONTAINER_ENV.items()),
+                    *(f"--env={env}=${env}" for env in forwarded_env),
+                    "--",
+                    *((shlex.quote(a) for a in ctx.args) if ctx.args else ["bash"]),
+                ]
+            ),
         ],
     )
 
     click.echo()
     click.echo(f"{click.style('ᛟ', fg='magenta', bold=True)} Exited Locki sandbox.", err=True)
-    click.echo(f"{click.style('ᛃ', fg='cyan', bold=True)} Return to this sandbox: {click.style(f'locki x -b {shlex.quote(branch)}', fg='green')}", err=True)
+    hint = f" -b {wt_id}" if branch else ""
+    click.echo(
+        f"{click.style('ᛃ', fg='cyan', bold=True)} Return to this sandbox: {click.style(f'locki x{hint}', fg='green')}",
+        err=True,
+    )
     if ctx.args and (resume_arg := {"claude": "-c", "gemini": "-r", "codex": "resume"}.get(ctx.args[0])):
-        click.echo(f"{click.style('ᛃ', fg='cyan', bold=True)} Continue conversation:  {click.style(f'locki x -b {shlex.quote(branch)} {ctx.args[0]} {resume_arg}', fg='green')}", err=True)
+        click.echo(
+            f"{click.style('ᛃ', fg='cyan', bold=True)} Continue conversation:  {click.style(f'locki x{hint} {ctx.args[0]} {resume_arg}', fg='green')}",
+            err=True,
+        )
     raise SystemExit(result.returncode)

@@ -47,7 +47,7 @@ def vm_status_cmd():
         return
 
     home = pathlib.Path.home()
-    rows: list[tuple[str, str, str, str, str, str]] = []
+    rows: list[tuple[str, str, str, str, str]] = []
     for line in result.stdout.decode().splitlines():
         parts = line.split(",", 1)
         if len(parts) != 2:
@@ -63,20 +63,16 @@ def vm_status_cmd():
         if repo_path:
             repo = "~/" + str(repo_path.relative_to(home)) if repo_path.is_relative_to(home) else str(repo_path)
         wt_path = WORKTREES_HOME / wt_id
-        title_file = wt_path / ".locki" / "title"
-        title = title_file.read_text().strip() if title_file.exists() else ""
-        if title == "<no title generated yet>":
-            title = ""
         path_str = str(wt_path)
         if wt_path.is_relative_to(home):
             path_str = "~/" + str(wt_path.relative_to(home))
-        rows.append((title, wt_id, status, repo, branch, path_str))
+        rows.append((wt_id, status, repo, branch, path_str))
 
     if not rows:
         click.echo("No sandboxes.")
         return
 
-    headers = ("TITLE", "SANDBOX ID", "STATUS", "REPO", "BRANCH", "WORKTREE")
+    headers = ("SANDBOX ID", "STATUS", "REPO", "BRANCH", "WORKTREE")
     widths = [len(h) for h in headers]
     for row in rows:
         for i, val in enumerate(row):
@@ -84,7 +80,7 @@ def vm_status_cmd():
 
     fmt = "  ".join(f"{{:<{w}}}" for w in widths)
     click.echo(fmt.format(*headers))
-    for row in sorted(rows, key=lambda r: (r[2], r[3], r[4])):
+    for row in sorted(rows, key=lambda r: (r[1], r[2], r[3])):
         click.echo(fmt.format(*row))
 
 

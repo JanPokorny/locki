@@ -26,7 +26,9 @@ def _parse_port_spec(spec: str) -> tuple[int, int]:
     if len(parts) == 2:
         host = _free_port() if parts[0] == "" else int(parts[0])
         return host, int(parts[1])
-    raise click.BadParameter(f"Invalid port spec '{spec}'. Use 'port', 'host_port:container_port', or ':container_port'.")
+    raise click.BadParameter(
+        f"Invalid port spec '{spec}'. Use 'port', 'host_port:container_port', or ':container_port'."
+    )
 
 
 def _list_forwards(wt_id: str):
@@ -61,7 +63,7 @@ def _list_forwards(wt_id: str):
 
 
 @click.command(context_settings={"allow_extra_args": True})
-@click.option("-b", "--branch", default=None, help="Branch name.")
+@click.option("-b", "--branch", default=None, help="Sandbox branch (substring match).")
 @click.option("--clear", is_flag=True, help="Remove all existing port forwards before adding new ones.")
 @click.option("--list", "list_forwards", is_flag=True, help="List active port forwards.")
 @click.pass_context

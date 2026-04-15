@@ -30,7 +30,10 @@ RULES = [
     ("git", "show", str, {"stat": _flag, "name_only": _flag, "name_status": _flag, "format": ...}),
     ("git", "restore", str, ..., {"staged": _flag, "source": ...}),
     ("git", "switch", str),
-    ("git", "switch", {"create": _required}),
+    ("git", "reset", str, {"hard": _flag}),
+    ("git", "branch", str),
+    ("git", "branch", str, {"move": _flag}),
+    ("git", "branch", {"show_current": _flag}),
     ("git", "stash", "push", {"message": ...}),
     ("git", "stash", "push"),
     ("git", "stash", "list"),
@@ -91,9 +94,7 @@ def matches(rule: tuple, positionals: list[str], flags: dict[str, str]) -> bool:
     for key, spec in spec_flags.items():
         val = flags.get(key)
         if spec is ...:                              continue
-        if callable(spec) and not spec(val):         return False
-        elif isinstance(spec, set) and val not in spec: return False
-        elif isinstance(spec, str) and val != spec:  return False
+        if (callable(spec) and not spec(val)) or (isinstance(spec, set) and val not in spec) or (isinstance(spec, str) and val != spec):         return False
     return True
 
 
@@ -115,77 +116,66 @@ def parse_args(args: list[str]) -> tuple[list[str], dict[str, str]]:
     return positionals, flags
 
 
-def _get_branch(wt_id: str) -> str | None:
-    """Read the initial branch name from worktree metadata."""
-    branch_file = WORKTREES_META / wt_id / "branch"
-    if branch_file.exists():
-        return branch_file.read_text().strip()
-    return None
+def _wt_tag(wt_id: str) -> str:
+    return f"#locki-{wt_id}"
 
 
-def _validate_switch(wt_id: str, positionals: list[str], flags: dict[str, str]):
-    """Validate that the target branch is allowed for git switch."""
-    initial = _get_branch(wt_id)
-    if not initial:
-        print("No initial branch recorded for this worktree. git switch is not available.", file=sys.stderr)
+def _validate_branch_suffix(wt_id: str, target: str):
+    """Check that a branch name ends with #locki-<wt_id>."""
+    tag = _wt_tag(wt_id)
+    if not target.endswith(tag):
+        print(f"Branch '{target}' is not allowed. Must end with '{tag}'.", file=sys.stderr)
         raise SystemExit(1)
 
-    target = flags.get("create")
-    if target:
-        pass
-    elif len(positionals) >= 3:
-        target = positionals[2]
-    else:
+
+def _validate_branch_arg(wt_id: str, positionals: list[str]):
+    """Validate that the branch name argument ends with #locki-<wt_id>."""
+    target = positionals[2] if len(positionals) >= 3 else None
+    if not target:
         print("No branch specified.", file=sys.stderr)
         raise SystemExit(1)
-
-    if target != initial and not target.startswith(initial + "/"):
-        print(f"Branch '{target}' is not allowed. Must be '{initial}' or '{initial}/<suffix>'.", file=sys.stderr)
-        raise SystemExit(1)
+    _validate_branch_suffix(wt_id, target)
 
 
 def _handle_stash_push(wt_id: str, flags: dict[str, str]):
-    """Auto-prefix stash message with [branch] for branch-scoped stashing."""
-    branch = _get_branch(wt_id) or "unknown"
-    prefix = f"[{branch}]"
+    """Auto-prefix stash message with worktree tag for wt-scoped stashing."""
+    tag = _wt_tag(wt_id)
     msg = flags.get("message", "")
-    full_msg = f"{prefix} {msg}" if msg else prefix
+    full_msg = f"[{tag}] {msg}" if msg else f"[{tag}]"
     os.execvp("git", ["git", "stash", "push", f"--message={full_msg}"])
 
 
 def _handle_stash_list(wt_id: str):
-    """Show only stashes belonging to the current branch."""
-    branch = _get_branch(wt_id) or "unknown"
-    prefix = f"[{branch}]"
+    """Show only stashes belonging to the current worktree."""
+    tag = _wt_tag(wt_id)
     result = subprocess.run(["git", "stash", "list"], capture_output=True, text=True)
     for line in result.stdout.splitlines():
-        if prefix in line:
+        if f"[{tag}]" in line:
             print(line)
     raise SystemExit(0 if result.returncode == 0 else result.returncode)
 
 
 def _handle_stash_pop_apply_drop(wt_id: str, positionals: list[str]):
-    """For pop/apply/drop: scope operations to the current branch's stashes."""
+    """For pop/apply/drop: scope operations to the current worktree's stashes."""
     action = positionals[2]  # "pop", "apply", or "drop"
     ref = positionals[3] if len(positionals) >= 4 else None
-    branch = _get_branch(wt_id) or "unknown"
-    prefix = f"[{branch}]"
+    tag = _wt_tag(wt_id)
 
     result = subprocess.run(["git", "stash", "list"], capture_output=True, text=True)
     stash_lines = result.stdout.splitlines()
 
     if ref:
         for line in stash_lines:
-            if line.startswith(ref + ":") and prefix in line:
+            if line.startswith(ref + ":") and f"[{tag}]" in line:
                 os.execvp("git", ["git", "stash", action, ref])
-        print(f"Stash {ref} does not belong to branch '{branch}'.", file=sys.stderr)
+        print(f"Stash {ref} does not belong to worktree '{wt_id}'.", file=sys.stderr)
         raise SystemExit(1)
     else:
         for line in stash_lines:
-            if prefix in line:
+            if f"[{tag}]" in line:
                 found_ref = line.split(":", 1)[0]
                 os.execvp("git", ["git", "stash", action, found_ref])
-        print(f"No stashes found for branch '{branch}'.", file=sys.stderr)
+        print(f"No stashes found for worktree '{wt_id}'.", file=sys.stderr)
         raise SystemExit(1)
 
 
@@ -242,8 +232,11 @@ def self_service_cmd():
     os.chdir(str(cwd))
 
     # Command-specific handlers
-    if exe == "git" and positionals[:1] == ["switch"]:
-        _validate_switch(wt_id, [exe, *positionals], flags)
+    if exe == "git" and (
+        positionals[:1] == ["switch"]
+        or (positionals[:1] == ["branch"] and "show_current" not in flags)
+    ):
+        _validate_branch_arg(wt_id, [exe, *positionals])
         os.execvp(exe, [exe, *argv[1:]])
     elif exe == "git" and positionals[:2] == ["stash", "push"]:
         _handle_stash_push(wt_id, flags)

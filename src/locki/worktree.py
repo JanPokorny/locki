@@ -11,6 +11,7 @@ from locki.utils import (
     find_worktree_for_branch,
     git_root,
     list_locki_worktree_branches,
+    match_sandbox_branch,
     resolve_branch,
     run_command,
     run_in_vm,
@@ -36,12 +37,13 @@ def _select_worktree_branch() -> str | None:
 
 
 @click.command()
-@click.option("-b", "--branch", default=None, help="Branch name.")
+@click.option("-b", "--branch", default=None, help="Sandbox branch (substring match).")
 @click.option("--force", "-f", is_flag=True, help="Skip safety checks.")
 @click.option("--delete-branch", is_flag=True, help="Also delete the git branch.")
 def remove_cmd(branch, force, delete_branch):
     """Remove a branch's worktree and container."""
     if branch:
+        branch = match_sandbox_branch(branch)
         wt_path = find_worktree_for_branch(branch)
     else:
         wt_path = current_worktree()
@@ -107,7 +109,7 @@ def remove_cmd(branch, force, delete_branch):
 
 
 @click.command()
-@click.option("-b", "--branch", default=None, help="Branch name.")
+@click.option("-b", "--branch", default=None, help="Sandbox branch (substring match).")
 def stop_cmd(branch):
     """Stop a branch's container without removing it."""
     _, wt_path = resolve_branch(branch)
@@ -141,27 +143,23 @@ def list_cmd():
             current_branch = line.removeprefix("branch refs/heads/")
         elif line == "" and current_path and current_branch:
             if current_path.is_relative_to(WORKTREES_HOME):
-                title_file = current_path / ".locki" / "title"
-                title = title_file.read_text().strip() if title_file.exists() else ""
-                if title == "<no title generated yet>":
-                    title = ""
                 path_str = str(current_path)
                 if current_path.is_relative_to(home):
                     path_str = "~/" + str(current_path.relative_to(home))
-                rows.append((title, current_branch, path_str))
+                rows.append((current_branch, path_str))
 
     if not rows:
         click.echo("No Locki worktrees in this repo.")
         return
 
     # Compute column widths
-    headers = ("TITLE", "BRANCH", "PATH")
+    headers = ("BRANCH", "PATH")
     widths = [len(h) for h in headers]
     for row in rows:
         for i, val in enumerate(row):
             widths[i] = max(widths[i], len(val))
 
-    fmt = f"{{:<{widths[0]}}}  {{:<{widths[1]}}}  {{}}"
+    fmt = f"{{:<{widths[0]}}}  {{}}"
     click.echo(fmt.format(*headers))
     for row in rows:
         click.echo(fmt.format(*row))

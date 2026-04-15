@@ -9,12 +9,14 @@ You are running inside a locki sandbox VM. This is an ephemeral environment desi
 
 Some commands execute on the host using a self-service proxy. Run them as usual, non-matches will be rejected. Only long flags are accepted. Available commands:
   git status | diff [--staged] [--name-only] [--stat] [--name-status] [ref [ref]] | add [--all] [file ...] | commit --message=<msg> | push | fetch | log [--oneline] [--all] [--format=<fmt>] [--max-count=<n>] [ref] | show [ref] [--stat] [--name-only] [--name-status] [--format=<fmt>] | restore [--staged] [--source=ref] <file ...>
-  git switch <branch> | switch --create=<branch>  (where <branch> can be the initial branch or any branch name with the initial branch name + / as a prefix)
-  git stash push [--message=<msg>] | stash list | stash pop [ref] | stash apply [ref] | stash drop [ref]  (stashes are branch-scoped)
+  git switch <branch> | reset [--hard] <ref> | branch <branch> | branch --move <branch> | branch --show-current  (where <branch> must end with #locki-<id>, where <id> is the last segment of worktree path)
+  git stash push [--message=<msg>] | list | pop [ref] | apply [ref] | drop [ref]  (stashes are worktree-scoped)
   gh pr create [--title=<t>] [--body=<b>] [--base=<b>] [--head=<h>] [--draft] [--fill] [--reviewer=<r>] [--label=<l>] [--assignee=<a>] | gh pr view/list/diff/status | gh run view/list | gh issue view/list
   locki port-forward :<container_port> [:<port2> ...]  (When you start a web server, API, or any service the user should access, forward the port to host. The output shows `<host_port>:<container_port>`. Give the user a full URL with the host-side port, e.g. `http://localhost:<host_port>`.)
 
-User needs to distinguish multiple sandboxes. Help them by writing a very concise distinguishing text (max 80 chars) to (already existing, gitignored) file <repo worktree>/.locki/title. e.g. `echo "Implement dark mode for login page" >.locki/title`. Do that as a first thing after receiving the first user inquiry. Optionally update during conversation if it stops being accurate.
+You start on a branch with name suffix `#locki-<id>` and you may only manipulate branches sharing this suffix. You may read from any branch (e.g. restore, or reset to it). If user asks you to perform a git operation you can't do, give them commands to do it on host (worktree path matches 1:1).
+
+Immediately after receiving the first user inquiry, run `git branch --move ...#locki-<id>` to rename the current git branch to be more descriptive. Optionally rename again in a later turn if the name stops being accurate.
 
 __LOCKI_EOF__
 
@@ -93,12 +95,12 @@ for pair in \
   bin="${cmd%% *}"
   cat > "/opt/locki/bin/jit/$bin" << EOF
 #!/bin/sh
-# set global node version to avoid broken mise shim
-if test "\$(mise tool node --requested)" = "[none]"; then mise use -g node@24; fi
+export MISE_STATUS_MESSAGE_MISSING_TOOLS=never
 # run from root to avoid mise discovering mise.toml and triggering full install
 target="\$(pwd)"
-cd /  
-export MISE_STATUS_MESSAGE_MISSING_TOOLS=never
+cd /
+# set global node version to avoid broken mise shim
+if test "\$(mise tool node --requested)" = "[none]"; then mise use -g node@24; fi
 exec mise x -C "\$target" nodejs@24 -- mise x $pkg@\$version -- $cmd "\$@"
 EOF
 done
@@ -122,10 +124,10 @@ for pair in \
   bin="${cmd%% *}"
   cat > "/opt/locki/bin/jit/$bin" << EOF
 #!/bin/sh
+export MISE_STATUS_MESSAGE_MISSING_TOOLS=never
 # run from root to avoid mise discovering mise.toml and triggering full install
 target="\$(pwd)"
 cd /  
-export MISE_STATUS_MESSAGE_MISSING_TOOLS=never
 exec mise x -C "\$target" $pkg -- $cmd "\$@"
 EOF
 done
