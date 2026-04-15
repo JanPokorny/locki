@@ -29,37 +29,22 @@ def _load_harness() -> str | None:
 
 def _save_harness(harness: str) -> None:
     LOCKI_HOME.mkdir(parents=True, exist_ok=True)
-    # Preserve existing config content, update/add [ai] harness
-    lines: list[str] = []
-    in_ai_section = False
-    wrote_harness = False
+    import tomllib
+
+    data: dict = {}
     if CONFIG_PATH.exists():
-        for line in CONFIG_PATH.read_text().splitlines():
-            stripped = line.strip()
-            if stripped == "[ai]":
-                in_ai_section = True
-                lines.append(line)
-                continue
-            if in_ai_section and stripped.startswith("harness"):
-                lines.append(f'harness = "{harness}"')
-                wrote_harness = True
-                in_ai_section = False
-                continue
-            if stripped.startswith("[") and in_ai_section:
-                # New section started without finding harness key
-                lines.append(f'harness = "{harness}"')
-                wrote_harness = True
-                in_ai_section = False
-            lines.append(line)
-    if in_ai_section and not wrote_harness:
-        lines.append(f'harness = "{harness}"')
-        wrote_harness = True
-    if not wrote_harness:
-        if lines and lines[-1].strip():
-            lines.append("")
-        lines.append("[ai]")
-        lines.append(f'harness = "{harness}"')
-    CONFIG_PATH.write_text("\n".join(lines) + "\n")
+        with open(CONFIG_PATH, "rb") as f:
+            data = tomllib.load(f)
+    data.setdefault("ai", {})["harness"] = harness
+
+    parts: list[str] = []
+    for section, values in data.items():
+        if isinstance(values, dict):
+            parts.append(f"[{section}]")
+            for k, v in values.items():
+                parts.append(f'{k} = "{v}"' if isinstance(v, str) else f"{k} = {v}")
+            parts.append("")
+    CONFIG_PATH.write_text("\n".join(parts))
 
 
 def _ask_harness() -> str:
