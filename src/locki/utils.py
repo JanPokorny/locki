@@ -1,17 +1,52 @@
-import datetime
+import fcntl
+import functools
+import importlib.resources
 import logging
 import os
+import pathlib
 import random
+import shutil
 import subprocess
 import sys
 import threading
 import time
 from contextlib import contextmanager, nullcontext
-from pathlib import Path
 
 import click
 
-LOG_DIR = Path.home() / ".locki" / "logs"
+from locki.config import LIMA_HOME, LOCKI_HOME, WORKTREES_HOME, WORKTREES_META
+from locki.logging import print_log_tail
+
+logger = logging.getLogger(__name__)
+
+
+class AliasGroup(click.Group):
+    """Click group that supports pipe-separated command aliases (e.g. 'shell | sh | bash')."""
+
+    def get_command(self, ctx, cmd_name):
+        # Direct match first
+        rv = super().get_command(ctx, cmd_name)
+        if rv is not None:
+            return rv
+        # Try alias match
+        for name in self.list_commands(ctx):
+            if cmd_name in name.split(" | "):
+                return super().get_command(ctx, name)
+        return None
+
+    def format_commands(self, ctx, formatter):
+        """Write the commands, showing only the primary name."""
+        commands = []
+        for subcommand in self.list_commands(ctx):
+            cmd = self.get_command(ctx, subcommand)
+            if cmd is None or cmd.hidden:
+                continue
+            primary = subcommand.split(" | ")[0]
+            help_text = cmd.get_short_help_str(limit=formatter.width)
+            commands.append((primary, help_text))
+        if commands:
+            with formatter.section("Commands"):
+                formatter.write_dl(commands)
 
 
 @contextmanager
@@ -47,57 +82,6 @@ def spinner(text: str):
         sys.stderr.flush()
 
 
-logger = logging.getLogger(__name__)
-
-_log_file_path: Path | None = None
-
-
-class _StderrFormatter(logging.Formatter):
-    def format(self, record):
-        if record.levelno >= logging.ERROR:
-            return f"{click.style("ERROR", fg="red")}: {record.getMessage()}"
-        return record.getMessage()
-
-
-def setup_logging():
-    global _log_file_path
-
-    root = logging.getLogger("locki")
-    root.setLevel(logging.DEBUG)
-
-    stderr_handler = logging.StreamHandler(sys.stderr)
-    stderr_handler.setLevel(logging.WARNING)
-    stderr_handler.setFormatter(_StderrFormatter())
-    root.addHandler(stderr_handler)
-
-    LOG_DIR.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    _log_file_path = LOG_DIR / f"{timestamp}-{os.getpid()}.log"
-    file_handler = logging.FileHandler(_log_file_path)
-    file_handler.setLevel(logging.DEBUG)
-    file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-    root.addHandler(file_handler)
-
-    # Clean up old log files, keep the 20 most recent
-    log_files = sorted(LOG_DIR.glob("*.log"), key=lambda f: f.stat().st_mtime, reverse=True)
-    for old_log in log_files[20:]:
-        old_log.unlink(missing_ok=True)
-
-
-def _print_log_tail():
-    if not _log_file_path or not _log_file_path.exists():
-        return
-    try:
-        lines = _log_file_path.read_text().splitlines()
-        tail = lines[-10:]
-        if tail:
-            print(f"\nRecent log entries ({_log_file_path}):", file=sys.stderr)
-            for line in tail:
-                print(f"  {line}", file=sys.stderr)
-    except OSError:
-        pass
-
-
 def run_command(
     command: list[str],
     message: str,
@@ -129,5 +113,127 @@ def run_command(
             logger.error("%s is not installed. Please install it first.", command[0])
             sys.exit(1)
         except subprocess.CalledProcessError:
-            _print_log_tail()
+            print_log_tail()
             raise
+
+
+@functools.cache
+def limactl() -> str:
+    bundled = importlib.resources.files("locki") / "data" / "bin" / "limactl"
+    if bundled.is_file():
+        return str(bundled)
+    system = shutil.which("limactl")
+    if system:
+        return system
+    logger.error("limactl is not installed. Please install Lima or use a platform-specific locki wheel.")
+    sys.exit(1)
+
+
+def run_in_vm(
+    command: list[str],
+    message: str,
+    env: dict[str, str] | None = None,
+    input: bytes | None = None,
+    check: bool = True,
+    quiet: bool = False,
+) -> subprocess.CompletedProcess[bytes]:
+    return run_command(
+        [limactl(), "shell", "--start", "--preserve-env", "--tty=false", "locki", "--", "sudo", "-E", *command],
+        message,
+        env={"LIMA_HOME": str(LIMA_HOME)} | (env or {}),
+        cwd="/",
+        input=input,
+        check=check,
+        quiet=quiet,
+    )
+
+
+@contextmanager
+def file_lock(name: str, wait_message: str):
+    """Acquire an exclusive file lock."""
+    LOCKI_HOME.mkdir(exist_ok=True)
+    lock_path = LOCKI_HOME / f"{name}.lock"
+    fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            with spinner(wait_message):
+                fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+
+
+@functools.cache
+def git_root() -> pathlib.Path:
+    cwd = pathlib.Path.cwd().resolve()
+    if cwd.is_relative_to(WORKTREES_HOME.resolve()):
+        wt_path = WORKTREES_HOME / cwd.relative_to(WORKTREES_HOME).parts[0]
+        meta_git = WORKTREES_META / wt_path.name / ".git"
+        if not meta_git.exists():
+            logger.error("No worktree metadata found for '%s'.", wt_path.name)
+            sys.exit(1)
+        (wt_path / ".git").write_text(meta_git.read_text())
+        result = subprocess.run(
+            ["git", "-C", str(wt_path), "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            logger.error("Could not determine main repo from worktree metadata.")
+            sys.exit(1)
+        return pathlib.Path(result.stdout.strip()).parent
+    result = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        logger.error("Not inside a git repository.")
+        sys.exit(1)
+    return pathlib.Path(result.stdout.strip())
+
+
+def current_worktree() -> pathlib.Path | None:
+    """If cwd is inside a Locki-managed worktree, return its path."""
+    cwd = pathlib.Path.cwd().resolve()
+    if not cwd.is_relative_to(WORKTREES_HOME.resolve()):
+        return None
+    return WORKTREES_HOME / cwd.relative_to(WORKTREES_HOME).parts[0]
+
+
+def resolve_branch(branch: str | None) -> tuple[str, pathlib.Path]:
+    """Resolve a branch name to (branch, worktree_path). Errors if unresolvable."""
+    if branch:
+        wt_path = find_worktree_for_branch(branch)
+        if wt_path is None:
+            logger.error("No worktree found for branch '%s'.", branch)
+            sys.exit(1)
+        return branch, wt_path
+    wt_path = current_worktree()
+    if wt_path is None:
+        logger.error("No branch specified and not inside a locki worktree.")
+        sys.exit(1)
+    return wt_path.relative_to(WORKTREES_HOME).parts[0], wt_path
+
+
+def find_worktree_for_branch(branch: str) -> pathlib.Path | None:
+    """Return the worktree path for a branch managed by Locki, or None."""
+    result = run_command(
+        ["git", "-C", str(git_root()), "worktree", "list", "--porcelain"],
+        "Listing worktrees",
+    )
+    current_path: pathlib.Path | None = None
+    for line in result.stdout.decode().splitlines():
+        if line.startswith("worktree "):
+            current_path = pathlib.Path(line.split(" ", 1)[1])
+        elif (
+            line.startswith("branch refs/heads/")
+            and line.removeprefix("branch refs/heads/") == branch
+            and current_path
+            and current_path.is_relative_to(WORKTREES_HOME)
+        ):
+            return current_path
+    return None

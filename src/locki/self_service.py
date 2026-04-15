@@ -6,6 +6,8 @@ import sys
 
 import click
 
+from locki.config import WORKTREES_HOME, WORKTREES_META
+
 _required = bool               # --flag=<non-empty value>
 _flag = {None, ""}        # optional boolean flag (--flag or absent, no value)
 
@@ -115,8 +117,7 @@ def parse_args(args: list[str]) -> tuple[list[str], dict[str, str]]:
 
 def _get_branch(wt_id: str) -> str | None:
     """Read the initial branch name from worktree metadata."""
-    import locki
-    branch_file = locki.WORKTREES_META / wt_id / "branch"
+    branch_file = WORKTREES_META / wt_id / "branch"
     if branch_file.exists():
         return branch_file.read_text().strip()
     return None
@@ -191,8 +192,6 @@ def _handle_stash_pop_apply_drop(wt_id: str, positionals: list[str]):
 @click.command(hidden=True)
 def self_service_cmd():
     """SSH forced command: validate and execute an allowed self-service command."""
-    import locki
-
     cmd = os.environ.get("SSH_ORIGINAL_COMMAND", "")
     if not cmd:
         print("No command specified.", file=sys.stderr)
@@ -212,12 +211,12 @@ def self_service_cmd():
 
     # Validate worktree
     cwd = pathlib.Path(cwd_str).resolve()
-    if not cwd.is_relative_to(locki.WORKTREES_HOME.resolve()):
+    if not cwd.is_relative_to(WORKTREES_HOME.resolve()):
         print(f"Not a locki worktree: {cwd_str!r}", file=sys.stderr)
         raise SystemExit(1)
-    wt_root = locki.WORKTREES_HOME / cwd.relative_to(locki.WORKTREES_HOME).parts[0]
+    wt_root = WORKTREES_HOME / cwd.relative_to(WORKTREES_HOME).parts[0]
     wt_id = wt_root.name
-    meta_git = locki.WORKTREES_META / wt_id / ".git"
+    meta_git = WORKTREES_META / wt_id / ".git"
     dot_git = wt_root / ".git"
     if not wt_root.is_dir() or not meta_git.exists() or not dot_git.is_file():
         print(f"Invalid worktree: {cwd_str!r}", file=sys.stderr)

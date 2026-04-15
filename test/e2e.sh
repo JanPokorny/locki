@@ -268,9 +268,9 @@ echo "Testing auto-generated branch..."
 
 auto_output=$(locki x echo auto-ok 2>&1)
 assert_output "auto branch runs command" "auto-ok" echo "$auto_output"
-assert_output "auto branch name printed" "Creating a new branch '" echo "$auto_output"
+assert_output "auto branch name printed" "Created a new branch" echo "$auto_output"
 # Viking name format: locki/<name>-<father>(sson|sdottir)-<number>
-auto_branch=$(echo "$auto_output" | sed -n "s/.*Creating a new branch '\([^']*\)'.*/\1/p")
+auto_branch=$(echo "$auto_output" | sed -n 's/.*Created a new branch.*locki\/\([^ .]*\).*/locki\/\1/p')
 if [[ "$auto_branch" =~ ^locki/[a-z]+-[a-z]+(sson|sdottir)-[0-9]+$ ]]; then pass "auto branch has Viking name format"; else fail "auto branch has Viking name format (got '$auto_branch')"; fi
 
 # ── worktree cleanup ─────────────────────────────────────────────────────────

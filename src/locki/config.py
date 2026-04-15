@@ -9,6 +9,12 @@ import pydantic
 
 logger = logging.getLogger(__name__)
 
+LOCKI_HOME = pathlib.Path.home() / ".locki"
+LIMA_HOME = LOCKI_HOME / "lima"
+WORKTREES_HOME = LOCKI_HOME / "worktrees"
+WORKTREES_META = LOCKI_HOME / "worktrees-meta"
+LOG_DIR = LOCKI_HOME / "logs"
+
 
 @functools.cache
 def _arch() -> str:

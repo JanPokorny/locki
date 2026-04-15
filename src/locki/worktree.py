@@ -5,8 +5,15 @@ import sys
 
 import click
 
-import locki
-from locki.utils import run_command
+from locki.config import WORKTREES_HOME, WORKTREES_META
+from locki.utils import (
+    current_worktree,
+    find_worktree_for_branch,
+    git_root,
+    resolve_branch,
+    run_command,
+    run_in_vm,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -18,9 +25,9 @@ logger = logging.getLogger(__name__)
 def remove_cmd(branch, force, delete_branch):
     """Remove a branch's worktree and container."""
     if branch:
-        wt_path = locki.find_worktree_for_branch(branch)
+        wt_path = find_worktree_for_branch(branch)
     else:
-        wt_path = locki.current_worktree()
+        wt_path = current_worktree()
         if wt_path is None:
             logger.error("No branch specified and not inside a locki worktree.")
             sys.exit(1)
@@ -52,25 +59,25 @@ def remove_cmd(branch, force, delete_branch):
         )
         branch = result.stdout.decode().strip() if result.returncode == 0 else None
 
-    wt_id = wt_path.relative_to(locki.WORKTREES_HOME).parts[0]
+    wt_id = wt_path.relative_to(WORKTREES_HOME).parts[0]
 
-    locki.run_in_vm(
+    run_in_vm(
         ["incus", "delete", "--force", wt_id],
         "Deleting container",
         check=False,
     )
 
     shutil.rmtree(wt_path, ignore_errors=True)
-    shutil.rmtree(locki.WORKTREES_META / wt_id, ignore_errors=True)
+    shutil.rmtree(WORKTREES_META / wt_id, ignore_errors=True)
     run_command(
-        ["git", "-C", str(locki.git_root()), "worktree", "prune"],
+        ["git", "-C", str(git_root()), "worktree", "prune"],
         "Removing worktree",
         check=False,
     )
 
     if delete_branch:
         run_command(
-            ["git", "-C", str(locki.git_root()), "branch", "-D", branch],
+            ["git", "-C", str(git_root()), "branch", "-D", branch],
             f"Deleting branch {branch}",
             check=False,
         )
@@ -80,9 +87,9 @@ def remove_cmd(branch, force, delete_branch):
 @click.option("-b", "--branch", default=None, help="Branch name.")
 def stop_cmd(branch):
     """Stop a branch's container without removing it."""
-    _, wt_path = locki.resolve_branch(branch)
-    wt_id = wt_path.relative_to(locki.WORKTREES_HOME).parts[0]
-    locki.run_in_vm(
+    _, wt_path = resolve_branch(branch)
+    wt_id = wt_path.relative_to(WORKTREES_HOME).parts[0]
+    run_in_vm(
         ["incus", "stop", wt_id],
         "Stopping container",
         check=False,
@@ -92,7 +99,7 @@ def stop_cmd(branch):
 @click.command()
 def list_cmd():
     """List Locki worktrees in the current repo."""
-    repo_root = locki.git_root()
+    repo_root = git_root()
     result = run_command(
         ["git", "-C", str(repo_root), "worktree", "list", "--porcelain"],
         "Listing worktrees",
@@ -110,7 +117,7 @@ def list_cmd():
         elif line.startswith("branch refs/heads/"):
             current_branch = line.removeprefix("branch refs/heads/")
         elif line == "" and current_path and current_branch:
-            if current_path.is_relative_to(locki.WORKTREES_HOME):
+            if current_path.is_relative_to(WORKTREES_HOME):
                 title_file = current_path / ".locki" / "title"
                 title = title_file.read_text().strip() if title_file.exists() else ""
                 if title == "<no title generated yet>":

@@ -4,7 +4,8 @@ import sys
 
 import click
 
-import locki
+from locki.config import WORKTREES_HOME
+from locki.utils import resolve_branch, run_in_vm
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +31,7 @@ def _parse_port_spec(spec: str) -> tuple[int, int]:
 
 def _list_forwards(wt_id: str):
     """Print all active port forwards for a container."""
-    result = locki.run_in_vm(
+    result = run_in_vm(
         ["incus", "config", "device", "list", wt_id, "--format=csv"],
         "Listing devices",
         quiet=True,
@@ -39,14 +40,14 @@ def _list_forwards(wt_id: str):
         name = line.strip().split(",")[0].strip()
         if not name.startswith("port-fwd-"):
             continue
-        dev_result = locki.run_in_vm(
+        dev_result = run_in_vm(
             ["incus", "config", "device", "get", wt_id, name, "listen"],
             f"Reading {name}",
             check=False,
             quiet=True,
         )
         listen = dev_result.stdout.decode().strip()
-        dev_result = locki.run_in_vm(
+        dev_result = run_in_vm(
             ["incus", "config", "device", "get", wt_id, name, "connect"],
             f"Reading {name}",
             check=False,
@@ -66,11 +67,11 @@ def _list_forwards(wt_id: str):
 @click.pass_context
 def port_forward_cmd(ctx, branch, clear, list_forwards):
     """Forward ports from the host to a branch's container."""
-    _, wt_path = locki.resolve_branch(branch)
-    wt_id = wt_path.relative_to(locki.WORKTREES_HOME).parts[0]
+    _, wt_path = resolve_branch(branch)
+    wt_id = wt_path.relative_to(WORKTREES_HOME).parts[0]
 
     # Ensure container is running
-    result = locki.run_in_vm(
+    result = run_in_vm(
         ["incus", "list", "--format=csv", "--columns=ns", wt_id],
         "Checking container",
         check=False,
@@ -85,14 +86,14 @@ def port_forward_cmd(ctx, branch, clear, list_forwards):
 
     if clear:
         # Remove all existing port-forward devices
-        result = locki.run_in_vm(
+        result = run_in_vm(
             ["incus", "config", "device", "list", wt_id],
             "Listing devices",
         )
         for line in result.stdout.decode().splitlines():
             name = line.strip()
             if name.startswith("port-fwd-"):
-                locki.run_in_vm(
+                run_in_vm(
                     ["incus", "config", "device", "remove", wt_id, name],
                     f"Removing {name}",
                 )
@@ -105,7 +106,7 @@ def port_forward_cmd(ctx, branch, clear, list_forwards):
             logger.error("Host port %d is not allowed (must be >= 1024).", host_port)
             sys.exit(1)
         device_name = f"port-fwd-{host_port}"
-        locki.run_in_vm(
+        run_in_vm(
             [
                 "incus",
                 "config",
