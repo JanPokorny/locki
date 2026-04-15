@@ -8,6 +8,7 @@ dependencies = [
     "click>=8.1",
     "InquirerPy>=0.3",
     "pydantic>=2.12.5",
+    "tomlkit>=0.13",
 ]
 
 [dependency-groups]

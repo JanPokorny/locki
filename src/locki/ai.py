@@ -1,9 +1,10 @@
-import os
 import sys
 
 import click
+import tomlkit
 
 from locki.config import LOCKI_HOME
+from locki.shell import exec_cmd
 from locki.utils import git_root, list_locki_worktree_branches
 
 HARNESSES = ["claude", "gemini", "codex", "opencode"]
@@ -15,10 +16,7 @@ def _load_harness() -> str | None:
     if not CONFIG_PATH.exists():
         return None
     try:
-        import tomllib
-
-        with open(CONFIG_PATH, "rb") as f:
-            data = tomllib.load(f)
+        data = tomlkit.loads(CONFIG_PATH.read_text())
         harness = data.get("ai", {}).get("harness")
         if harness in HARNESSES:
             return harness
@@ -29,22 +27,11 @@ def _load_harness() -> str | None:
 
 def _save_harness(harness: str) -> None:
     LOCKI_HOME.mkdir(parents=True, exist_ok=True)
-    import tomllib
-
-    data: dict = {}
-    if CONFIG_PATH.exists():
-        with open(CONFIG_PATH, "rb") as f:
-            data = tomllib.load(f)
-    data.setdefault("ai", {})["harness"] = harness
-
-    parts: list[str] = []
-    for section, values in data.items():
-        if isinstance(values, dict):
-            parts.append(f"[{section}]")
-            for k, v in values.items():
-                parts.append(f'{k} = "{v}"' if isinstance(v, str) else f"{k} = {v}")
-            parts.append("")
-    CONFIG_PATH.write_text("\n".join(parts))
+    data = tomlkit.loads(CONFIG_PATH.read_text()) if CONFIG_PATH.exists() else tomlkit.document()
+    if "ai" not in data:
+        data.add("ai", tomlkit.table())
+    data["ai"]["harness"] = harness
+    CONFIG_PATH.write_text(tomlkit.dumps(data))
 
 
 def _ask_harness() -> str:
@@ -122,30 +109,9 @@ def ai_cmd(ctx, branch, new):
 
     git_root()  # fail fast if not in a git repo
 
-    # Build locki x arguments
-    args = ["locki", "x"]
-    if is_new:
-        args.append("-n")
-    elif branch:
-        args.extend(["-b", branch])
-
-    args.append(harness)
-
-    # Add resume args when returning to an existing sandbox
+    # Build the command args that exec_cmd will run inside the container
+    ctx.args = [harness]
     if not is_new and branch:
-        args.extend(RESUME_ARGS.get(harness, []))
+        ctx.args.extend(RESUME_ARGS.get(harness, []))
 
-    # Pass through any extra args from the user
-    args.extend(ctx.args)
-
-    locki_bin = _find_locki_bin()
-    os.execvp(locki_bin[0], locki_bin + args[1:])
-
-
-def _find_locki_bin() -> list[str]:
-    import shutil
-
-    locki_path = shutil.which("locki")
-    if locki_path:
-        return [locki_path]
-    return [sys.executable, "-m", "locki"]
+    ctx.invoke(exec_cmd.callback, branch=branch, new=is_new)
