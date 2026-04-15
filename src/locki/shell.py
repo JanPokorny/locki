@@ -28,6 +28,51 @@ from locki.utils import (
     run_in_vm,
 )
 
+CONTAINER_ENV = {
+    "BUN_INSTALL_CACHE_DIR": "/var/cache/locki/bun",
+    "BUNDLE_PATH": "/var/cache/locki/bundle",
+    "CABAL_DIR": "/var/cache/locki/cabal",
+    "CARGO_HOME": "/var/cache/locki/cargo",
+    "COMPOSER_CACHE_DIR": "/var/cache/locki/composer",
+    "CONAN_USER_HOME": "/var/cache/locki/conan",
+    "COREPACK_ENABLE_DOWNLOAD_PROMPT": "0",
+    "COURSIER_CACHE": "/var/cache/locki/coursier",
+    "DENO_DIR": "/var/cache/locki/deno",
+    "GEMINI_FORCE_ENCRYPTED_FILE_STORAGE": "true",
+    "GOCACHE": "/var/cache/locki/go/build",
+    "GOMODCACHE": "/var/cache/locki/go/mod",
+    "GRADLE_USER_HOME": "/var/cache/locki/gradle",
+    "HEX_HOME": "/var/cache/locki/hex",
+    "IS_SANDBOX": "1",
+    "JULIA_DEPOT_PATH": "/var/cache/locki/julia",
+    "LEIN_HOME": "/var/cache/locki/lein",
+    "MAVEN_OPTS": "-Dmaven.repo.local=/var/cache/locki/maven",
+    "MISE_CACHE_DIR": "/var/cache/locki/mise",
+    "MISE_DATA_DIR": "/usr/share/mise",
+    "MISE_INSTALL_PATH": "/usr/local/bin/mise",
+    "MISE_NODE_VERIFY": "false",
+    "MISE_TRUSTED_CONFIG_PATHS": "/",
+    "MIX_HOME": "/var/cache/locki/mix",
+    "NIMBLE_DIR": "/var/cache/locki/nimble",
+    "npm_config_cache": "/var/cache/locki/npm",
+    "NUGET_PACKAGES": "/var/cache/locki/nuget",
+    "PATH": "/opt/locki/bin:/root/.local/bin:/usr/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/locki/bin/jit",
+    "PIP_CACHE_DIR": "/var/cache/locki/pip",
+    "PNPM_HOME": "/usr/share/pnpm",
+    "PUB_CACHE": "/var/cache/locki/pub",
+    "R_LIBS_USER": "/var/cache/locki/r",
+    "REBAR_CACHE_DIR": "/var/cache/locki/rebar3",
+    "STACK_ROOT": "/var/cache/locki/stack",
+    "TF_PLUGIN_CACHE_DIR": "/var/cache/locki/terraform",
+    "UV_CACHE_DIR": "/var/cache/locki/uv",
+    "VCPKG_DEFAULT_BINARY_CACHE": "/var/cache/locki/vcpkg",
+    "XDG_DATA_HOME": "/usr/share",
+    "XDG_CACHE_HOME": "/var/cache/locki",
+    "XDG_BIN_HOME": "/usr/local/bin",
+    "YARN_CACHE_FOLDER": "/var/cache/locki/yarn",
+    "ZIG_GLOBAL_CACHE_DIR": "/var/cache/locki/zig",
+}
+
 GIT_HOOKS = [
     "applypatch-msg",
     "pre-applypatch",
@@ -328,8 +373,9 @@ def exec_cmd(ctx, branch):
         )
 
         setup_script = (importlib.resources.files("locki") / "data" / "container-setup.sh").read_bytes()
+        env_flags = [flag for k, v in CONTAINER_ENV.items() for flag in ("--env", f"{k}={v}")]
         run_in_vm(
-            ["incus", "exec", wt_id, "--env", f"LOCKI_WORKTREES_HOME={WORKTREES_HOME}", "--", "/bin/sh"],
+            ["incus", "exec", wt_id, *env_flags, "--env", f"LOCKI_WORKTREES_HOME={WORKTREES_HOME}", "--", "/bin/sh"],
             "Configuring container",
             input=setup_script,
         )
@@ -408,6 +454,7 @@ def exec_cmd(ctx, branch):
                 shlex.quote(wt_id),
                 "--cwd",
                 shlex.quote(str(wt_path)),
+                *(f"--env={k}={v}" for k, v in CONTAINER_ENV.items()),
                 *(f"--env={env}=${env}" for env in forwarded_env),
                 "--",
                 *((shlex.quote(a) for a in ctx.args) if ctx.args else ["bash"]),

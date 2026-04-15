@@ -21,48 +21,6 @@ networks:
 profiles:
   - name: default
     config:
-      environment.BUN_INSTALL_CACHE_DIR: /var/cache/locki/bun
-      environment.BUNDLE_PATH: /var/cache/locki/bundle
-      environment.CABAL_DIR: /var/cache/locki/cabal
-      environment.CARGO_HOME: /var/cache/locki/cargo
-      environment.COMPOSER_CACHE_DIR: /var/cache/locki/composer
-      environment.CONAN_USER_HOME: /var/cache/locki/conan
-      environment.COREPACK_ENABLE_DOWNLOAD_PROMPT: 0
-      environment.COURSIER_CACHE: /var/cache/locki/coursier
-      environment.DENO_DIR: /var/cache/locki/deno
-      environment.GEMINI_FORCE_ENCRYPTED_FILE_STORAGE: "true"
-      environment.GOCACHE: /var/cache/locki/go/build
-      environment.GOMODCACHE: /var/cache/locki/go/mod
-      environment.GRADLE_USER_HOME: /var/cache/locki/gradle
-      environment.HEX_HOME: /var/cache/locki/hex
-      environment.IS_SANDBOX: 1
-      environment.JULIA_DEPOT_PATH: /var/cache/locki/julia
-      environment.LEIN_HOME: /var/cache/locki/lein
-      environment.MAVEN_OPTS: -Dmaven.repo.local=/var/cache/locki/maven
-      environment.MISE_CACHE_DIR: /var/cache/locki/mise
-      environment.MISE_DATA_DIR: /usr/share/mise
-      environment.MISE_INSTALL_PATH: /usr/local/bin/mise
-      environment.MISE_NODE_VERIFY: "false"
-      environment.MISE_TRUSTED_CONFIG_PATHS: /
-      environment.MIX_HOME: /var/cache/locki/mix
-      environment.NIMBLE_DIR: /var/cache/locki/nimble
-      environment.npm_config_cache: /var/cache/locki/npm
-      environment.NUGET_PACKAGES: /var/cache/locki/nuget
-      environment.PATH: /opt/locki/bin:/root/.local/bin:/usr/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/locki/bin/jit
-      environment.PIP_CACHE_DIR: /var/cache/locki/pip
-      environment.PNPM_HOME: /usr/share/pnpm
-      environment.PUB_CACHE: /var/cache/locki/pub
-      environment.R_LIBS_USER: /var/cache/locki/r
-      environment.REBAR_CACHE_DIR: /var/cache/locki/rebar3
-      environment.STACK_ROOT: /var/cache/locki/stack
-      environment.TF_PLUGIN_CACHE_DIR: /var/cache/locki/terraform
-      environment.UV_CACHE_DIR: /var/cache/locki/uv
-      environment.VCPKG_DEFAULT_BINARY_CACHE: /var/cache/locki/vcpkg
-      environment.XDG_DATA_HOME: /usr/share
-      environment.XDG_CACHE_HOME: /var/cache/locki
-      environment.XDG_BIN_HOME: /usr/local/bin
-      environment.YARN_CACHE_FOLDER: /var/cache/locki/yarn
-      environment.ZIG_GLOBAL_CACHE_DIR: /var/cache/locki/zig
       security.nesting: "true"
       security.privileged: "true"
       raw.lxc: |
