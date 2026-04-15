@@ -30,7 +30,7 @@ developer_instructions = "/etc/codex/AGENTS.md"
 projects."$LOCKI_WORKTREES_HOME".trust_level = "trusted"
 __LOCKI_EOF__
 
-# MARK: Executable shims
+# MARK: High-priority shims
 
 mkdir -p /opt/locki/bin
 
@@ -46,15 +46,30 @@ done
 exec ssh -F /root/.ssh/locki-ssh-config locki-proxy -- "$q"
 __LOCKI_EOF__
 
+## pnpm -- set store dir
+cat > /opt/locki/bin/pnpm << '__LOCKI_EOF__'
+#!/bin/sh
+rm -f "$(readlink -f "$0")"
+pnpm config set store-dir /var/cache/locki/pnpm
+pnpm config set global-bin-dir /usr/local/bin
+exec pnpm "$@"
+__LOCKI_EOF__
+
+chmod +x /opt/locki/bin/*
+
+# MARK: Low-priority shims
+
+mkdir -p /opt/locki/bin/jit
+
 ## bwrap executable needs to be present so Codex shuts up about it
-cat > /opt/locki/bin/bwrap << '__LOCKI_EOF__'
+cat > /opt/locki/bin/jit/bwrap << '__LOCKI_EOF__'
 #!/bin/sh
 rm -f "$(readlink -f "$0")"
 exec bwrap "$@"
 __LOCKI_EOF__
 
-## auto-install shim for docker -- not installable with Mise
-command -v docker || cat > /opt/locki/bin/docker << '__LOCKI_EOF__'
+## JIT shim for docker -- not installable with Mise
+command -v docker || cat > /opt/locki/bin/jit/docker << '__LOCKI_EOF__'
 #!/bin/sh
 rm -f "$(readlink -f "$0")"
 if command -v dnf >/dev/null 2>&1; then
@@ -67,7 +82,7 @@ systemctl enable --now docker
 exec docker "$@"
 __LOCKI_EOF__
 
-## nodejs-based auto-install shims
+## JIT shims for nodejs-based tools
 for pair in \
   "npm:@anthropic-ai/claude-code=claude --dangerously-skip-permissions" \
   "npm:@google/gemini-cli=gemini --yolo" \
@@ -76,10 +91,10 @@ for pair in \
   pkg="${pair%%=*}"
   cmd="${pair##*=}"
   bin="${cmd%% *}"
-  cat > "/opt/locki/bin/$bin" << EOF
+  cat > "/opt/locki/bin/jit/$bin" << EOF
 #!/bin/sh
-# use specific version if agent requested it, else latest
-version="\$(mise tool $pkg --requested | sed s/\\\\[none\\\\]/latest/g)"
+# set global node version to avoid broken mise shim
+if test "\$(mise tool node --requested)" = "[none]"; then mise use -g node@24; fi
 # run from root to avoid mise discovering mise.toml and triggering full install
 target="\$(pwd)"
 cd /  
@@ -88,7 +103,7 @@ exec mise x -C "\$target" nodejs@24 -- mise x $pkg@\$version -- $cmd "\$@"
 EOF
 done
 
-## other auto-install shims
+## JIT shims for other tools
 for pair in \
   "aqua:fish-shell/fish-shell=fish" \
   "fd=fd" \
@@ -96,25 +111,26 @@ for pair in \
   "jq=jq" \
   "k9s=k9s" \
   "kubectl=kubectl" \
+  "pnpm=pnpm" \
   "rg=rg" \
+  "uv=uv" \
+  "yarn=yarn" \
   "yq=yq" \
 ; do
   pkg="${pair%%=*}"
   cmd="${pair##*=}"
   bin="${cmd%% *}"
-  cat > "/opt/locki/bin/$bin" << EOF
+  cat > "/opt/locki/bin/jit/$bin" << EOF
 #!/bin/sh
-# use specific version if agent requested it, else latest
-version="\$(mise tool $pkg --requested | sed s/\\\\[none\\\\]/latest/g)"
 # run from root to avoid mise discovering mise.toml and triggering full install
 target="\$(pwd)"
 cd /  
 export MISE_STATUS_MESSAGE_MISSING_TOOLS=never
-exec mise x -C "\$target" $pkg@\$version -- $cmd "\$@"
+exec mise x -C "\$target" $pkg -- $cmd "\$@"
 EOF
 done
 
-chmod +x /opt/locki/bin/*
+chmod +x /opt/locki/bin/jit/*
 
 # MARK: Caching
 
@@ -184,12 +200,3 @@ if ! command -v mise; then
   ln -sf "/var/cache/mise-install/mise-v${mise_version}-linux-${arch}/mise/bin/mise" /usr/local/bin/mise
   chmod +x /usr/local/bin/mise
 fi
-
-mkdir -p /etc/bashrc.d
-mise activate bash >/etc/bashrc.d/mise.sh
-
-mkdir -p /etc/zshrc.d
-mise activate zsh >/etc/zshrc.d/mise.sh
-
-mkdir -p /etc/fish/conf.d
-mise activate fish >/etc/fish/conf.d/mise.fish

@@ -47,10 +47,8 @@ profiles:
       environment.MIX_HOME: /var/cache/locki/mix
       environment.NIMBLE_DIR: /var/cache/locki/nimble
       environment.npm_config_cache: /var/cache/locki/npm
-      environment.npm_config_global_bin_dir: /usr/local/bin
-      environment.npm_config_store_dir: /var/cache/locki/pnpm
       environment.NUGET_PACKAGES: /var/cache/locki/nuget
-      environment.PATH: /opt/locki/bin:/root/.local/bin:/usr/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      environment.PATH: /opt/locki/bin:/root/.local/bin:/usr/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/locki/bin/jit
       environment.PIP_CACHE_DIR: /var/cache/locki/pip
       environment.PNPM_HOME: /usr/share/pnpm
       environment.PUB_CACHE: /var/cache/locki/pub
