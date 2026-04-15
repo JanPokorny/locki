@@ -10,12 +10,29 @@ from locki.utils import (
     current_worktree,
     find_worktree_for_branch,
     git_root,
+    list_locki_worktree_branches,
     resolve_branch,
     run_command,
     run_in_vm,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _select_worktree_branch() -> str | None:
+    """Show interactive fuzzy selector for Locki worktree branches."""
+    from InquirerPy import inquirer
+    from InquirerPy.base.control import Choice
+
+    wt_branches = list_locki_worktree_branches()
+    if not wt_branches:
+        return None
+
+    choices = [Choice(value=b, name=b) for b in sorted(wt_branches)]
+    return inquirer.fuzzy(
+        message="Select a branch to remove:",
+        choices=choices,
+    ).execute()
 
 
 @click.command()
@@ -29,8 +46,14 @@ def remove_cmd(branch, force, delete_branch):
     else:
         wt_path = current_worktree()
         if wt_path is None:
-            logger.error("No branch specified and not inside a locki worktree.")
-            sys.exit(1)
+            if not sys.stdin.isatty():
+                logger.error("No branch specified. Use -b <branch> in non-interactive mode.")
+                sys.exit(1)
+            branch = _select_worktree_branch()
+            if branch is None:
+                click.echo("No Locki worktrees to remove.")
+                return
+            wt_path = find_worktree_for_branch(branch)
 
     if wt_path is None:
         logger.info("No locki-managed worktree found for '%s', nothing to do.", branch)

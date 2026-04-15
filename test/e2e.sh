@@ -73,11 +73,11 @@ cd "$REPO"
 echo
 echo "Testing cold start + parallel VM creation..."
 
-cold_start=$(timed locki x -b 'feat/auth_v2.0' echo 1) || true
+cold_start=$(timed locki x -c -b 'feat/auth_v2.0' echo 1) || true
 echo "  cold start: ${cold_start}s"
 
 # branch b in parallel with a (VM already exists, but tests lock waiting)
-assert_output "locki x b runs" "2" locki x -b 'fix-login_bug.3' echo 2
+assert_output "locki x b runs" "2" locki x -c -b 'fix-login_bug.3' echo 2
 
 # ── cache persistence across invocations ─────────────────────────────────────
 
@@ -177,8 +177,11 @@ git -C "$TMPDIR_ROOT/pusher" push -u origin 'dependabot/pip/apps/some-long-serve
 # Verify the branch doesn't exist locally yet
 assert_fail "remote branch not local yet" git -C "$REPO" rev-parse --verify 'refs/heads/dependabot/pip/apps/some-long-server-name/pip-security-4d376cd218'
 
-# locki x should fetch and create the branch from remote
-assert_ok "locki fetches remote branch" locki x -b 'dependabot/pip/apps/some-long-server-name/pip-security-4d376cd218' echo ok
+# Fetch manually (locki no longer auto-fetches)
+git -C "$REPO" fetch
+
+# locki x should create worktree from the fetched remote branch
+assert_ok "locki uses remote branch" locki x -b 'dependabot/pip/apps/some-long-server-name/pip-security-4d376cd218' echo ok
 
 # Check the branch was created from the remote (has the remote commit)
 REMOTE_ONLY_WT=$(git -C "$REPO" worktree list --porcelain | grep -B2 "branch refs/heads/dependabot/pip/apps/some-long-server-name/pip-security-4d376cd218" | head -1 | sed 's/worktree //')
@@ -189,7 +192,7 @@ assert_output "branch has remote commit" "remote commit" git -C "$REMOTE_ONLY_WT
 echo
 echo "Testing warm start..."
 
-warm_start=$(timed locki x -b 'release_v1.0-rc#1' echo 3) || true
+warm_start=$(timed locki x -c -b 'release_v1.0-rc#1' echo 3) || true
 echo "  warm start: ${warm_start}s"
 
 # ── hot start (existing container) ───────────────────────────────────────────
@@ -219,7 +222,7 @@ aarch64 = "images:ubuntu/24.04"
 x86_64 = "images:ubuntu/24.04"
 TOML
 
-assert_output "custom image container runs ubuntu" "Ubuntu" locki x -b '@user+hotfix%2!weird,name' cat /etc/os-release
+assert_output "custom image container runs ubuntu" "Ubuntu" locki x -c -b '@user+hotfix%2!weird,name' cat /etc/os-release
 rm -f "$REPO/locki.toml"
 
 # ── port forwarding ─────────────────────────────────────────────────────────
@@ -261,17 +264,13 @@ assert_ok    ":port forward cleaned up" locki port-forward -b 'fix-login_bug.3' 
 # Reject privileged ports
 assert_fail  "port < 1024 rejected" locki port-forward -b 'fix-login_bug.3' 80
 
-# ── auto-generated branch ───────────────────────────────────────────────────
+# ── branch creation with -c flag ────────────────────────────────────────────
 
 echo
-echo "Testing auto-generated branch..."
+echo "Testing branch creation with -c flag..."
 
-auto_output=$(locki x echo auto-ok 2>&1)
-assert_output "auto branch runs command" "auto-ok" echo "$auto_output"
-assert_output "auto branch name printed" "Created a new branch" echo "$auto_output"
-# Viking name format: locki/<name>-<father>(sson|sdottir)-<number>
-auto_branch=$(echo "$auto_output" | sed -n 's/.*Created a new branch.*locki\/\([^ .]*\).*/locki\/\1/p')
-if [[ "$auto_branch" =~ ^locki/[a-z]+-[a-z]+(sson|sdottir)-[0-9]+$ ]]; then pass "auto branch has Viking name format"; else fail "auto branch has Viking name format (got '$auto_branch')"; fi
+assert_output "-c flag creates new branch" "create-ok" locki x -c -b locki/test-create-branch echo create-ok
+assert_fail "missing -c rejects unknown branch" locki x -b locki/nonexistent-branch echo nope
 
 # ── worktree cleanup ─────────────────────────────────────────────────────────
 

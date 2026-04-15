@@ -24,6 +24,9 @@ from locki.utils import (
     find_worktree_for_branch,
     git_root,
     limactl,
+    list_local_branches,
+    list_locki_worktree_branches,
+    list_remote_branches,
     run_command,
     run_in_vm,
 )
@@ -145,35 +148,88 @@ def _viking_name() -> str:
     return f"{name}-{father}{suffix}-{number}"
 
 
+def _select_branch_interactive() -> tuple[str, bool]:
+    """Show interactive fuzzy branch selector. Returns (branch_name, create_branch)."""
+    from InquirerPy import inquirer
+    from InquirerPy.base.control import Choice
+    from InquirerPy.separator import Separator
+
+    create_new_sentinel = "__create_new__"
+
+    wt_branches = list_locki_worktree_branches()
+    wt_set = set(wt_branches)
+    local_branches = list_local_branches()
+    local = sorted(set(local_branches) - wt_set)
+    remote = sorted(set(list_remote_branches()) - wt_set - set(local_branches))
+
+    choices: list = [Choice(value=create_new_sentinel, name="(create new)")]
+
+    if wt_branches:
+        choices.append(Separator("── Locki worktrees ──"))
+        for b in sorted(wt_branches):
+            choices.append(Choice(value=b, name=b))
+
+    if local:
+        choices.append(Separator("── Local branches ──"))
+        for b in local:
+            choices.append(Choice(value=b, name=b))
+
+    if remote:
+        choices.append(Separator("── Remote branches ──"))
+        for b in remote:
+            choices.append(Choice(value=b, name=b))
+
+    selected = inquirer.fuzzy(
+        message="Select a branch:",
+        choices=choices,
+    ).execute()
+
+    if selected == create_new_sentinel:
+        config = load_config(git_root())
+        existing = subprocess.run(
+            ["git", "-C", str(git_root()), "branch", "--list", "--all", "--format=%(refname:short)"],
+            capture_output=True, text=True,
+        ).stdout.splitlines()
+        existing_set = {b.strip().removeprefix("origin/") for b in existing}
+        default_name = ""
+        for _ in range(100):
+            default_name = config.branch_prefix + _viking_name()
+            if default_name not in existing_set:
+                break
+        branch = inquirer.text(
+            message="Branch name:",
+            default=default_name,
+        ).execute()
+        return branch, True
+
+    return selected, False
+
+
 @click.command("exec | x", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 @click.option("-b", "--branch", default=None, help="Branch name to work on.")
+@click.option("-c", "--create-branch", is_flag=True, help="Create the branch if it doesn't exist.")
 @click.pass_context
-def exec_cmd(ctx, branch):
+def exec_cmd(ctx, branch, create_branch):
     """Run a command in the per-branch sandbox container.
 
     \b
     Examples:
-      locki x bash                    # interactive shell
+      locki x bash                    # interactive shell (branch picker)
       locki x claude                  # run Claude Code
       locki x -b my-feature bash      # specify branch
+      locki x -c -b new-feat bash     # create branch & shell
       locki x bash -c "echo hello"    # run a one-liner
     """
     click.echo(f"{click.style('ᚠ', fg='magenta', bold=True)} Entering a Locki sandbox.", err=True)
     if not branch:
         wt_path = current_worktree()
         if wt_path is None:
-            # In root repo, auto-generate a Viking branch name (avoid existing branches)
-            config = load_config(git_root())
-            existing = subprocess.run(
-                ["git", "-C", str(git_root()), "branch", "--list", "--all", "--format=%(refname:short)"],
-                capture_output=True, text=True,
-            ).stdout.splitlines()
-            existing_set = {b.strip().removeprefix("origin/") for b in existing}
-            for _ in range(100):
-                branch = config.branch_prefix + _viking_name()
-                if branch not in existing_set:
-                    break
-            click.echo(f"{click.style('ᚦ', fg='magenta', bold=True)} Created a new branch {click.style(branch, fg="green")}.", err=True)
+            if not sys.stdin.isatty():
+                click.echo(f"{click.style('ᛞ', fg='red', bold=True)} No branch specified. Use -b <branch> in non-interactive mode.", file=sys.stderr)
+                sys.exit(1)
+            branch, create_branch = _select_branch_interactive()
+            if create_branch:
+                click.echo(f"{click.style('ᚦ', fg='magenta', bold=True)} Creating a new branch {click.style(branch, fg='green')}.", err=True)
 
     git_root()  # fail fast if not in a git repo
 
@@ -246,18 +302,19 @@ def exec_cmd(ctx, branch):
         wt_path = WORKTREES_HOME / wt_id
         wt_path.mkdir(parents=True, exist_ok=True)
 
-        run_command(
-            ["git", "-C", str(git_root()), "fetch"],
-            "Fetching from remote",
-            check=False,
-        )
-
         result = run_command(
             ["git", "-C", str(git_root()), "worktree", "add", str(wt_path), branch],
             f"Creating worktree for {click.style(branch, fg='green')}",
             check=False,
         )
         if result.returncode != 0:
+            if not create_branch:
+                shutil.rmtree(wt_path, ignore_errors=True)
+                click.echo(
+                    f"{click.style('ᛞ', fg='red', bold=True)} Branch {click.style(branch, fg='yellow')} does not exist. Use -c to create it.",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
             run_command(
                 ["git", "-C", str(git_root()), "branch", branch],
                 f"Creating branch {click.style(branch, fg='green')}",

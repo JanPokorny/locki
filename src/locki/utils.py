@@ -237,3 +237,51 @@ def find_worktree_for_branch(branch: str) -> pathlib.Path | None:
         ):
             return current_path
     return None
+
+
+def list_locki_worktree_branches() -> list[str]:
+    """Return branch names that have Locki-managed worktrees in the current repo."""
+    result = subprocess.run(
+        ["git", "-C", str(git_root()), "worktree", "list", "--porcelain"],
+        capture_output=True, text=True,
+    )
+    branches: list[str] = []
+    current_path: pathlib.Path | None = None
+    for line in result.stdout.splitlines():
+        if line.startswith("worktree "):
+            current_path = pathlib.Path(line.split(" ", 1)[1])
+        elif (
+            line.startswith("branch refs/heads/")
+            and current_path
+            and current_path.is_relative_to(WORKTREES_HOME)
+        ):
+            branches.append(line.removeprefix("branch refs/heads/"))
+    return branches
+
+
+def list_local_branches() -> list[str]:
+    """Return all local branch names."""
+    result = subprocess.run(
+        ["git", "-C", str(git_root()), "branch", "--format=%(refname:short)"],
+        capture_output=True, text=True,
+    )
+    return [b.strip() for b in result.stdout.splitlines() if b.strip()]
+
+
+def list_remote_branches() -> list[str]:
+    """Return remote branch names with the remote prefix stripped."""
+    result = subprocess.run(
+        ["git", "-C", str(git_root()), "branch", "-r", "--format=%(refname:short)"],
+        capture_output=True, text=True,
+    )
+    seen: set[str] = set()
+    branches: list[str] = []
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        _, _, branch = line.partition("/")
+        if branch and branch != "HEAD" and branch not in seen:
+            seen.add(branch)
+            branches.append(branch)
+    return branches
