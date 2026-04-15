@@ -1,4 +1,3 @@
-import json
 import logging
 import pathlib
 import shutil
@@ -91,47 +90,8 @@ def stop_cmd(branch):
 
 
 @click.command()
-@click.option("--all", "-a", "show_all", is_flag=True, help="Show worktrees from all repos.")
-def status_cmd(show_all):
-    """Show VM status and managed worktrees."""
-    # VM status
-    vm_status = "not created"
-    try:
-        result = run_command(
-            [locki.limactl(), "list", "--json"],
-            "Checking VM",
-            env={"LIMA_HOME": str(locki.LIMA_HOME)},
-            cwd="/",
-            check=False,
-            quiet=True,
-        )
-        for line in result.stdout.decode().splitlines():
-            vm = json.loads(line)
-            if vm.get("name") == "locki":
-                vm_status = vm.get("status", "unknown").lower()
-    except Exception:
-        pass
-
-    click.echo(f"VM: {vm_status}")
-
-    # Container statuses (only if VM is running)
-    containers: dict[str, str] = {}
-    if vm_status == "running":
-        try:
-            result = locki.run_in_vm(
-                ["incus", "list", "--format=csv", "--columns=n,s"],
-                "Listing containers",
-                check=False,
-                quiet=True,
-            )
-            for line in result.stdout.decode().splitlines():
-                parts = line.split(",", 1)
-                if len(parts) == 2:
-                    containers[parts[0].strip()] = parts[1].strip().lower()
-        except Exception:
-            pass
-
-    # Current repo worktrees
+def list_cmd():
+    """List Locki worktrees in the current repo."""
     repo_root = locki.git_root()
     result = run_command(
         ["git", "-C", str(repo_root), "worktree", "list", "--porcelain"],
@@ -139,7 +99,8 @@ def status_cmd(show_all):
         quiet=True,
     )
 
-    current_repo_wts: list[tuple[str, pathlib.Path, str]] = []
+    home = pathlib.Path.home()
+    rows: list[tuple[str, str, str]] = []
     current_path: pathlib.Path | None = None
     current_branch: str | None = None
     for line in result.stdout.decode().splitlines():
@@ -150,41 +111,27 @@ def status_cmd(show_all):
             current_branch = line.removeprefix("branch refs/heads/")
         elif line == "" and current_path and current_branch:
             if current_path.is_relative_to(locki.WORKTREES_HOME):
-                wt_id = current_path.relative_to(locki.WORKTREES_HOME).parts[0]
-                current_repo_wts.append((current_branch, current_path, wt_id))
+                title_file = current_path / ".locki" / "title"
+                title = title_file.read_text().strip() if title_file.exists() else ""
+                if title == "<no title generated yet>":
+                    title = ""
+                path_str = str(current_path)
+                if current_path.is_relative_to(home):
+                    path_str = "~/" + str(current_path.relative_to(home))
+                rows.append((title, current_branch, path_str))
 
-    current_repo_wt_paths = {str(wt[1]) for wt in current_repo_wts}
+    if not rows:
+        click.echo("No Locki worktrees in this repo.")
+        return
 
-    if current_repo_wts:
-        click.echo(f"\n{repo_root.name}:")
-        for branch, _wt_path, wt_id in current_repo_wts:
-            status = containers.get(wt_id, "no container")
-            click.echo(f"  {branch:<30s} {status}")
-    else:
-        click.echo(f"\n{repo_root.name}: no worktrees")
+    # Compute column widths
+    headers = ("TITLE", "BRANCH", "PATH")
+    widths = [len(h) for h in headers]
+    for row in rows:
+        for i, val in enumerate(row):
+            widths[i] = max(widths[i], len(val))
 
-    # Other worktrees
-    other_wts: list[pathlib.Path] = []
-    if locki.WORKTREES_HOME.exists():
-        for d in sorted(locki.WORKTREES_HOME.iterdir()):
-            if d.is_dir() and str(d) not in current_repo_wt_paths:
-                other_wts.append(d)
-
-    if other_wts and not show_all:
-        click.echo(f"\n{len(other_wts)} more worktree(s) from other repos (use --all to see all)")
-    elif other_wts and show_all:
-        # Group other worktrees by repo
-        by_repo: dict[str, list[tuple[str, str]]] = {}
-        for d in other_wts:
-            wt_id = d.name
-            branch_file = locki.WORKTREES_META / wt_id / "branch"
-            repo_file = locki.WORKTREES_META / wt_id / "repo"
-            branch = branch_file.read_text().strip() if branch_file.exists() else wt_id
-            repo_name = pathlib.Path(repo_file.read_text().strip()).name if repo_file.exists() else "unknown"
-            by_repo.setdefault(repo_name, []).append((branch, wt_id))
-
-        for repo_name, wts in sorted(by_repo.items()):
-            click.echo(f"\n{repo_name}:")
-            for branch, wt_id in wts:
-                status = containers.get(wt_id, "no container")
-                click.echo(f"  {branch:<30s} {status}")
+    fmt = f"{{:<{widths[0]}}}  {{:<{widths[1]}}}  {{}}"
+    click.echo(fmt.format(*headers))
+    for row in rows:
+        click.echo(fmt.format(*row))

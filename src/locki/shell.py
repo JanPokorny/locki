@@ -189,6 +189,11 @@ def exec_cmd(ctx, branch):
                 f"Creating worktree for {click.style(branch, fg='green')}",
             )
 
+        locki_dir = wt_path / ".locki"
+        locki_dir.mkdir(parents=True, exist_ok=True)
+        (locki_dir / ".gitignore").write_text("*\n")
+        (locki_dir / "title").write_text("<no title generated yet>\n")
+
         meta_dir = locki.WORKTREES_META / wt_id
         meta_dir.mkdir(parents=True, exist_ok=True)
         (meta_dir / ".git").write_text((wt_path / ".git").read_text())

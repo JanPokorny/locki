@@ -14,6 +14,8 @@ Some commands execute on the host using a self-service proxy. Run them as usual,
   gh pr create [--title=<t>] [--body=<b>] [--base=<b>] [--head=<h>] [--draft] [--fill] [--reviewer=<r>] [--label=<l>] [--assignee=<a>] | gh pr view/list/diff/status | gh run view/list | gh issue view/list
   locki port-forward :<container_port> [:<port2> ...]  (When you start a web server, API, or any service the user should access, forward the port to host. The output shows `<host_port>:<container_port>`. Give the user a full URL with the host-side port, e.g. `http://localhost:<host_port>`.)
 
+User needs to distinguish multiple sandboxes. Help them by writing a very concise distinguishing text (max 80 chars) to (already existing, gitignored) file <repo worktree>/.locki/title. e.g. `echo "Implement dark mode for login page" >.locki/title`. Do that as a first thing after receiving the first user inquiry. Optionally update during conversation if it stops being accurate.
+
 __LOCKI_EOF__
 
 cat > /etc/gemini-cli/settings.json << '__LOCKI_EOF__'

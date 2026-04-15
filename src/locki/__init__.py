@@ -209,12 +209,12 @@ from locki.port_forward import port_forward_cmd  # noqa: E402
 from locki.self_service import self_service_cmd  # noqa: E402
 from locki.shell import exec_cmd  # noqa: E402
 from locki.vm import vm_app  # noqa: E402
-from locki.worktree import remove_cmd, status_cmd, stop_cmd  # noqa: E402
+from locki.worktree import list_cmd, remove_cmd, stop_cmd  # noqa: E402
 
 app.add_command(exec_cmd, "exec | x")
 app.add_command(port_forward_cmd, "port-forward | pf")
 app.add_command(remove_cmd, "remove | rm | delete")
 app.add_command(stop_cmd, "stop")
-app.add_command(status_cmd, "status | st")
+app.add_command(list_cmd, "list | ls")
 app.add_command(self_service_cmd, "self-service")
 app.add_command(vm_app, "vm")
