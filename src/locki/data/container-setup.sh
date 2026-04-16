@@ -5,18 +5,51 @@ set -eux
 
 mkdir -p /etc/claude-code /etc/gemini-cli /etc/codex /etc/opencode
 tee /etc/claude-code/CLAUDE.md /etc/gemini-cli/GEMINI.md /etc/codex/AGENTS.md /etc/opencode/AGENTS.md > /dev/null << '__LOCKI_EOF__'
-You are running inside a locki sandbox VM. This is an ephemeral environment designed to keep the main machine safe from malfunctioning agents. The folder is a fresh worktree: before delving into your task, start by setting up the environment. Check project metadata (`mise.toml`, `.tool-versions`, `.nvmrc`, `pyproject.toml`, etc.), CI definitions (`.github/workflows/*.yaml`, etc.) or docs (`README.md`, `CONTRIBUTING.md`, `*.md`, `docs/*`, etc.) to determine needed tools and their versions, and setup commands. If there is `mise.toml`, run `mise install` to set up all tools. Otherwise manually enable specific tool versions using e.g.: `mise use -g python@3.12.1`, `mise use -g node@22`, `mise use -g jq`, falling back to OS package manager if `mise` does not have the tool (`dnf` by default, unless running on a custom image). Docker is pre-installed.
+# Sandbox environment
 
-Some commands execute on the host using a self-service proxy. Run them as usual, non-matches will be rejected. Only long flags are accepted. Available commands:
+You are running inside a Locki sandbox -- an Incus LXC container running in a Lima VM. This environment is designed to give you free reign -- you are running as `root` -- while preventing accidental damage to files on the host machine.
+
+# Git
+
+You are operating on a separated worktree folder of a git repo lying outside of the sandbox -- for this reason, `.git` is just a file pointer and you can't access the actual `.git` folder. Git operations are only possible using the self-service proxy, see below.
+
+# Self-service proxy
+
+Some commands execute on the host using a self-service proxy. This lets you execute a limited safe set of higher-priviledged commands. Run them as usual -- the executables present in sandbox are shims that call out to the self-service proxy. The proxy will reject the command if it does not exactly match an allowed pattern. If user asks you to perform an operation you can't do, you can always prepare commands for them to run on host (worktree path matches 1:1).
+
+## Git
+
   git status | diff [--staged] [--name-only] [--stat] [--name-status] [ref [ref]] | add [--all] [file ...] | commit --message=<msg> | push | fetch | log [--oneline] [--all] [--format=<fmt>] [--max-count=<n>] [ref] | show [ref] [--stat] [--name-only] [--name-status] [--format=<fmt>] | restore [--staged] [--source=ref] <file ...>
-  git switch <branch> | reset [--hard] <ref> | branch <branch> | branch --move <branch> | branch --show-current  (where <branch> must end with #locki-<id>, where <id> is the last segment of worktree path)
-  git stash push [--message=<msg>] | list | pop [ref] | apply [ref] | drop [ref]  (stashes are worktree-scoped)
+  git switch <branch>#locki-<worktree-dirname> | reset [--hard] <ref> | branch <branch>#locki-<worktree-dirname> | branch --move <branch>#locki-<worktree-dirname> | branch --show-current
+  git stash push [--message=<msg>] | list | pop [ref] | apply [ref] | drop [ref]
+
+The name suffix `#locki-<worktree-dirname>` must be present on all branches you create or modify. You may read from any branch (e.g. restore from it, reset to it). You may use `git stash` freely, it is sandbox-scoped.
+
+## GitHub CLI
+
   gh pr create [--title=<t>] [--body=<b>] [--base=<b>] [--head=<h>] [--draft] [--fill] [--reviewer=<r>] [--label=<l>] [--assignee=<a>] | gh pr view/list/diff/status | gh run view/list | gh issue view/list
-  locki port-forward :<container_port> [:<port2> ...]  (When you start a web server, API, or any service the user should access, forward the port to host. The output shows `<host_port>:<container_port>`. Give the user a full URL with the host-side port, e.g. `http://localhost:<host_port>`.)
 
-You start on a branch with name suffix `#locki-<id>` and you may only manipulate branches sharing this suffix. You may read from any branch (e.g. restore, or reset to it). If user asks you to perform a git operation you can't do, give them commands to do it on host (worktree path matches 1:1).
+## Port forwarding
 
-Immediately after receiving the first user inquiry, run `git branch --move ...#locki-<id>` to rename the current git branch to be more descriptive. Optionally rename again in a later turn if the name stops being accurate.
+  locki port-forward :<port> [:<port> ...]
+
+When you start a network service the user should access, forward the port to host. The output shows `<host_port>:<sandbox_port>`. Give the user a full URL with the host-side port, e.g. `http://localhost:<host_port>`.)
+
+# Startup checklist
+
+Perform always when starting a conversation.
+
+1. Check project metadata (`mise.toml`, `.tool-versions`, `.nvmrc`, `pyproject.toml`, etc.), CI definitions (`.github/workflows/*.yaml`, etc.) or docs (`README.md`, `CONTRIBUTING.md`, `*.md`, `docs/*`, etc.) to determine needed tools and their versions, and setup commands. If there is `mise.toml`, run `mise install` to set up all tools. Otherwise manually enable specific tool versions using e.g.: `mise use -g python@3.12.1`, `mise use -g node@22`, `mise use -g jq`, falling back to OS package manager if `mise` does not have the tool (`dnf` by default, unless running on a custom image). Docker is pre-installed.
+
+2. Check current branch name using `git branch --show-current`. If it is `untitled#locki-<worktree-dirname>`, reset it to main using `git reset --hard main`, then rename using `branch --move <new-name>#locki-<worktree-dirname>`. Pick `<new-name>` based on the task at hand.
+
+# Cleanup checklist
+
+Perform when user asks you to cleanup the sandbox. This may come at the end, or even beginning of conversation, if the user forgot to cleanup before starting a new conversation.
+
+1. Check current branch name using `git branch --show-current`. If it is NOT `untitled#locki-<worktree-dirname>`, run `git branch untitled#locki-<worktree-dirname>` to create it, then `git switch untitled#locki-<worktree-dirname>` to switch to it and `git reset --hard main` to update it.
+
+2. If the user assigned you more work after the cleanup, continue by following the startup checklist.
 
 __LOCKI_EOF__
 
