@@ -3,9 +3,9 @@ import sys
 import click
 import tomlkit
 
-from locki.config import LOCKI_HOME
+from locki.config import LOCKI_HOME, WORKTREES_HOME
 from locki.shell import exec_cmd
-from locki.utils import git_root, list_locki_worktree_branches
+from locki.utils import find_worktree_for_branch, git_root, list_locki_worktree_branches, match_sandbox_branch
 
 HARNESSES = ["claude", "gemini", "codex", "opencode"]
 RESUME_ARGS = {"claude": ["-c"], "gemini": ["-r"], "codex": ["resume"]}
@@ -112,6 +112,18 @@ def ai_cmd(ctx, branch, new):
     # Build the command args that exec_cmd will run inside the container
     ctx.args = [harness]
     if not is_new and branch:
-        ctx.args.extend(RESUME_ARGS.get(harness, []))
+        if harness == "claude":
+            resolved = match_sandbox_branch(branch)
+            branch = resolved
+            wt_path = find_worktree_for_branch(branch)
+            if wt_path:
+                wt_id = wt_path.relative_to(WORKTREES_HOME).parts[0]
+                projects_dir = LOCKI_HOME / "home" / ".claude" / "projects"
+                if projects_dir.is_dir() and any(
+                    d.name.endswith(wt_id) for d in projects_dir.iterdir() if d.is_dir()
+                ):
+                    ctx.args.extend(RESUME_ARGS["claude"])
+        else:
+            ctx.args.extend(RESUME_ARGS.get(harness, []))
 
     ctx.invoke(exec_cmd.callback, branch=branch, new=is_new)
