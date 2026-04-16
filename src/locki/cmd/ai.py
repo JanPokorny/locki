@@ -4,7 +4,7 @@ import click
 
 from locki.config import load_config, save_user_config
 from locki.paths import DATA, USER_CONFIG, WORKTREES
-from locki.shell import exec_cmd
+from locki.cmd.exec import exec_cmd
 from locki.utils import find_worktree_for_branch, git_root, list_locki_worktree_branches, match_sandbox_branch
 
 HARNESSES = ["claude", "gemini", "codex", "opencode"]

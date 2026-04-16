@@ -121,7 +121,7 @@ def exec_cmd(ctx, branch, create, id_file):
       locki x bash                    # interactive shell (sandbox picker)
       locki x claude                  # run Claude Code
       locki x -b feat bash            # match sandbox by substring
-      locki x -c bash                 # create new unnamed sandbox
+      locki x -c bash                 # create new untitled sandbox
       locki x -c -b auth bash         # create new sandbox named "auth"
       locki x bash -c "echo hello"    # run a one-liner
     """
@@ -129,7 +129,7 @@ def exec_cmd(ctx, branch, create, id_file):
     wt_id: str | None = None
     if create:
         wt_id = _gen_wt_id()
-        name = branch or "unnamed"
+        name = branch or "untitled"
         branch = f"{name}#locki-{wt_id}"
         if id_file:
             pathlib.Path(id_file).write_text(wt_id)
@@ -159,7 +159,7 @@ def exec_cmd(ctx, branch, create, id_file):
 
             if selected is None:
                 wt_id = _gen_wt_id()
-                branch = f"unnamed#locki-{wt_id}"
+                branch = f"untitled#locki-{wt_id}"
             else:
                 branch = selected
 
