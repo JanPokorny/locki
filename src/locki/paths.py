@@ -2,10 +2,14 @@ import os
 import pathlib
 
 _home = pathlib.Path.home()
-CONFIG = pathlib.Path(os.environ.get("XDG_CONFIG_HOME") or (_home / ".config")) / "locki"
-DATA = pathlib.Path(os.environ.get("XDG_DATA_HOME") or (_home / ".local" / "share")) / "locki"
-STATE = pathlib.Path(os.environ.get("XDG_STATE_HOME") or (_home / ".local" / "state")) / "locki"
-RUNTIME = pathlib.Path(os.environ.get("XDG_RUNTIME_DIR") or os.environ.get("TMPDIR") or "/tmp") / "locki"
+LEGACY = _home / ".locki"
+if LEGACY.exists():
+    CONFIG = DATA = STATE = RUNTIME = LEGACY
+else:
+    CONFIG = pathlib.Path(os.environ.get("XDG_CONFIG_HOME") or (_home / ".config")) / "locki"
+    DATA = pathlib.Path(os.environ.get("XDG_DATA_HOME") or (_home / ".local" / "share")) / "locki"
+    STATE = pathlib.Path(os.environ.get("XDG_STATE_HOME") or (_home / ".local" / "state")) / "locki"
+    RUNTIME = pathlib.Path(os.environ.get("XDG_RUNTIME_DIR") or os.environ.get("TMPDIR") or "/tmp") / "locki"
 
 LIMA = STATE / "lima"
 WORKTREES = DATA / "worktrees"
