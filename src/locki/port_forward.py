@@ -4,7 +4,7 @@ import sys
 
 import click
 
-from locki.config import WORKTREES_HOME
+from locki.paths import WORKTREES
 from locki.utils import resolve_branch, run_in_vm
 
 logger = logging.getLogger(__name__)
@@ -70,7 +70,7 @@ def _list_forwards(wt_id: str):
 def port_forward_cmd(ctx, branch, clear, list_forwards):
     """Forward ports from the host to a branch's container."""
     _, wt_path = resolve_branch(branch)
-    wt_id = wt_path.relative_to(WORKTREES_HOME).parts[0]
+    wt_id = wt_path.relative_to(WORKTREES).parts[0]
 
     # Ensure container is running
     result = run_in_vm(

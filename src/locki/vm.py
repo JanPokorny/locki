@@ -3,7 +3,7 @@ import pathlib
 
 import click
 
-from locki.config import LIMA_HOME, WORKTREES_HOME, WORKTREES_META
+from locki.paths import LIMA, WORKTREES, WORKTREES_META
 from locki.utils import AliasGroup, limactl, run_command, run_in_vm
 
 
@@ -19,7 +19,7 @@ def vm_status_cmd():
         result = run_command(
             [limactl(), "list", "--json"],
             "Checking VM",
-            env={"LIMA_HOME": str(LIMA_HOME)},
+            env={"LIMA_HOME": str(LIMA)},
             cwd="/",
             check=False,
             quiet=True,
@@ -62,7 +62,7 @@ def vm_status_cmd():
         repo = ""
         if repo_path:
             repo = "~/" + str(repo_path.relative_to(home)) if repo_path.is_relative_to(home) else str(repo_path)
-        wt_path = WORKTREES_HOME / wt_id
+        wt_path = WORKTREES / wt_id
         path_str = str(wt_path)
         if wt_path.is_relative_to(home):
             path_str = "~/" + str(wt_path.relative_to(home))
@@ -89,7 +89,7 @@ def vm_stop_cmd():
     run_command(
         [limactl(), "stop", "locki"],
         "Stopping VM",
-        env={"LIMA_HOME": str(LIMA_HOME)},
+        env={"LIMA_HOME": str(LIMA)},
         cwd="/",
     )
 
@@ -99,6 +99,6 @@ def vm_delete_cmd():
     run_command(
         [limactl(), "delete", "-f", "locki"],
         "Deleting VM",
-        env={"LIMA_HOME": str(LIMA_HOME)},
+        env={"LIMA_HOME": str(LIMA)},
         cwd="/",
     )

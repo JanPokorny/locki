@@ -5,7 +5,7 @@ import sys
 
 import click
 
-from locki.config import WORKTREES_HOME, WORKTREES_META
+from locki.paths import WORKTREES, WORKTREES_META
 from locki.utils import (
     current_worktree,
     find_worktree_for_branch,
@@ -84,7 +84,7 @@ def remove_cmd(branch, force, delete_branch):
         )
         branch = result.stdout.decode().strip() if result.returncode == 0 else None
 
-    wt_id = wt_path.relative_to(WORKTREES_HOME).parts[0]
+    wt_id = wt_path.relative_to(WORKTREES).parts[0]
 
     run_in_vm(
         ["incus", "delete", "--force", wt_id],
@@ -113,7 +113,7 @@ def remove_cmd(branch, force, delete_branch):
 def stop_cmd(branch):
     """Stop a branch's container without removing it."""
     _, wt_path = resolve_branch(branch)
-    wt_id = wt_path.relative_to(WORKTREES_HOME).parts[0]
+    wt_id = wt_path.relative_to(WORKTREES).parts[0]
     run_in_vm(
         ["incus", "stop", wt_id],
         "Stopping container",
@@ -142,7 +142,7 @@ def list_cmd():
         elif line.startswith("branch refs/heads/"):
             current_branch = line.removeprefix("branch refs/heads/")
         elif line == "" and current_path and current_branch:
-            if current_path.is_relative_to(WORKTREES_HOME):
+            if current_path.is_relative_to(WORKTREES):
                 path_str = str(current_path)
                 if current_path.is_relative_to(home):
                     path_str = "~/" + str(current_path.relative_to(home))

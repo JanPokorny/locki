@@ -44,7 +44,11 @@ timed() {
 TMPDIR_ROOT=$(cd "$(mktemp -d /tmp/locki-e2e.XXXX)" && pwd -P)
 export HOME="$TMPDIR_ROOT/h"
 mkdir -p "$HOME"
-kill_locki_sshd() { local pf="$HOME/.locki/ssh/sshd.pid"; [ -f "$pf" ] && kill "$(cat "$pf")" 2>/dev/null || true; }
+export XDG_CONFIG_HOME="$TMPDIR_ROOT/xdg/config"
+export XDG_DATA_HOME="$TMPDIR_ROOT/xdg/data"
+export XDG_STATE_HOME="$TMPDIR_ROOT/xdg/state"
+export XDG_RUNTIME_DIR="$TMPDIR_ROOT/xdg/run"
+kill_locki_sshd() { local pf="$XDG_RUNTIME_DIR/locki/sshd.pid"; [ -f "$pf" ] && kill "$(cat "$pf")" 2>/dev/null || true; }
 kill_locki_sshd
 cleanup() { kill_locki_sshd; rm -rf "$TMPDIR_ROOT"; }
 trap cleanup EXIT
@@ -73,11 +77,11 @@ cd "$REPO"
 echo
 echo "Testing cold start + parallel VM creation..."
 
-cold_start=$(timed locki x --new auth echo 1) || true
+cold_start=$(timed locki x --create -b auth echo 1) || true
 echo "  cold start: ${cold_start}s"
 
 # branch b in parallel with a (VM already exists, but tests lock waiting)
-assert_output "locki x b runs" "2" locki x --new login echo 2
+assert_output "locki x b runs" "2" locki x --create -b login echo 2
 
 # ── cache persistence across invocations ─────────────────────────────────────
 
@@ -169,7 +173,7 @@ rm -f "$HOOKS_DIR/commit-msg"
 echo
 echo "Testing warm start..."
 
-warm_start=$(timed locki x --new release echo 3) || true
+warm_start=$(timed locki x --create -b release echo 3) || true
 echo "  warm start: ${warm_start}s"
 
 # ── hot start (existing container) ───────────────────────────────────────────
@@ -199,7 +203,7 @@ aarch64 = "images:ubuntu/24.04"
 x86_64 = "images:ubuntu/24.04"
 TOML
 
-assert_output "custom image container runs ubuntu" "Ubuntu" locki x --new custom-img cat /etc/os-release
+assert_output "custom image container runs ubuntu" "Ubuntu" locki x --create -b custom-img cat /etc/os-release
 rm -f "$REPO/locki.toml"
 
 # ── port forwarding ─────────────────────────────────────────────────────────
@@ -232,7 +236,7 @@ sleep 3
 assert_fail  "cleared forward is unreachable" bash -c "nc -4 -w2 127.0.0.1 9111"
 
 # Random host port with :container_port syntax
-random_output=$(locki port-forward -b login :9222 2>/dev/null)
+random_output=$(locki port-forward -b login :9222 2>/dev/null) || true
 random_host_port=$(echo "$random_output" | grep -oE '^[0-9]+')
 if [[ "$random_host_port" -ge 1024 ]]; then pass ":port assigns random host port >= 1024"; else fail ":port assigns random host port >= 1024 (got '$random_host_port')"; fi
 assert_output ":port output shows container port" ":9222" echo "$random_output"
@@ -244,9 +248,9 @@ assert_fail  "port < 1024 rejected" locki port-forward -b login 80
 # ── sandbox creation with --new ─────────────────────────────────────────────
 
 echo
-echo "Testing sandbox creation with --new..."
+echo "Testing sandbox creation with --create..."
 
-assert_output "--new creates sandbox" "create-ok" locki x --new test-create echo create-ok
+assert_output "--create creates sandbox" "create-ok" locki x --create -b test-create echo create-ok
 assert_fail "unknown substring rejects" locki x -b nonexistent-branch echo nope
 
 # ── worktree cleanup ─────────────────────────────────────────────────────────

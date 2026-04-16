@@ -16,7 +16,8 @@ import tempfile
 
 import click
 
-from locki.config import LIMA_HOME, LOCKI_HOME, WORKTREES_HOME, WORKTREES_META, load_config
+from locki.config import load_config
+from locki.paths import DATA, LIMA, RUNTIME, STATE, WORKTREES, WORKTREES_META
 from locki.utils import (
     current_worktree,
     file_lock,
@@ -49,7 +50,7 @@ CONTAINER_ENV = {
     "LEIN_HOME": "/var/cache/locki/lein",
     "MAVEN_OPTS": "-Dmaven.repo.local=/var/cache/locki/maven",
     "MISE_CACHE_DIR": "/var/cache/locki/mise",
-    "MISE_DATA_DIR": "/usr/share/mise",
+    "MISE_DATA": "/usr/share/mise",
     "MISE_INSTALL_PATH": "/usr/local/bin/mise",
     "MISE_NODE_VERIFY": "false",
     "MISE_TRUSTED_CONFIG_PATHS": "/",
@@ -107,11 +108,12 @@ def _gen_wt_id() -> str:
     return "".join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(8))
 
 
-@click.command("exec | x", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
-@click.option("-b", "--branch", default=None, help="Substring match on existing sandbox branch.")
-@click.option("-n", "--new", "new", is_flag=True, default=False, help="Create a new sandbox.")
+@click.command("exec | x", context_settings={"allow_extra_args": True, "ignore_unknown_options": True, "allow_interspersed_args": False})
+@click.option("-b", "--branch", default=None, help="Substring match on existing sandbox branch, or name prefix with --create.")
+@click.option("-c", "--create", is_flag=True, default=False, help="Create a new sandbox.")
+@click.option("-f", "--id-file", default=None, type=click.Path(), help="Write the generated sandbox ID to this file.")
 @click.pass_context
-def exec_cmd(ctx, branch, new):
+def exec_cmd(ctx, branch, create, id_file):
     """Run a command in the per-branch sandbox container.
 
     \b
@@ -119,14 +121,18 @@ def exec_cmd(ctx, branch, new):
       locki x bash                    # interactive shell (sandbox picker)
       locki x claude                  # run Claude Code
       locki x -b feat bash            # match sandbox by substring
-      locki x -n bash                 # create new sandbox
+      locki x -c bash                 # create new unnamed sandbox
+      locki x -c -b auth bash         # create new sandbox named "auth"
       locki x bash -c "echo hello"    # run a one-liner
     """
     click.echo(f"{click.style('ᚠ', fg='magenta', bold=True)} Entering a Locki sandbox.", err=True)
     wt_id: str | None = None
-    if new:
+    if create:
         wt_id = _gen_wt_id()
-        branch = f"unnamed#locki-{wt_id}"
+        name = branch or "unnamed"
+        branch = f"{name}#locki-{wt_id}"
+        if id_file:
+            pathlib.Path(id_file).write_text(wt_id)
     elif branch:
         branch = match_sandbox_branch(branch)
     else:
@@ -159,11 +165,10 @@ def exec_cmd(ctx, branch, new):
 
     git_root()  # fail fast if not in a git repo
 
-    LOCKI_HOME.mkdir(exist_ok=True)
-    LIMA_HOME.mkdir(exist_ok=True, parents=True)
-    WORKTREES_HOME.mkdir(parents=True, exist_ok=True)
+    LIMA.mkdir(exist_ok=True, parents=True)
+    WORKTREES.mkdir(parents=True, exist_ok=True)
 
-    sandbox_home = LOCKI_HOME / "home"
+    sandbox_home = DATA / "home"
     sandbox_home.mkdir(parents=True, exist_ok=True)
     if not (claude_json_file := sandbox_home / ".claude.json").exists():
         claude_json_file.write_text('{ "projects": { "/": { "hasTrustDialogAccepted": true } } }')
@@ -186,8 +191,8 @@ def exec_cmd(ctx, branch, new):
                 "base": ["template:fedora"],
                 "containerd": {"system": False, "user": False},
                 "mounts": [
-                    {"location": "~/.locki/worktrees", "writable": True},
-                    {"location": "~/.locki/home", "mountPoint": "/root/.locki/home", "writable": True},
+                    {"location": str(WORKTREES), "writable": True},
+                    {"location": str(sandbox_home), "mountPoint": "/root/.locki/home", "writable": True},
                 ],
                 "provision": [{"mode": "system", "script": vm_setup}],
             }
@@ -199,7 +204,6 @@ def exec_cmd(ctx, branch, new):
             run_command(
                 [limactl(), "--tty=false", "create", lima_yaml, "--mount-writable", "--name=locki"],
                 "Preparing VM",
-                env={"LIMA_HOME": str(LIMA_HOME)},
                 cwd="/",
                 check=False,
             )
@@ -208,10 +212,29 @@ def exec_cmd(ctx, branch, new):
         run_command(
             [limactl(), "--tty=false", "start", "locki"],
             "Starting VM",
-            env={"LIMA_HOME": str(LIMA_HOME)},
             cwd="/",
             check=False,
         )
+
+    # Verify the VM is actually running before proceeding
+    verify = run_command(
+        [limactl(), "list", "--json"],
+        "Verifying VM",
+        cwd="/",
+        check=False,
+        quiet=True,
+    )
+    vm_running = False
+    for line in verify.stdout.decode().splitlines():
+        try:
+            vm = json.loads(line)
+            if vm.get("name") == "locki" and vm.get("status") == "Running":
+                vm_running = True
+        except json.JSONDecodeError:
+            pass
+    if not vm_running:
+        logger.error("Lima VM failed to start. LIMA_HOME=%s", LIMA)
+        sys.exit(1)
 
     wt_path = find_worktree_for_branch(branch) if branch else current_worktree()
     if not wt_path:  # branch was provided but does not exit
@@ -229,7 +252,7 @@ def exec_cmd(ctx, branch, new):
 
         if not wt_id:
             wt_id = _gen_wt_id()
-        wt_path = WORKTREES_HOME / wt_id
+        wt_path = WORKTREES / wt_id
         wt_path.mkdir(parents=True, exist_ok=True)
 
         run_command(
@@ -274,7 +297,7 @@ def exec_cmd(ctx, branch, new):
             "Configuring auto push for new branches",
         )
 
-    wt_id = wt_path.relative_to(WORKTREES_HOME).parts[0]
+    wt_id = wt_path.relative_to(WORKTREES).parts[0]
 
     config = load_config(git_root())
 
@@ -302,7 +325,6 @@ def exec_cmd(ctx, branch, new):
                 run_command(
                     [limactl(), "copy", str(local_file), f"locki:/tmp/{tmp_name}"],
                     "Copying image into VM",
-                    env={"LIMA_HOME": str(LIMA_HOME)},
                     cwd="/",
                 )
                 run_in_vm(
@@ -352,15 +374,15 @@ def exec_cmd(ctx, branch, new):
         setup_script = (importlib.resources.files("locki") / "data" / "container-setup.sh").read_bytes()
         env_flags = [flag for k, v in CONTAINER_ENV.items() for flag in ("--env", f"{k}={v}")]
         run_in_vm(
-            ["incus", "exec", wt_id, *env_flags, "--env", f"LOCKI_WORKTREES_HOME={WORKTREES_HOME}", "--", "/bin/sh"],
+            ["incus", "exec", wt_id, *env_flags, "--env", f"LOCKI_WORKTREES_HOME={WORKTREES}", "--", "/bin/sh"],
             "Configuring container",
             input=setup_script,
         )
 
     # Start SSH proxy (sshd) for git/gh command forwarding
-    ssh_dir = LOCKI_HOME / "ssh"
+    ssh_dir = STATE / "ssh"
     ssh_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-    client_ssh_dir = LOCKI_HOME / "home" / ".ssh"
+    client_ssh_dir = DATA / "home" / ".ssh"
     client_ssh_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
     host_key = ssh_dir / "host_key"
     client_key = client_ssh_dir / "id_locki"
@@ -372,12 +394,20 @@ def exec_cmd(ctx, branch, new):
         )
     auth_keys = ssh_dir / "authorized_keys"
     locki_bin = shutil.which("locki") or f"{sys.executable} -m locki"
+    # Forward HOME and any XDG base-dir vars so self-service resolves the same paths.
+    # sshd strips env by default; only vars baked into the command= reach the child.
+    cmd_env = f"HOME={shlex.quote(str(pathlib.Path.home()))}"
+    for var in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR"):
+        val = os.environ.get(var)
+        if val:
+            cmd_env += f" {var}={shlex.quote(val)}"
     auth_keys.write_text(
-        f'command="HOME={shlex.quote(str(pathlib.Path.home()))} {locki_bin} self-service",no-port-forwarding,no-X11-forwarding,no-agent-forwarding '
+        f'command="{cmd_env} {locki_bin} self-service",no-port-forwarding,no-X11-forwarding,no-agent-forwarding '
         f"{client_key.with_suffix('.pub').read_text().strip()}\n"
     )
     auth_keys.chmod(0o600)
-    pid_file = ssh_dir / "sshd.pid"
+    RUNTIME.mkdir(parents=True, exist_ok=True)
+    pid_file = RUNTIME / "sshd.pid"
     sshd_running = False
     ssh_port = 0
     if pid_file.exists():
@@ -387,7 +417,7 @@ def exec_cmd(ctx, branch, new):
             match = re.search(r"^Port (\d+)", (ssh_dir / "sshd_config").read_text(), re.MULTILINE)
             if match:
                 ssh_port = int(match.group(1))
-        except ProcessLookupError, ValueError, PermissionError, FileNotFoundError:
+        except (ProcessLookupError, ValueError, PermissionError, FileNotFoundError):
             pass
     sshd_path = shutil.which("sshd")
     if sshd_path is None:
@@ -409,7 +439,6 @@ def exec_cmd(ctx, branch, new):
 
     forwarded_env = {"TERM", "COLORTERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION", "LANG", "SSH_TTY"}
 
-    os.environ["LIMA_HOME"] = str(LIMA_HOME)
     os.environ["LIMA_SHELLENV_ALLOW"] = ",".join(forwarded_env)
 
     result = subprocess.run(
@@ -446,5 +475,10 @@ def exec_cmd(ctx, branch, new):
     click.echo(f"{click.style('ᛃ', fg='cyan', bold=True)} Return to this worktree:", err=True)
     click.echo(f"{click.style('ᛃ', fg='cyan', bold=True)}      via AI: {click.style(f'locki ai{f" -b {wt_id}" if branch else ""}', fg='green')}" + (f" (or just {click.style('locki ai', fg='green')} and find it in the list)" if branch else ""), err=True)
     click.echo(f"{click.style('ᛃ', fg='cyan', bold=True)}   via shell: {click.style(f'locki x {f" -b {wt_id}" if branch else ""}', fg='green')}", err=True)
-    click.echo(f"{click.style('ᛃ', fg='cyan', bold=True)}     on disk: {click.style(f'~/.locki/worktrees/{wt_id}', fg='green')}", err=True)
+    wt_full = WORKTREES / wt_id
+    try:
+        wt_display = "~/" + str(wt_full.relative_to(pathlib.Path.home()))
+    except ValueError:
+        wt_display = str(wt_full)
+    click.echo(f"{click.style('ᛃ', fg='cyan', bold=True)}     on disk: {click.style(wt_display, fg='green')}", err=True)
     raise SystemExit(result.returncode)

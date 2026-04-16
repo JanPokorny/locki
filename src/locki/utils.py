@@ -14,8 +14,8 @@ from contextlib import contextmanager, nullcontext
 
 import click
 
-from locki.config import LIMA_HOME, LOCKI_HOME, WORKTREES_HOME, WORKTREES_META
 from locki.logging import print_log_tail
+from locki.paths import RUNTIME, WORKTREES, WORKTREES_META
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +51,7 @@ class AliasGroup(click.Group):
 
 @contextmanager
 def spinner(text: str):
+    is_tty = sys.stderr.isatty()
     stop = threading.Event()
     start = time.time()
 
@@ -66,19 +67,25 @@ def spinner(text: str):
         s = f" ({elapsed}s)" if elapsed < 60 else f" ({elapsed // 60}m{elapsed % 60}s)"
         return click.style(s, dim=True)
 
-    thread = threading.Thread(target=_spin, daemon=True)
-    thread.start()
+    if is_tty:
+        thread = threading.Thread(target=_spin, daemon=True)
+        thread.start()
+    else:
+        sys.stderr.write(f"\n[spinner] {text}")
+        sys.stderr.flush()
     try:
         yield
-        stop.set()
-        thread.join()
+        if is_tty:
+            stop.set()
+            thread.join()
         click.echo(
             f"\r{click.style('ᛝ', fg='green', bold=True)} {text.replace('ing ', 'ed ', count=1)}{_duration()} ",
             err=True,
         )
     except BaseException:
-        stop.set()
-        thread.join()
+        if is_tty:
+            stop.set()
+            thread.join()
         click.echo(f"\r{click.style('ᛞ', fg='red', bold=True)} {text} failed{_duration()}", err=True)
         raise
     finally:
@@ -143,7 +150,7 @@ def run_in_vm(
     return run_command(
         [limactl(), "shell", "--start", "--preserve-env", "--tty=false", "locki", "--", "sudo", "-E", *command],
         message,
-        env={"LIMA_HOME": str(LIMA_HOME)} | (env or {}),
+        env=env,
         cwd="/",
         input=input,
         check=check,
@@ -154,8 +161,8 @@ def run_in_vm(
 @contextmanager
 def file_lock(name: str, wait_message: str):
     """Acquire an exclusive file lock."""
-    LOCKI_HOME.mkdir(exist_ok=True)
-    lock_path = LOCKI_HOME / f"{name}.lock"
+    RUNTIME.mkdir(parents=True, exist_ok=True)
+    lock_path = RUNTIME / f"{name}.lock"
     fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR)
     try:
         try:
@@ -172,8 +179,8 @@ def file_lock(name: str, wait_message: str):
 @functools.cache
 def git_root() -> pathlib.Path:
     cwd = pathlib.Path.cwd().resolve()
-    if cwd.is_relative_to(WORKTREES_HOME.resolve()):
-        wt_path = WORKTREES_HOME / cwd.relative_to(WORKTREES_HOME).parts[0]
+    if cwd.is_relative_to(WORKTREES.resolve()):
+        wt_path = WORKTREES / cwd.relative_to(WORKTREES).parts[0]
         meta_git = WORKTREES_META / wt_path.name / ".git"
         if not meta_git.exists():
             logger.error("No worktree metadata found for '%s'.", wt_path.name)
@@ -202,9 +209,9 @@ def git_root() -> pathlib.Path:
 def current_worktree() -> pathlib.Path | None:
     """If cwd is inside a Locki-managed worktree, return its path."""
     cwd = pathlib.Path.cwd().resolve()
-    if not cwd.is_relative_to(WORKTREES_HOME.resolve()):
+    if not cwd.is_relative_to(WORKTREES.resolve()):
         return None
-    return WORKTREES_HOME / cwd.relative_to(WORKTREES_HOME).parts[0]
+    return WORKTREES / cwd.relative_to(WORKTREES).parts[0]
 
 
 def resolve_branch(branch: str | None) -> tuple[str, pathlib.Path]:
@@ -220,7 +227,7 @@ def resolve_branch(branch: str | None) -> tuple[str, pathlib.Path]:
     if wt_path is None:
         logger.error("No branch specified and not inside a locki worktree.")
         sys.exit(1)
-    return wt_path.relative_to(WORKTREES_HOME).parts[0], wt_path
+    return wt_path.relative_to(WORKTREES).parts[0], wt_path
 
 
 def find_worktree_for_branch(branch: str) -> pathlib.Path | None:
@@ -237,7 +244,7 @@ def find_worktree_for_branch(branch: str) -> pathlib.Path | None:
             line.startswith("branch refs/heads/")
             and line.removeprefix("branch refs/heads/") == branch
             and current_path
-            and current_path.is_relative_to(WORKTREES_HOME)
+            and current_path.is_relative_to(WORKTREES)
         ):
             return current_path
     return None
@@ -255,7 +262,7 @@ def list_locki_worktree_branches() -> list[str]:
     for line in result.stdout.splitlines():
         if line.startswith("worktree "):
             current_path = pathlib.Path(line.split(" ", 1)[1])
-        elif line.startswith("branch refs/heads/") and current_path and current_path.is_relative_to(WORKTREES_HOME):
+        elif line.startswith("branch refs/heads/") and current_path and current_path.is_relative_to(WORKTREES):
             branches.append(line.removeprefix("branch refs/heads/"))
     return branches
 

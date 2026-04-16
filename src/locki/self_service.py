@@ -6,7 +6,7 @@ import sys
 
 import click
 
-from locki.config import WORKTREES_HOME, WORKTREES_META
+from locki.paths import WORKTREES, WORKTREES_META
 
 _required = bool               # --flag=<non-empty value>
 _flag = {None, ""}        # optional boolean flag (--flag or absent, no value)
@@ -191,7 +191,7 @@ def self_service_cmd():
         parts = shlex.split(cmd)
     except ValueError as e:
         print(f"Failed to parse command: {e}", file=sys.stderr)
-        raise SystemExit(1)
+        raise SystemExit(1) from e
 
     if len(parts) < 2:
         print("Usage: <cwd> <exe> [args...]", file=sys.stderr)
@@ -201,10 +201,10 @@ def self_service_cmd():
 
     # Validate worktree
     cwd = pathlib.Path(cwd_str).resolve()
-    if not cwd.is_relative_to(WORKTREES_HOME.resolve()):
+    if not cwd.is_relative_to(WORKTREES.resolve()):
         print(f"Not a locki worktree: {cwd_str!r}", file=sys.stderr)
         raise SystemExit(1)
-    wt_root = WORKTREES_HOME / cwd.relative_to(WORKTREES_HOME).parts[0]
+    wt_root = WORKTREES / cwd.relative_to(WORKTREES).parts[0]
     wt_id = wt_root.name
     meta_git = WORKTREES_META / wt_id / ".git"
     dot_git = wt_root / ".git"

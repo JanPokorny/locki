@@ -6,7 +6,7 @@ import sys
 
 import click
 
-from locki.config import LOG_DIR
+from locki.paths import LOG
 
 _log_file_path: pathlib.Path | None = None
 
@@ -29,16 +29,16 @@ def setup_logging():
     stderr_handler.setFormatter(_StderrFormatter())
     root.addHandler(stderr_handler)
 
-    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    LOG.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    _log_file_path = LOG_DIR / f"{timestamp}-{os.getpid()}.log"
+    _log_file_path = LOG / f"{timestamp}-{os.getpid()}.log"
     file_handler = logging.FileHandler(_log_file_path)
     file_handler.setLevel(logging.DEBUG)
     file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
     root.addHandler(file_handler)
 
     # Clean up old log files, keep the 20 most recent
-    log_files = sorted(LOG_DIR.glob("*.log"), key=lambda f: f.stat().st_mtime, reverse=True)
+    log_files = sorted(LOG.glob("*.log"), key=lambda f: f.stat().st_mtime, reverse=True)
     for old_log in log_files[20:]:
         old_log.unlink(missing_ok=True)
 
