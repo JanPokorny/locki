@@ -16,7 +16,7 @@ def _ask_harness() -> str:
         click.echo(
             f"{click.style('ᛞ', fg='red', bold=True)} No default AI harness configured. "
             f"Run {click.style('locki ai', fg='green')} interactively first to pick one, "
-            f"or configure e.g. {click.style('ai.harness = \"claude\"', fg='yellow')} in {click.style(str(USER_CONFIG), fg='cyan')}.",
+            f"or configure e.g. {click.style('ai.harness = "claude"', fg='yellow')} in {click.style(str(USER_CONFIG), fg='cyan')}.",
             err=True,
         )
         sys.exit(1)
@@ -67,9 +67,7 @@ def ai_cmd(ctx, branch, create, id_file):
             from InquirerPy import inquirer
             from InquirerPy.base.control import Choice
 
-            choices = [Choice(value=None, name="(create new)")] + [
-                Choice(value=b, name=b) for b in sorted(wt_branches)
-            ]
+            choices = [Choice(value=None, name="(create new)")] + [Choice(value=b, name=b) for b in sorted(wt_branches)]
             selected = inquirer.fuzzy(
                 message="Select a sandbox:",
                 choices=choices,
@@ -97,9 +95,7 @@ def ai_cmd(ctx, branch, create, id_file):
             if wt_path:
                 wt_id = wt_path.relative_to(WORKTREES).parts[0]
                 projects_dir = DATA / "home" / ".claude" / "projects"
-                if projects_dir.is_dir() and any(
-                    d.name.endswith(wt_id) for d in projects_dir.iterdir() if d.is_dir()
-                ):
+                if projects_dir.is_dir() and any(d.name.endswith(wt_id) for d in projects_dir.iterdir() if d.is_dir()):
                     ctx.args.extend(RESUME_ARGS["claude"])
         else:
             ctx.args.extend(RESUME_ARGS.get(harness, []))

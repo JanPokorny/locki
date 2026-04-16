@@ -8,8 +8,8 @@ import click
 
 from locki.paths import WORKTREES, WORKTREES_META
 
-_required = bool               # --flag=<non-empty value>
-_flag = {None, ""}        # optional boolean flag (--flag or absent, no value)
+_required = bool  # --flag=<non-empty value>
+_flag = {None, ""}  # optional boolean flag (--flag or absent, no value)
 
 _diff_flags = {"staged": _flag, "name_only": _flag, "stat": _flag, "name_status": _flag}
 _log_flags = {"oneline": _flag, "format": ..., "max_count": ..., "all": _flag}
@@ -43,7 +43,22 @@ RULES = [
     ("git", "stash", "apply", str),
     ("git", "stash", "drop"),
     ("git", "stash", "drop", str),
-    ("gh", "pr", "create", {"title": _required, "body": ..., "base": ..., "draft": _flag, "fill": _flag, "reviewer": ..., "label": ..., "assignee": ..., "head": ...}),
+    (
+        "gh",
+        "pr",
+        "create",
+        {
+            "title": _required,
+            "body": ...,
+            "base": ...,
+            "draft": _flag,
+            "fill": _flag,
+            "reviewer": ...,
+            "label": ...,
+            "assignee": ...,
+            "head": ...,
+        },
+    ),
     ("gh", "pr", "view"),
     ("gh", "pr", "view", str.isdigit),
     ("gh", "pr", "list"),
@@ -74,27 +89,39 @@ def matches(rule: tuple, positionals: list[str], flags: dict[str, str]) -> bool:
 
     has_varargs = ... in spec_args
     if has_varargs:
-        fixed_specs = spec_args[:spec_args.index(...)]
+        fixed_specs = spec_args[: spec_args.index(...)]
         if len(positionals) < len(fixed_specs):
             return False
-        for val, spec in zip(positionals[:len(fixed_specs)], fixed_specs):
-            if isinstance(spec, str) and val != spec:   return False
-            if isinstance(spec, set) and val not in spec: return False
-            if callable(spec) and not spec(val):          return False
+        for val, spec in zip(positionals[: len(fixed_specs)], fixed_specs):
+            if isinstance(spec, str) and val != spec:
+                return False
+            if isinstance(spec, set) and val not in spec:
+                return False
+            if callable(spec) and not spec(val):
+                return False
     else:
         if len(positionals) != len(spec_args):
             return False
         for val, spec in zip(positionals, spec_args):
-            if isinstance(spec, str) and val != spec:   return False
-            if isinstance(spec, set) and val not in spec: return False
-            if callable(spec) and not spec(val):          return False
+            if isinstance(spec, str) and val != spec:
+                return False
+            if isinstance(spec, set) and val not in spec:
+                return False
+            if callable(spec) and not spec(val):
+                return False
 
     if any(key not in spec_flags for key in flags):
         return False
     for key, spec in spec_flags.items():
         val = flags.get(key)
-        if spec is ...:                              continue
-        if (callable(spec) and not spec(val)) or (isinstance(spec, set) and val not in spec) or (isinstance(spec, str) and val != spec):         return False
+        if spec is ...:
+            continue
+        if (
+            (callable(spec) and not spec(val))
+            or (isinstance(spec, set) and val not in spec)
+            or (isinstance(spec, str) and val != spec)
+        ):
+            return False
     return True
 
 
@@ -233,8 +260,7 @@ def self_service_cmd():
 
     # Command-specific handlers
     if exe == "git" and (
-        positionals[:1] == ["switch"]
-        or (positionals[:1] == ["branch"] and "show_current" not in flags)
+        positionals[:1] == ["switch"] or (positionals[:1] == ["branch"] and "show_current" not in flags)
     ):
         _validate_branch_arg(wt_id, [exe, *positionals])
         os.execvp(exe, [exe, *argv[1:]])
@@ -242,7 +268,12 @@ def self_service_cmd():
         _handle_stash_push(wt_id, flags)
     elif exe == "git" and positionals[:2] == ["stash", "list"]:
         _handle_stash_list(wt_id)
-    elif exe == "git" and positionals[:1] == ["stash"] and len(positionals) >= 2 and positionals[1] in ("pop", "apply", "drop"):
+    elif (
+        exe == "git"
+        and positionals[:1] == ["stash"]
+        and len(positionals) >= 2
+        and positionals[1] in ("pop", "apply", "drop")
+    ):
         _handle_stash_pop_apply_drop(wt_id, [exe, *positionals])
     elif exe == "locki":
         os.execvp(sys.executable, [sys.executable, "-m", "locki", *argv[1:]])

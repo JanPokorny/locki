@@ -108,8 +108,13 @@ def _gen_wt_id() -> str:
     return "".join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(8))
 
 
-@click.command("exec | x", context_settings={"allow_extra_args": True, "ignore_unknown_options": True, "allow_interspersed_args": False})
-@click.option("-b", "--branch", default=None, help="Substring match on existing sandbox branch, or name prefix with --create.")
+@click.command(
+    "exec | x",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True, "allow_interspersed_args": False},
+)
+@click.option(
+    "-b", "--branch", default=None, help="Substring match on existing sandbox branch, or name prefix with --create."
+)
 @click.option("-c", "--create", is_flag=True, default=False, help="Create a new sandbox.")
 @click.option("-f", "--id-file", default=None, type=click.Path(), help="Write the generated sandbox ID to this file.")
 @click.pass_context
@@ -417,7 +422,7 @@ def exec_cmd(ctx, branch, create, id_file):
             match = re.search(r"^Port (\d+)", (ssh_dir / "sshd_config").read_text(), re.MULTILINE)
             if match:
                 ssh_port = int(match.group(1))
-        except (ProcessLookupError, ValueError, PermissionError, FileNotFoundError):
+        except ProcessLookupError, ValueError, PermissionError, FileNotFoundError:
             pass
     sshd_path = shutil.which("sshd")
     if sshd_path is None:
@@ -473,8 +478,15 @@ def exec_cmd(ctx, branch, create, id_file):
     click.echo()
     click.echo(f"{click.style('ᛟ', fg='magenta', bold=True)} Exited Locki sandbox.", err=True)
     click.echo(f"{click.style('ᛃ', fg='cyan', bold=True)} Return to this worktree:", err=True)
-    click.echo(f"{click.style('ᛃ', fg='cyan', bold=True)}      via AI: {click.style(f'locki ai{f" -b {wt_id}" if branch else ""}', fg='green')}" + (f" (or just {click.style('locki ai', fg='green')} and find it in the list)" if branch else ""), err=True)
-    click.echo(f"{click.style('ᛃ', fg='cyan', bold=True)}   via shell: {click.style(f'locki x {f" -b {wt_id}" if branch else ""}', fg='green')}", err=True)
+    click.echo(
+        f"{click.style('ᛃ', fg='cyan', bold=True)}      via AI: {click.style(f'locki ai{f" -b {wt_id}" if branch else ""}', fg='green')}"
+        + (f" (or just {click.style('locki ai', fg='green')} and find it in the list)" if branch else ""),
+        err=True,
+    )
+    click.echo(
+        f"{click.style('ᛃ', fg='cyan', bold=True)}   via shell: {click.style(f'locki x {f" -b {wt_id}" if branch else ""}', fg='green')}",
+        err=True,
+    )
     wt_full = WORKTREES / wt_id
     try:
         wt_display = "~/" + str(wt_full.relative_to(pathlib.Path.home()))
