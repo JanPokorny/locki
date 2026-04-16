@@ -126,7 +126,7 @@ def exec_cmd(ctx, branch, new):
     wt_id: str | None = None
     if new:
         wt_id = _gen_wt_id()
-        branch = f"default#locki-{wt_id}"
+        branch = f"new#locki-{wt_id}"
     elif branch:
         branch = match_sandbox_branch(branch)
     else:
@@ -153,7 +153,7 @@ def exec_cmd(ctx, branch, new):
 
             if selected is None:
                 wt_id = _gen_wt_id()
-                branch = f"default#locki-{wt_id}"
+                branch = f"new#locki-{wt_id}"
             else:
                 branch = selected
 
