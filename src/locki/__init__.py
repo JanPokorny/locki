@@ -1,13 +1,18 @@
+import os
+
 import click
 
 from locki.ai import ai_cmd
 from locki.logging import setup_logging
+from locki.paths import LIMA
 from locki.port_forward import port_forward_cmd
 from locki.self_service import self_service_cmd
 from locki.shell import exec_cmd
 from locki.utils import AliasGroup
 from locki.vm import vm_app
 from locki.worktree import list_cmd, remove_cmd, stop_cmd
+
+os.environ["LIMA_HOME"] = str(LIMA)  # limactl reads this; set early so every subprocess inherits it
 
 setup_logging()
 app = click.group(

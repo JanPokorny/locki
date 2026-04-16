@@ -16,5 +16,3 @@ WORKTREES = DATA / "worktrees"
 WORKTREES_META = DATA / "worktrees-meta"
 LOG = STATE / "logs"
 USER_CONFIG = CONFIG / "config.toml"
-
-os.environ["LIMA_HOME"] = str(LIMA)  # limactl reads this; set early so every subprocess inherits it
