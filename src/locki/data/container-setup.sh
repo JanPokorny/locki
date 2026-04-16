@@ -33,7 +33,7 @@ The name suffix `#locki-<worktree-dirname>` must be present on all branches you 
 
   locki port-forward :<port> [:<port> ...]
 
-When you start a network service the user should access, forward the port to host. The output shows `<host_port>:<sandbox_port>`. Give the user a full URL with the host-side port, e.g. `http://localhost:<host_port>`.)
+When you start a network service the user should access, forward the port to host. Host port will be picked automatically and shown in output as `<host_port>:<sandbox_port>`. Give the user a full URL with the host port, e.g. `http://localhost:<host_port>`.)
 
 # Startup checklist
 
