@@ -101,16 +101,17 @@ Case study: [Kagenti ADK](https://github.com/kagenti/adk) uses Locki to run a fu
 
 1. Install: `uv tool install locki`. ([Install uv](https://docs.astral.sh/uv/getting-started/installation/) first if you don't have it.)
 1. If you're on Linux, also install [OpenSSH](https://repology.org/project/openssh/versions) (usually preinstalled) and [QEMU](https://www.qemu.org/download/#linux).
-1. `cd` to your Git repository and run: `locki x claude`
+1. `cd` to your Git repository and run: `locki ai`
 
     <small>
 
-    (`locki x` runs any command sandboxed. In addition to `claude`, also `gemini`, `codex`, and `opencode` are preinstalled. Use `locki x` alone to open a shell, where you can use `mise` and `dnf` to install anything you want.)
+    (Use `locki x` alone to open a regular shell instead.)
 
     </small>
 1. First start takes longer, wait a few minutes for the VM to boot.
 1. Follow prompts to log in to the AI CLI. Login will be persisted across sandboxes.
-1. Build! Your agent is already instructed on how to behave in the sandbox. 
+1. Build! Your agent is already instructed on how to behave in the sandbox.
+1. Run `locki ai` again to open an interactive selector: continue existing session, or start a new one.
 1. Once happy, commit and push your changes. Ask the agent, or do this manually for more control.
 1. After merging the branch, just delete the worktree from your IDE and Locki will clean up the sandbox.
 
