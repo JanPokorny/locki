@@ -14,7 +14,8 @@ def _ask_harness() -> str:
     if not sys.stdin.isatty():
         click.echo(
             f"{click.style('ᛞ', fg='red', bold=True)} No default AI harness configured. "
-            "Run `locki ai` interactively first to pick one.",
+            f"Run {click.style('locki ai', fg='green')} interactively first to pick one, "
+            f"or configure e.g. {click.style('ai.harness = "claude"', fg='yellow')} in {click.style('~/.locki/config.toml', fg='cyan')}.",
             err=True,
         )
         sys.exit(1)

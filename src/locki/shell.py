@@ -443,14 +443,8 @@ def exec_cmd(ctx, branch, new):
 
     click.echo()
     click.echo(f"{click.style('ᛟ', fg='magenta', bold=True)} Exited Locki sandbox.", err=True)
-    hint = f" -b {wt_id}" if branch else ""
-    click.echo(
-        f"{click.style('ᛃ', fg='cyan', bold=True)} Return to this sandbox: {click.style(f'locki x{hint}', fg='green')}",
-        err=True,
-    )
-    if ctx.args and (resume_arg := {"claude": "-c", "gemini": "-r", "codex": "resume"}.get(ctx.args[0])):
-        click.echo(
-            f"{click.style('ᛃ', fg='cyan', bold=True)} Continue conversation:  {click.style(f'locki x{hint} {ctx.args[0]} {resume_arg}', fg='green')}",
-            err=True,
-        )
+    click.echo(f"{click.style('ᛃ', fg='cyan', bold=True)} Return to this worktree:", err=True)
+    click.echo(f"{click.style('ᛃ', fg='cyan', bold=True)}      via AI: {click.style(f'locki ai{f" -b {wt_id}" if branch else ""}', fg='green')}" + (f" (or just {click.style('locki ai', fg='green')} and find it in the list)" if branch else ""), err=True)
+    click.echo(f"{click.style('ᛃ', fg='cyan', bold=True)}   via shell: {click.style(f'locki x {f" -b {wt_id}" if branch else ""}', fg='green')}", err=True)
+    click.echo(f"{click.style('ᛃ', fg='cyan', bold=True)}     on disk: {click.style(f'~/.locki/worktrees/{wt_id}', fg='green')}", err=True)
     raise SystemExit(result.returncode)
