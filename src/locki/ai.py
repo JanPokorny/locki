@@ -1,37 +1,13 @@
 import sys
 
 import click
-import tomlkit
 
-from locki.config import LOCKI_HOME, WORKTREES_HOME
+from locki.config import LOCKI_HOME, USER_CONFIG_PATH, WORKTREES_HOME, load_config, save_user_config
 from locki.shell import exec_cmd
 from locki.utils import find_worktree_for_branch, git_root, list_locki_worktree_branches, match_sandbox_branch
 
 HARNESSES = ["claude", "gemini", "codex", "opencode"]
 RESUME_ARGS = {"claude": ["-c"], "gemini": ["-r"], "codex": ["resume"]}
-CONFIG_PATH = LOCKI_HOME / "config.toml"
-
-
-def _load_harness() -> str | None:
-    if not CONFIG_PATH.exists():
-        return None
-    try:
-        data = tomlkit.loads(CONFIG_PATH.read_text())
-        harness = data.get("ai", {}).get("harness")
-        if harness in HARNESSES:
-            return harness
-    except Exception:
-        pass
-    return None
-
-
-def _save_harness(harness: str) -> None:
-    LOCKI_HOME.mkdir(parents=True, exist_ok=True)
-    data = tomlkit.loads(CONFIG_PATH.read_text()) if CONFIG_PATH.exists() else tomlkit.document()
-    if "ai" not in data:
-        data.add("ai", tomlkit.table())
-    data["ai"]["harness"] = harness
-    CONFIG_PATH.write_text(tomlkit.dumps(data))
 
 
 def _ask_harness() -> str:
@@ -51,10 +27,10 @@ def _ask_harness() -> str:
         choices=[Choice(value=h, name=h) for h in HARNESSES],
     ).execute()
 
-    _save_harness(selected)
+    save_user_config("ai", "harness", selected)
     click.echo(
         f"{click.style('ᛝ', fg='green', bold=True)} Saved default harness "
-        f"{click.style(selected, fg='green')} to {CONFIG_PATH}",
+        f"{click.style(selected, fg='green')} to {USER_CONFIG_PATH}",
         err=True,
     )
     return selected
@@ -73,7 +49,8 @@ def ai_cmd(ctx, branch, new):
       locki ai -b feat                # resume in existing sandbox
       locki ai -n                     # new sandbox, fresh conversation
     """
-    harness = _load_harness()
+    config = load_config(git_root())
+    harness = config.ai.harness if config.ai.harness in HARNESSES else None
     if harness is None:
         harness = _ask_harness()
 
@@ -106,8 +83,6 @@ def ai_cmd(ctx, branch, new):
                 err=True,
             )
             sys.exit(1)
-
-    git_root()  # fail fast if not in a git repo
 
     # Build the command args that exec_cmd will run inside the container
     ctx.args = [harness]
