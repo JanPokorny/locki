@@ -1,6 +1,6 @@
 [project]
 name = "locki"
-version = "0.0.8"
+version = "0.0.9"
 description = "AI sandboxing without the taste of sand"
 readme = "README.md"
 requires-python = ">=3.11,<3.15"
