@@ -125,7 +125,7 @@ Case study: [Kagenti ADK](https://github.com/kagenti/adk) uses Locki to run a fu
 
 ## Pro-tips for power users
 
-- `locki x` opens an interactive picker to select an existing sandbox or create a new one. Use `locki x -n` to create a new sandbox non-interactively. Use `locki x -b <substring>` to match an existing sandbox by any part of its branch name (e.g. the branch name or the 8-char ID). `cd` to a worktree folder (`~/.locki/worktrees/...`) to operate on it directly.
+- `locki x` opens an interactive picker to select an existing sandbox or create a new one. Use `locki x -c` to create a new sandbox non-interactively. Use `locki x -m <substring>` to match an existing sandbox by any part of its branch name (e.g. the branch name or the 8-char ID). `cd` to a worktree folder (`~/.locki/worktrees/...`) to operate on it directly.
 
 - Editors like VSCode show worktrees in the sidebar, useful as a quick UI for reviewing and modifying changes.
   *(⚠️ VSCode 1.115.0+ requires setting `"git.detectWorktrees": true` for this to work.)*
@@ -134,7 +134,7 @@ Case study: [Kagenti ADK](https://github.com/kagenti/adk) uses Locki to run a fu
 
 - Want to use custom AI configuration in the VM -- instructions, skills, MCP servers, ...? Sandboxes share a home folder accessible at `~/.locki/home` on host. For example, you can run `cp ~/.claude/CLAUDE.md ~/.locki/home/.claude/CLAUDE.md` to copy your custom instructions for use in sandboxes.
 
-- Forward ports from a sandbox to your host: `locki pf -b <substring> 8080` or `locki pf -b <substring> :3000` for a random host port. Use `--clear` to remove all forwards. Agent in sandbox can forward via self-service, just ask them.
+- Forward ports from a sandbox to your host: `locki pf -m <substring> 8080` or `locki pf -m <substring> :3000` for a random host port. Use `--clear` to remove all forwards. Agent in sandbox can forward via self-service, just ask them.
 
 - Using Git hooks? Locki worktrees are automatically configured to run these inside the sandbox, even if you run `git` from outside. You won't be surprised by a `.venv` or `node_modules` containing incompatible binaries.
 
