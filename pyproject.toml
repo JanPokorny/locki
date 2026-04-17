@@ -34,6 +34,10 @@ lint.select = [
 lint.ignore = ["E501"]
 force-exclude = true
 
+[tool.pyrefly]
+project_includes = ["src"]
+python_version = "3.14"
+
 [tool.uv]
 exclude-newer = "P7D"
 exclude-newer-package = {}
