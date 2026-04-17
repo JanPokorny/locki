@@ -105,7 +105,7 @@ Case study: [Kagenti ADK](https://github.com/kagenti/adk) uses Locki to run a fu
 
     <small>
 
-    (Use `locki x` alone to open a regular shell instead.)
+    (Supported harnesses: `claude`, `gemini`, `codex`, `opencode`.)
 
     </small>
 1. First start takes longer, wait a few minutes for the VM to boot.
@@ -117,7 +117,7 @@ Case study: [Kagenti ADK](https://github.com/kagenti/adk) uses Locki to run a fu
 
     <small>
 
-    (Or do it manually with: `locki rm`)
+    (Or do it manually with: `locki remove`)
 
     </small>
 
@@ -125,9 +125,9 @@ Case study: [Kagenti ADK](https://github.com/kagenti/adk) uses Locki to run a fu
 
 ## Pro-tips for power users
 
-- `locki x` opens an interactive picker to select an existing sandbox or create a new one. Use `locki x -c` to create a new sandbox non-interactively. Use `locki x -m <substring>` to match an existing sandbox by any part of its branch name (e.g. the branch name or the 8-char ID). `cd` to a worktree folder (`~/.local/share/locki/worktrees/...`) to operate on it directly. Run `locki ls` to list Locki worktrees in the current repo.
+- `locki exec` runs a command inside a sandbox (e.g. `locki exec bash` for an interactive shell, or `locki exec pytest` to one-shot a command). Without a command it opens a picker to select an existing sandbox or create a new one. Use `locki exec -c` to create a new sandbox non-interactively, or `locki exec -m <substring>` to match an existing sandbox by any part of its branch name (e.g. the branch name or the 8-char ID). `cd` to a worktree folder (`~/.local/share/locki/worktrees/...`) to operate on it directly. Run `locki list` to see Locki worktrees in the current repo.
 
-- Supported AI harnesses: `claude`, `gemini`, `codex`, `opencode`. First `locki ai` run prompts you to pick a default, saved to `~/.config/locki/config.toml` (editable under `[ai] harness = "..."`).
+- The first `locki ai` run prompts you to pick a default harness; change it later in `~/.config/locki/config.toml` under `[ai] harness = "..."`.
 
 - Editors like VSCode show worktrees in the sidebar, useful as a quick UI for reviewing and modifying changes.
   *(⚠️ VSCode 1.115.0+ requires setting `"git.detectWorktrees": true` for this to work.)*
@@ -136,7 +136,7 @@ Case study: [Kagenti ADK](https://github.com/kagenti/adk) uses Locki to run a fu
 
 - Want to use custom AI configuration in the VM -- instructions, skills, MCP servers, ...? Sandboxes share a home folder accessible at `~/.local/share/locki/home` on host (or `$XDG_DATA_HOME/locki/home`). For example, you can run `cp ~/.claude/CLAUDE.md ~/.local/share/locki/home/.claude/CLAUDE.md` to copy your custom instructions for use in sandboxes.
 
-- Forward ports from a sandbox to your host: `locki pf -m <substring> 8080` or `locki pf -m <substring> :3000` for a random host port. Use `--clear` to remove all forwards. Agent in sandbox can forward via self-service, just ask them.
+- Forward ports from a sandbox to your host: `locki port-forward -m <substring> 8080` or `locki port-forward -m <substring> :3000` for a random host port. Use `--clear` to remove all forwards. Agent in sandbox can forward via self-service, just ask them.
 
 - Using Git hooks? Locki worktrees are automatically configured to run these inside the sandbox, even if you run `git` from outside. You won't be surprised by a `.venv` or `node_modules` containing incompatible binaries.
 
