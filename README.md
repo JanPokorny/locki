@@ -125,7 +125,9 @@ Case study: [Kagenti ADK](https://github.com/kagenti/adk) uses Locki to run a fu
 
 ## Pro-tips for power users
 
-- `locki x` opens an interactive picker to select an existing sandbox or create a new one. Use `locki x -c` to create a new sandbox non-interactively. Use `locki x -m <substring>` to match an existing sandbox by any part of its branch name (e.g. the branch name or the 8-char ID). `cd` to a worktree folder (`~/.local/share/locki/worktrees/...`) to operate on it directly.
+- `locki x` opens an interactive picker to select an existing sandbox or create a new one. Use `locki x -c` to create a new sandbox non-interactively. Use `locki x -m <substring>` to match an existing sandbox by any part of its branch name (e.g. the branch name or the 8-char ID). `cd` to a worktree folder (`~/.local/share/locki/worktrees/...`) to operate on it directly. Run `locki ls` to list Locki worktrees in the current repo.
+
+- Supported AI harnesses: `claude`, `gemini`, `codex`, `opencode`. First `locki ai` run prompts you to pick a default, saved to `~/.config/locki/config.toml` (editable under `[ai] harness = "..."`).
 
 - Editors like VSCode show worktrees in the sidebar, useful as a quick UI for reviewing and modifying changes.
   *(⚠️ VSCode 1.115.0+ requires setting `"git.detectWorktrees": true` for this to work.)*
@@ -155,7 +157,7 @@ Case study: [Kagenti ADK](https://github.com/kagenti/adk) uses Locki to run a fu
 
 ## Notes on security
 
-Locki uses a single Lima VM which can only access the `~/.local/share/locki/worktrees` and `~/.local/share/locki/home` folders (honoring `$XDG_DATA_HOME`), which forms the security boundary. The sandboxed programs can read and write to these folders, and also access anything on the internet and local network. Furthermore, an allowlist of `git` and `gh` commands is used to offer a guest-to-host SSH server. `.git` files are checked for tampering when hooks are executed against them.
+Locki uses a single Lima VM which can only access the `~/.local/share/locki/worktrees` and `~/.local/share/locki/home` folders (honoring `$XDG_DATA_HOME`), which forms the security boundary. The sandboxed programs can read and write to these folders, and also access anything on the internet and local network. Furthermore, a guest-to-host SSH server exposes a limited set of `git` and `gh` subcommands, with write access restricted to the sandbox's own namespaced branches and stashes (so an agent in one sandbox cannot alter another sandbox's branch, the main branch, or unrelated stashes). `.git` files are checked for tampering when hooks are executed against them.
 
 Locki is designed to provide protection for the host operating system and files from being messed up by a malfunctioning AI agent. There is no exfiltration protection, so be aware that API keys exposed to the agents need to be treated as potentially exposed and disposable, with limited scope. (This is no different from running the agent locally, just specifying that Locki does not help here. Use a dedicated solution like [OneCLI](https://github.com/onecli/onecli) if interested.)
 
