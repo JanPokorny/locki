@@ -100,8 +100,7 @@ def ai_cmd(ctx, match, select, create, id_file):
                 branch = selected
         else:
             click.echo(
-                f"{click.style('ᛞ', fg='red', bold=True)} No branch specified. "
-                "Use -m <query> in non-interactive mode.",
+                f"{click.style('ᛞ', fg='red', bold=True)} No branch specified. Use -m <query> in non-interactive mode.",
                 err=True,
             )
             sys.exit(1)

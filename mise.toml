@@ -6,14 +6,36 @@ yq = "latest"
 [settings]
 task.disable_spec_from_run_scripts = true
 
+[hooks]
+postinstall = ["{{ mise_bin }} setup"]
+
 [env]
 UV_PYTHON_PREFERENCE = "only-managed"
 
 # setup
 
 [tasks.setup]
+depends = ["setup:*"]
+
+[tasks."setup:uv"]
+hide = true
 run = "uv sync --all-extras --dev"
 sources = ["uv.lock", "pyproject.toml"]
+
+[tasks."setup:git-hooks"]
+hide = true
+run = """
+#!/bin/bash
+test ! -d .git && exit 0
+printf '#!/bin/sh\nmise run git-hooks:pre-commit' >.git/hooks/pre-commit <<'HOOK'
+chmod +x .git/hooks/pre-commit
+"""
+
+# git hooks
+
+[tasks."git-hooks:pre-commit"]
+hide = true
+depends = ["check"]
 
 # check
 

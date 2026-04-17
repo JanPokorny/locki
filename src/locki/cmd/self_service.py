@@ -1,6 +1,5 @@
 import os
 import pathlib
-import re
 import shlex
 import subprocess
 import sys
@@ -35,6 +34,7 @@ def _is_pr_comments_api_path(path: str) -> bool:
         and parts[4].isdigit()
         and parts[5] == "comments"
     )
+
 
 RULES = [
     # ── git read-only ────────────────────────────────────────────────────────
@@ -134,7 +134,7 @@ def matches(rule: tuple, positionals: list[str], flags: dict[str, str]) -> bool:
         fixed_specs = spec_args[: spec_args.index(...)]
         if len(positionals) < len(fixed_specs):
             return False
-        for val, spec in zip(positionals[: len(fixed_specs)], fixed_specs):
+        for val, spec in zip(positionals[: len(fixed_specs)], fixed_specs, strict=True):
             if isinstance(spec, str) and val != spec:
                 return False
             if isinstance(spec, set) and val not in spec:
@@ -144,7 +144,7 @@ def matches(rule: tuple, positionals: list[str], flags: dict[str, str]) -> bool:
     else:
         if len(positionals) != len(spec_args):
             return False
-        for val, spec in zip(positionals, spec_args):
+        for val, spec in zip(positionals, spec_args, strict=True):
             if isinstance(spec, str) and val != spec:
                 return False
             if isinstance(spec, set) and val not in spec:
@@ -311,7 +311,7 @@ def self_service_cmd():
         positionals, flags = parse_args(argv[1:])
     except ValueError as e:
         print(str(e), file=sys.stderr)
-        raise SystemExit(1)
+        raise SystemExit(1) from None
     if not any(matches(rule, [exe, *positionals], flags) for rule in RULES):
         print(f"Command not allowed: {' '.join(argv)!r}", file=sys.stderr)
         raise SystemExit(1)
