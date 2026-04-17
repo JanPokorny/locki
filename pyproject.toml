@@ -13,6 +13,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "pyrefly>=0.60.1",
     "ruff>=0.15.7",
     "wheel>=0.46.3",
 ]

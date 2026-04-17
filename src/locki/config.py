@@ -20,6 +20,9 @@ def _arch() -> str:
             return "aarch64"
         case "x86_64" | "x64" | "amd64":
             return "x86_64"
+        case arch:
+            logger.error("Unsupported architecture: %s", arch)
+            sys.exit(1)
 
 
 def _deep_merge(base: dict, override: dict) -> dict:
@@ -86,5 +89,5 @@ def save_user_config(section: str, key: str, value: object) -> None:
     data = tomlkit.loads(USER_CONFIG.read_text()) if USER_CONFIG.exists() else tomlkit.document()
     if section not in data:
         data.add(section, tomlkit.table())
-    data[section][key] = value
+    data[section][key] = value  # pyrefly: ignore[unsupported-operation] -- tomlkit Item supports subscript at runtime
     USER_CONFIG.write_text(tomlkit.dumps(data))

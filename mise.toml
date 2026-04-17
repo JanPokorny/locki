@@ -50,6 +50,10 @@ sources = ["src/**/*.py"]
 run = "uv run ruff format --quiet --check"
 sources = ["src/**/*.py"]
 
+[tasks."check:pyrefly"]
+run = "uv run pyrefly check --disable-project-excludes-heuristics src"
+sources = ["src/**/*.py"]
+
 # fix
 
 [tasks.fix]

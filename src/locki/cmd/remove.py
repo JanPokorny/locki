@@ -99,7 +99,7 @@ def remove_cmd(match, force, delete_branch):
         check=False,
     )
 
-    if delete_branch:
+    if delete_branch and branch:
         run_command(
             ["git", "-C", str(git_root()), "branch", "-D", branch],
             f"Deleting branch {branch}",

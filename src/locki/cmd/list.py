@@ -17,7 +17,7 @@ def list_cmd():
     )
 
     home = pathlib.Path.home()
-    rows: list[tuple[str, str, str]] = []
+    rows: list[tuple[str, str]] = []
     current_path: pathlib.Path | None = None
     current_branch: str | None = None
     for line in result.stdout.decode().splitlines():

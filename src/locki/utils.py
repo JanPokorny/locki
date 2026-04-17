@@ -67,6 +67,7 @@ def spinner(text: str):
         s = f" ({elapsed}s)" if elapsed < 60 else f" ({elapsed // 60}m{elapsed % 60}s)"
         return click.style(s, dim=True)
 
+    thread: threading.Thread | None = None
     if is_tty:
         thread = threading.Thread(target=_spin, daemon=True)
         thread.start()
@@ -75,7 +76,7 @@ def spinner(text: str):
         sys.stderr.flush()
     try:
         yield
-        if is_tty:
+        if thread:
             stop.set()
             thread.join()
         click.echo(
@@ -83,7 +84,7 @@ def spinner(text: str):
             err=True,
         )
     except BaseException:
-        if is_tty:
+        if thread:
             stop.set()
             thread.join()
         click.echo(f"\r{click.style('ᛞ', fg='red', bold=True)} {text} failed{_duration()}", err=True)
