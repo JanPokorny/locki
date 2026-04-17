@@ -1,5 +1,6 @@
 import os
 import pathlib
+import re
 import shlex
 import subprocess
 import sys
@@ -10,30 +11,62 @@ from locki.paths import WORKTREES, WORKTREES_META
 
 _required = bool  # --flag=<non-empty value>
 _flag = {None, ""}  # optional boolean flag (--flag or absent, no value)
+_present = {""}  # flag must be present (no value expected)
 
 _diff_flags = {"staged": _flag, "name_only": _flag, "stat": _flag, "name_status": _flag}
-_log_flags = {"oneline": _flag, "format": ..., "max_count": ..., "all": _flag}
+_log_flags = {"oneline": _flag, "format": ..., "max_count": ..., "all": _flag, "graph": _flag}
+_pr_view_flags = {"comments": _flag}
+_run_view_flags = {"log": _flag, "log_failed": _flag}
+_commit_flags = {"message": _required, "signoff": _flag, "amend": _flag}
+_push_flags = {"force_with_lease": _flag}
+_fetch_flags = {"prune": _flag}
+_pull_flags = {"rebase": _flag, "ff_only": _flag}
+_state_flags = {"continue": _flag, "abort": _flag, "skip": _flag}  # rebase/cherry-pick/merge
+_pr_edit_flags = {"title": ..., "body": ..., "add_label": ..., "add_reviewer": ..., "add_assignee": ...}
+
+
+def _is_pr_comments_api_path(path: str) -> bool:
+    """Match repos/{owner}/{repo}/pulls/{number}/comments."""
+    parts = path.split("/")
+    return (
+        len(parts) == 6
+        and parts[0] == "repos"
+        and parts[3] == "pulls"
+        and parts[4].isdigit()
+        and parts[5] == "comments"
+    )
 
 RULES = [
+    # ── git read-only ────────────────────────────────────────────────────────
     ("git", "status"),
     ("git", "diff", _diff_flags),
     ("git", "diff", str, _diff_flags),
     ("git", "diff", str, str, _diff_flags),
-    ("git", "add", {"all": _flag}),
-    ("git", "add", str, ...),
-    ("git", "commit", {"message": _required, "signoff": _flag}),
-    ("git", "push"),
-    ("git", "fetch"),
     ("git", "log", _log_flags),
     ("git", "log", str, _log_flags),
     ("git", "show", {"stat": _flag, "name_only": _flag, "name_status": _flag, "format": ...}),
     ("git", "show", str, {"stat": _flag, "name_only": _flag, "name_status": _flag, "format": ...}),
+    ("git", "blame", str),
+    ("git", "branch", {"show_current": _flag}),
+    # ── git write (sandbox branch) ───────────────────────────────────────────
+    ("git", "add", {"all": _flag}),
+    ("git", "add", str, ...),
+    ("git", "commit", _commit_flags),
+    ("git", "commit", {"amend": _present, "no_edit": _flag}),
+    ("git", "push", _push_flags),
+    ("git", "fetch", _fetch_flags),
+    ("git", "pull", _pull_flags),
     ("git", "restore", str, ..., {"staged": _flag, "source": ...}),
     ("git", "switch", str),
+    ("git", "rebase", str),
+    ("git", "rebase", _state_flags),
+    ("git", "cherry-pick", str),
+    ("git", "cherry-pick", _state_flags),
+    ("git", "merge", str),
+    ("git", "merge", _state_flags),
     ("git", "reset", str, {"hard": _flag}),
     ("git", "branch", str),
     ("git", "branch", str, {"move": _flag}),
-    ("git", "branch", {"show_current": _flag}),
     ("git", "stash", "push", {"message": ...}),
     ("git", "stash", "push"),
     ("git", "stash", "list"),
@@ -43,6 +76,22 @@ RULES = [
     ("git", "stash", "apply", str),
     ("git", "stash", "drop"),
     ("git", "stash", "drop", str),
+    # ── gh read-only ─────────────────────────────────────────────────────────
+    ("gh", "pr", "view", _pr_view_flags),
+    ("gh", "pr", "view", str.isdigit, _pr_view_flags),
+    ("gh", "pr", "list"),
+    ("gh", "pr", "diff"),
+    ("gh", "pr", "status"),
+    ("gh", "pr", "checks"),
+    ("gh", "pr", "checks", str.isdigit),
+    ("gh", "run", "list"),
+    ("gh", "run", "view", _run_view_flags),
+    ("gh", "run", "view", str.isdigit, _run_view_flags),
+    ("gh", "issue", "view"),
+    ("gh", "issue", "view", str.isdigit),
+    ("gh", "issue", "list"),
+    ("gh", "api", _is_pr_comments_api_path),
+    # ── gh write (sandbox PR) ────────────────────────────────────────────────
     (
         "gh",
         "pr",
@@ -59,17 +108,10 @@ RULES = [
             "head": ...,
         },
     ),
-    ("gh", "pr", "view"),
-    ("gh", "pr", "view", str.isdigit),
-    ("gh", "pr", "list"),
-    ("gh", "pr", "diff"),
-    ("gh", "pr", "status"),
-    ("gh", "run", "list"),
-    ("gh", "run", "view"),
-    ("gh", "run", "view", str.isdigit),
-    ("gh", "issue", "view"),
-    ("gh", "issue", "view", str.isdigit),
-    ("gh", "issue", "list"),
+    ("gh", "pr", "edit", _pr_edit_flags),
+    ("gh", "pr", "edit", str.isdigit, _pr_edit_flags),
+    ("gh", "pr", "comment", str.isdigit, {"body": _required}),
+    # ── locki ────────────────────────────────────────────────────────────────
     ("locki", "port-forward", lambda s: s.startswith(":") and s[1:].isdigit(), ...),
 ]
 
@@ -162,6 +204,24 @@ def _validate_branch_arg(wt_id: str, positionals: list[str]):
         print("No branch specified.", file=sys.stderr)
         raise SystemExit(1)
     _validate_branch_suffix(wt_id, target)
+
+
+def _validate_gh_api_repo(api_path: str):
+    """Verify that the repo in a gh api path matches the current repo."""
+    parts = api_path.split("/")
+    requested = f"{parts[1]}/{parts[2]}"
+    result = subprocess.run(
+        ["gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        print("Could not determine current repo.", file=sys.stderr)
+        raise SystemExit(1)
+    actual = result.stdout.strip()
+    if requested != actual:
+        print(f"API repo '{requested}' does not match current repo '{actual}'.", file=sys.stderr)
+        raise SystemExit(1)
 
 
 def _handle_stash_push(wt_id: str, flags: dict[str, str]):
@@ -275,6 +335,9 @@ def self_service_cmd():
         and positionals[1] in ("pop", "apply", "drop")
     ):
         _handle_stash_pop_apply_drop(wt_id, [exe, *positionals])
+    elif exe == "gh" and positionals[:1] == ["api"]:
+        _validate_gh_api_repo(positionals[1])
+        os.execvp(exe, [exe, *argv[1:]])
     elif exe == "locki":
         os.execvp(sys.executable, [sys.executable, "-m", "locki", *argv[1:]])
     else:

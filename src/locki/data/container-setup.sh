@@ -19,19 +19,42 @@ Some commands execute on the host using a self-service proxy. This lets you exec
 
 ## Git
 
-  git status | diff [--staged] [--name-only] [--stat] [--name-status] [ref [ref]] | add [--all] [file ...] | commit --message=<msg> | push | fetch | log [--oneline] [--all] [--format=<fmt>] [--max-count=<n>] [ref] | show [ref] [--stat] [--name-only] [--name-status] [--format=<fmt>] | restore [--staged] [--source=ref] <file ...>
-  git switch <branch>#locki-<worktree-dirname> | reset [--hard] <ref> | branch <branch>#locki-<worktree-dirname> | branch --move <branch>#locki-<worktree-dirname> | branch --show-current
-  git stash push [--message=<msg>] | list | pop [ref] | apply [ref] | drop [ref]
+  git status
+  git diff [--staged] [--name-only] [--stat] [--name-status] [<ref> [<ref>]]
+  git log [--oneline] [--all] [--graph] [--format=<fmt>] [--max-count=<n>] [<ref>]
+  git show [<ref>] [--stat] [--name-only] [--name-status] [--format=<fmt>]
+  git blame <file>
+  git add (--all | <file>...)
+  git restore [--staged] [--source=<ref>] <file>...
+  git commit --message=<msg> [--signoff] [--amend]
+  git commit --amend [--no-edit]
+  git push [--force-with-lease]
+  git fetch [--prune]
+  git pull [--rebase] [--ff-only]
+  git switch <branch>
+  git branch (<branch> | --show-current | --move <branch>)
+  git reset [--hard] <ref>
+  git (rebase | cherry-pick | merge) <ref>
+  git (rebase | cherry-pick | merge) (--continue | --abort | --skip)
+  git stash (push [--message=<msg>] | list | pop [<ref>] | apply [<ref>] | drop [<ref>])
 
-The name suffix `#locki-<worktree-dirname>` must be present on all branches you create or modify. You may read from any branch (e.g. restore from it, reset to it). You may use `git stash` freely, it is sandbox-scoped.
+Branches you create, modify, or switch to must end with `#locki-<id>` (where `<id>` is the last segment of the worktree path). You may read from any ref. Stashes are sandbox-scoped.
 
 ## GitHub CLI
 
-  gh pr create [--title=<t>] [--body=<b>] [--base=<b>] [--head=<h>] [--draft] [--fill] [--reviewer=<r>] [--label=<l>] [--assignee=<a>] | gh pr view/list/diff/status | gh run view/list | gh issue view/list
+  gh pr (view [<number>] [--comments] | list | diff | status | checks [<number>])
+  gh pr create [--title=<t>] [--body=<b>] [--base=<b>] [--head=<h>] [--draft] [--fill] [--reviewer=<r>] [--label=<l>] [--assignee=<a>]
+  gh pr edit [<number>] [--title=<t>] [--body=<b>] [--add-label=<l>] [--add-reviewer=<r>] [--add-assignee=<a>]
+  gh pr comment <number> --body=<b>
+  gh run (view [<number>] [--log] [--log-failed] | list)
+  gh issue (view [<number>] | list)
+  gh api repos/<owner>/<repo>/pulls/<number>/comments
+
+`<owner>/<repo>` may only be the current repo.
 
 ## Port forwarding
 
-  locki port-forward :<port> [:<port> ...]
+  locki port-forward :<port> [:<port>]...
 
 When you start a network service the user should access, forward the port to host. Host port will be picked automatically and shown in output as `<host_port>:<sandbox_port>`. Give the user a full URL with the host port, e.g. `http://localhost:<host_port>`.)
 
