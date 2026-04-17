@@ -2,10 +2,16 @@ import sys
 
 import click
 
+from locki.cmd.exec import exec_cmd
 from locki.config import load_config, save_user_config
 from locki.paths import DATA, USER_CONFIG, WORKTREES
-from locki.cmd.exec import exec_cmd
-from locki.utils import find_worktree_for_branch, git_root, list_locki_worktree_branches, match_sandbox_branch
+from locki.utils import (
+    current_worktree,
+    find_worktree_for_branch,
+    git_root,
+    list_locki_worktree_branches,
+    match_sandbox_branch,
+)
 
 HARNESSES = ["claude", "gemini", "codex", "opencode"]
 RESUME_ARGS = {"claude": ["-c"], "gemini": ["-r"], "codex": ["resume"]}
@@ -39,19 +45,28 @@ def _ask_harness() -> str:
 
 
 @click.command("ai", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
-@click.option("-b", "--branch", default=None, help="Substring match on existing sandbox branch.")
+@click.option("-m", "--match", "match", default=None, help="Substring match on existing sandbox branch.")
+@click.option("-s", "--select", is_flag=True, default=False, help="Show interactive sandbox selector.")
 @click.option("-c", "--create", is_flag=True, default=False, help="Create a new sandbox.")
 @click.option("-f", "--id-file", default=None, type=click.Path(), help="Write the generated sandbox ID to this file.")
 @click.pass_context
-def ai_cmd(ctx, branch, create, id_file):
+def ai_cmd(ctx, match, select, create, id_file):
     """Start an AI harness in a sandbox (wrapper around locki x).
 
     \b
     Examples:
       locki ai                        # pick sandbox, run default harness
-      locki ai -b feat                # resume in existing sandbox
+      locki ai -m feat                # resume in existing sandbox
+      locki ai -s                     # force sandbox selector
       locki ai -c                     # new sandbox, fresh conversation
     """
+    if create and match:
+        click.echo(
+            f"{click.style('ᛞ', fg='red', bold=True)} --create and --match cannot be used together.",
+            err=True,
+        )
+        sys.exit(1)
+
     config = load_config(git_root())
     harness = config.ai.harness if config.ai.harness in HARNESSES else None
     if harness is None:
@@ -59,7 +74,13 @@ def ai_cmd(ctx, branch, create, id_file):
 
     # Determine sandbox and whether we're resuming
     is_new = create
-    if not branch and not create:
+    branch: str | None = None
+    if match:
+        branch = match
+    elif select:
+        pass  # fall through to exec_cmd which handles the selector
+    elif not create and not current_worktree():
+        # In main checkout with no flags — show selector or create new
         wt_branches = list_locki_worktree_branches()
         if not wt_branches:
             is_new = True
@@ -80,7 +101,7 @@ def ai_cmd(ctx, branch, create, id_file):
         else:
             click.echo(
                 f"{click.style('ᛞ', fg='red', bold=True)} No branch specified. "
-                "Use -b <branch> in non-interactive mode.",
+                "Use -m <query> in non-interactive mode.",
                 err=True,
             )
             sys.exit(1)
@@ -100,4 +121,4 @@ def ai_cmd(ctx, branch, create, id_file):
         else:
             ctx.args.extend(RESUME_ARGS.get(harness, []))
 
-    ctx.invoke(exec_cmd.callback, branch=branch, create=is_new, id_file=id_file)
+    ctx.invoke(exec_cmd.callback, match=branch, select=select, create=is_new, id_file=id_file)

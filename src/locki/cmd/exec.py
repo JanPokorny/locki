@@ -112,61 +112,65 @@ def _gen_wt_id() -> str:
     "exec | x",
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True, "allow_interspersed_args": False},
 )
-@click.option(
-    "-b", "--branch", default=None, help="Substring match on existing sandbox branch, or name prefix with --create."
-)
+@click.option("-m", "--match", "match", default=None, help="Substring match on existing sandbox branch.")
+@click.option("-s", "--select", is_flag=True, default=False, help="Show interactive sandbox selector.")
 @click.option("-c", "--create", is_flag=True, default=False, help="Create a new sandbox.")
 @click.option("-f", "--id-file", default=None, type=click.Path(), help="Write the generated sandbox ID to this file.")
 @click.pass_context
-def exec_cmd(ctx, branch, create, id_file):
+def exec_cmd(ctx, match, select, create, id_file):
     """Run a command in the per-branch sandbox container.
 
     \b
     Examples:
       locki x bash                    # interactive shell (sandbox picker)
       locki x claude                  # run Claude Code
-      locki x -b feat bash            # match sandbox by substring
-      locki x -c bash                 # create new untitled sandbox
-      locki x -c -b auth bash         # create new sandbox named "auth"
+      locki x -m feat bash            # match sandbox by substring
+      locki x -s bash                 # force sandbox selector
+      locki x -c bash                 # create new sandbox
       locki x bash -c "echo hello"    # run a one-liner
     """
+    if create and match:
+        click.echo(
+            f"{click.style('ᛞ', fg='red', bold=True)} --create and --match cannot be used together.",
+            err=True,
+        )
+        sys.exit(1)
+
     click.echo(f"{click.style('ᚠ', fg='magenta', bold=True)} Entering a Locki sandbox.", err=True)
     wt_id: str | None = None
+    branch: str | None = None
     if create:
         wt_id = _gen_wt_id()
-        name = branch or "untitled"
-        branch = f"{name}#locki-{wt_id}"
+        branch = f"untitled#locki-{wt_id}"
         if id_file:
             pathlib.Path(id_file).write_text(wt_id)
-    elif branch:
-        branch = match_sandbox_branch(branch)
-    else:
-        wt_path = current_worktree()
-        if wt_path is None:
-            if not sys.stdin.isatty():
-                click.echo(
-                    f"{click.style('ᛞ', fg='red', bold=True)} No branch specified. Use -b <branch> in non-interactive mode.",
-                    file=sys.stderr,
-                )
-                sys.exit(1)
+    elif match:
+        branch = match_sandbox_branch(match)
+    elif select or not current_worktree():
+        if not sys.stdin.isatty():
+            click.echo(
+                f"{click.style('ᛞ', fg='red', bold=True)} No branch specified. Use -m <query> in non-interactive mode.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
-            from InquirerPy import inquirer
-            from InquirerPy.base.control import Choice
+        from InquirerPy import inquirer
+        from InquirerPy.base.control import Choice
 
-            wt_branches = list_locki_worktree_branches()
+        wt_branches = list_locki_worktree_branches()
 
-            choices = [Choice(value=None, name="(create new)")] + [Choice(value=b, name=b) for b in sorted(wt_branches)]
+        choices = [Choice(value=None, name="(create new)")] + [Choice(value=b, name=b) for b in sorted(wt_branches)]
 
-            selected = inquirer.fuzzy(
-                message="Select a sandbox:",
-                choices=choices,
-            ).execute()
+        selected = inquirer.fuzzy(
+            message="Select a sandbox:",
+            choices=choices,
+        ).execute()
 
-            if selected is None:
-                wt_id = _gen_wt_id()
-                branch = f"untitled#locki-{wt_id}"
-            else:
-                branch = selected
+        if selected is None:
+            wt_id = _gen_wt_id()
+            branch = f"untitled#locki-{wt_id}"
+        else:
+            branch = selected
 
     git_root()  # fail fast if not in a git repo
 

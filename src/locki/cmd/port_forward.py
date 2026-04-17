@@ -63,13 +63,13 @@ def _list_forwards(wt_id: str):
 
 
 @click.command(context_settings={"allow_extra_args": True})
-@click.option("-b", "--branch", default=None, help="Sandbox branch (substring match).")
+@click.option("-m", "--match", "match", default=None, help="Sandbox branch (substring match).")
 @click.option("--clear", is_flag=True, help="Remove all existing port forwards before adding new ones.")
 @click.option("--list", "list_forwards", is_flag=True, help="List active port forwards.")
 @click.pass_context
-def port_forward_cmd(ctx, branch, clear, list_forwards):
+def port_forward_cmd(ctx, match, clear, list_forwards):
     """Forward ports from the host to a branch's container."""
-    _, wt_path = resolve_branch(branch)
+    _, wt_path = resolve_branch(match)
     wt_id = wt_path.relative_to(WORKTREES).parts[0]
 
     # Ensure container is running
