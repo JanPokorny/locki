@@ -44,35 +44,26 @@ Some commands execute on the host using a self-service proxy. This lets you exec
 
 Branches you create, modify, or switch to must end with `#locki-<id>` (where `<id>` is the last segment of the worktree path). You may read from any ref. Stashes are sandbox-scoped.
 
-### Manual interactive rebase (via cherry-pick)
+### Interactive rebase
 
 `git rebase --interactive` is unavailable -- replay commits by hand instead.
 
 Setup:
 
-  git branch backup#locki-<id>                    # safety net
-  git log --reverse --oneline <upstream>..HEAD    # todo list, oldest first
+  git branch backup#locki-<id>
+  git log --reverse --oneline <upstream>..HEAD
   git checkout --detach <new-base>
 
-Per commit (oldest first):
-
-  pick:    git cherry-pick <sha>
-  reword:  git cherry-pick <sha> && git commit --amend --message="..."
-  edit:    git cherry-pick --no-commit <sha>; modify; git add --all; git commit --reuse-message=<sha>
-  squash:  git cherry-pick --no-commit <sha> && git commit --amend --message="..."
-  fixup:   git cherry-pick --no-commit <sha> && git commit --amend --no-edit
-  drop:    skip
-  exec:    run command; stop on non-zero
-
-Conflicts: resolve, `git add <files>`, then `git cherry-pick --continue`. For `--no-commit` variants, finish with `git commit --amend [--no-edit]` instead. Bail with `--skip` or `--abort`.
+Per SHA:
+- pick = `git cherry-pick <sha>` (on conflict: resolve, `git add .`, `git cherry-pick --continue`)
+- reword/edit = pick, make changes, amend
+- squash/fixup = `git cherry-pick --no-commit <sha>`, amend
 
 Finish:
 
   git switch --force-create <original-branch>#locki-<id>
-  git diff backup#locki-<id>..HEAD                # sanity check
+  git diff backup#locki-<id>..HEAD
   git branch --delete --force backup#locki-<id>
-
-Recovery: `git cherry-pick --abort`; `git reset --hard backup#locki-<id>`; `git reflog` recovers almost anything.
 
 ## GitHub CLI
 
