@@ -13,10 +13,17 @@ _flag = {None, ""}  # optional boolean flag (--flag or absent, no value)
 _present = {""}  # flag must be present (no value expected)
 
 _diff_flags = {"staged": _flag, "name_only": _flag, "stat": _flag, "name_status": _flag}
-_log_flags = {"oneline": _flag, "format": ..., "max_count": ..., "all": _flag, "graph": _flag}
+_log_flags = {
+    "oneline": _flag,
+    "format": ...,
+    "max_count": ...,
+    "all": _flag,
+    "graph": _flag,
+    "reverse": _flag,
+}
 _pr_view_flags = {"comments": _flag}
 _run_view_flags = {"log": _flag, "log_failed": _flag}
-_commit_flags = {"message": _required, "signoff": _flag, "amend": _flag}
+_commit_flags = {"message": _required, "signoff": _flag, "amend": _flag, "gpg_sign": _flag}
 _push_flags = {"force_with_lease": _flag}
 _fetch_flags = {"prune": _flag}
 _pull_flags = {"rebase": _flag, "ff_only": _flag}
@@ -48,25 +55,29 @@ RULES = [
     ("git", "show", str, {"stat": _flag, "name_only": _flag, "name_status": _flag, "format": ...}),
     ("git", "blame", str),
     ("git", "branch", {"show_current": _flag}),
+    ("git", "reflog"),
     # ── git write (sandbox branch) ───────────────────────────────────────────
     ("git", "add", {"all": _flag}),
     ("git", "add", str, ...),
     ("git", "commit", _commit_flags),
-    ("git", "commit", {"amend": _present, "no_edit": _flag}),
+    ("git", "commit", {"amend": _present, "no_edit": _flag, "gpg_sign": _flag}),
+    ("git", "commit", {"reuse_message": _required, "amend": _flag, "gpg_sign": _flag}),
     ("git", "push", _push_flags),
     ("git", "fetch", _fetch_flags),
     ("git", "pull", _pull_flags),
     ("git", "restore", str, ..., {"staged": _flag, "source": ...}),
-    ("git", "switch", str),
+    ("git", "checkout", {"detach": _present}),
+    ("git", "checkout", str, {"detach": _present}),
+    ("git", "switch", str, {"force_create": _flag}),
     ("git", "rebase", str),
     ("git", "rebase", _state_flags),
-    ("git", "cherry-pick", str),
+    ("git", "cherry-pick", str, {"no_commit": _flag, "gpg_sign": _flag}),
     ("git", "cherry-pick", _state_flags),
     ("git", "merge", str),
     ("git", "merge", _state_flags),
     ("git", "reset", str, {"hard": _flag}),
     ("git", "branch", str),
-    ("git", "branch", str, {"move": _flag}),
+    ("git", "branch", str, {"move": _flag, "delete": _flag, "force": _flag}),
     ("git", "stash", "push", {"message": ...}),
     ("git", "stash", "push"),
     ("git", "stash", "list"),

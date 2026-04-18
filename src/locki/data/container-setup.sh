@@ -21,24 +21,58 @@ Some commands execute on the host using a self-service proxy. This lets you exec
 
   git status
   git diff [--staged] [--name-only] [--stat] [--name-status] [<ref> [<ref>]]
-  git log [--oneline] [--all] [--graph] [--format=<fmt>] [--max-count=<n>] [<ref>]
+  git log [--oneline] [--all] [--graph] [--reverse] [--format=<fmt>] [--max-count=<n>] [<ref>]
   git show [<ref>] [--stat] [--name-only] [--name-status] [--format=<fmt>]
   git blame <file>
+  git reflog
   git add (--all | <file>...)
   git restore [--staged] [--source=<ref>] <file>...
-  git commit --message=<msg> [--signoff] [--amend]
-  git commit --amend [--no-edit]
+  git commit --message=<msg> [--signoff] [--amend] [--gpg-sign]
+  git commit --amend [--no-edit] [--gpg-sign]
+  git commit --reuse-message=<sha> [--amend] [--gpg-sign]
   git push [--force-with-lease]
   git fetch [--prune]
   git pull [--rebase] [--ff-only]
-  git switch <branch>
-  git branch (<branch> | --show-current | --move <branch>)
+  git checkout --detach [<ref>]
+  git switch [--force-create] <branch>
+  git branch (<branch> [--move | --delete [--force]] | --show-current)
   git reset [--hard] <ref>
-  git (rebase | cherry-pick | merge) <ref>
+  git cherry-pick [--no-commit] [--gpg-sign] <ref>
+  git (rebase | merge) <ref>
   git (rebase | cherry-pick | merge) (--continue | --abort | --skip)
   git stash (push [--message=<msg>] | list | pop [<ref>] | apply [<ref>] | drop [<ref>])
 
 Branches you create, modify, or switch to must end with `#locki-<id>` (where `<id>` is the last segment of the worktree path). You may read from any ref. Stashes are sandbox-scoped.
+
+### Manual interactive rebase (via cherry-pick)
+
+`git rebase --interactive` is unavailable -- replay commits by hand instead.
+
+Setup:
+
+  git branch backup#locki-<id>                    # safety net
+  git log --reverse --oneline <upstream>..HEAD    # todo list, oldest first
+  git checkout --detach <new-base>
+
+Per commit (oldest first):
+
+  pick:    git cherry-pick <sha>
+  reword:  git cherry-pick <sha> && git commit --amend --message="..."
+  edit:    git cherry-pick --no-commit <sha>; modify; git add --all; git commit --reuse-message=<sha>
+  squash:  git cherry-pick --no-commit <sha> && git commit --amend --message="..."
+  fixup:   git cherry-pick --no-commit <sha> && git commit --amend --no-edit
+  drop:    skip
+  exec:    run command; stop on non-zero
+
+Conflicts: resolve, `git add <files>`, then `git cherry-pick --continue`. For `--no-commit` variants, finish with `git commit --amend [--no-edit]` instead. Bail with `--skip` or `--abort`.
+
+Finish:
+
+  git switch --force-create <original-branch>#locki-<id>
+  git diff backup#locki-<id>..HEAD                # sanity check
+  git branch --delete --force backup#locki-<id>
+
+Recovery: `git cherry-pick --abort`; `git reset --hard backup#locki-<id>`; `git reflog` recovers almost anything.
 
 ## GitHub CLI
 
