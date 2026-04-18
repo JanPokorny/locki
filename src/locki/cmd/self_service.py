@@ -174,8 +174,13 @@ def parse_args(args: list[str]) -> tuple[list[str], dict[str, str]]:
     """
     positionals: list[str] = []
     flags: dict[str, str] = {}
+    rest_positional = False
     for arg in args:
-        if arg.startswith("--"):
+        if rest_positional:
+            positionals.append(arg)
+        elif arg == "--":
+            rest_positional = True
+        elif arg.startswith("--"):
             key, _, value = arg[2:].partition("=")
             flags[key.replace("-", "_")] = value
         elif arg.startswith("-"):
