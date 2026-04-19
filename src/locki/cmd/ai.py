@@ -107,17 +107,19 @@ def ai_cmd(ctx, match, select, create, id_file):
 
     # Build the command args that exec_cmd will run inside the container
     ctx.args = [harness]
-    if not is_new and branch:
-        if harness == "claude":
-            resolved = match_sandbox_branch(branch)
-            branch = resolved
+    if not is_new and not select:
+        if branch:
+            branch = match_sandbox_branch(branch)
             wt_path = find_worktree_for_branch(branch)
-            if wt_path:
+        else:
+            wt_path = current_worktree()
+        if wt_path:
+            if harness == "claude":
                 wt_id = wt_path.relative_to(WORKTREES).parts[0]
                 projects_dir = DATA / "home" / ".claude" / "projects"
                 if projects_dir.is_dir() and any(d.name.endswith(wt_id) for d in projects_dir.iterdir() if d.is_dir()):
                     ctx.args.extend(RESUME_ARGS["claude"])
-        else:
-            ctx.args.extend(RESUME_ARGS.get(harness, []))
+            else:
+                ctx.args.extend(RESUME_ARGS.get(harness, []))
 
     ctx.invoke(exec_cmd.callback, match=branch, select=select, create=is_new, id_file=id_file)
