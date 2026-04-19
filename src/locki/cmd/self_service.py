@@ -52,7 +52,7 @@ RULES = [
     ("git", "log", _log_flags),
     ("git", "log", str, _log_flags),
     ("git", "show", {"stat": _flag, "name_only": _flag, "name_status": _flag, "format": ...}),
-    ("git", "show", str, {"stat": _flag, "name_only": _flag, "name_status": _flag, "format": ...}),
+    ("git", "show", str, ..., {"stat": _flag, "name_only": _flag, "name_status": _flag, "format": ...}),
     ("git", "blame", str),
     ("git", "branch", {"show_current": _flag}),
     ("git", "reflog"),
