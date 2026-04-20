@@ -82,7 +82,7 @@ locki x claude "fix issue #42"
 - **No compromises**: Run anything including `systemd`, containers, even Kubernetes clusters.
 - **Safe Git**: Sandboxes are only able to modify namespaced branches. Stash is scoped. Hooks are redirected.
 - **Visibility and control**: Worktrees live on your computer, see and modify them right there.
-- **Agent-friendly**: Bundled agent-friendly tools and sandbox-specific instructions for best behavior.
+- **Agent-friendly**: Bundled hand-picked tools and sandbox-specific instructions for best behavior.
 
 Case study: [Kagenti ADK](https://github.com/kagenti/adk) uses Locki to run a full MicroShift node, allowing agents to verify their work using E2E tests on a real cluster. Something breaks? The agent can `kubectl` right in and debug, all contained within the Locki sandbox.
 
