@@ -15,13 +15,13 @@ Some commands execute on the host using a self-service proxy. This lets you exec
 ```locki-self-service-command-filter
 git status
 git diff [--staged] [--name-only] [--stat] [--name-status] [<ref> [<ref>]]
-git log [--oneline] [--all] [--graph] [--reverse] [--format=<fmt>] [--max-count=<n>] [<ref>]
-git show [<ref>] [--stat] [--name-only] [--name-status] [--format=<fmt>] [-- <file> ...]
+git log [--oneline] [--all] [--graph] [--reverse] [--format=<fmt>] [-n/--max-count=<n>] [<ref>]
+git show [<ref>] [--stat] [--name-only] [--name-status] [--format=<fmt>] [<file> ...]
 git blame <file>
 git reflog
 git add (--all | <file> ...)
 git restore [--staged] [--source=<ref>] <file> ...
-git commit (--message=<msg> [--signoff] | --reuse-message=<sha>) [--amend [--no-edit]] [--gpg-sign]
+git commit (-m/--message=<msg> [-s/--signoff] | -C/--reuse-message=<sha>) [--amend [--no-edit]] [--gpg-sign]
 git push [--force-with-lease]
 git fetch [--prune]
 git pull [--rebase] [--ff-only]
@@ -31,7 +31,7 @@ git reset [--hard] <ref>
 git cherry-pick [--no-commit] [--gpg-sign] <ref>
 git (rebase | merge) <ref>
 git (rebase | cherry-pick | merge) (--continue | --abort | --skip)
-git stash push --message=<text>#locki-<wt-id>
+git stash push -m/--message=<text>#locki-<wt-id>
 git stash list
 git stash apply <stash-ref>
 git stash (pop | drop) <owned-stash-ref>
@@ -63,11 +63,11 @@ Finish:
 ## GitHub CLI
 
 ```locki-self-service-command-filter
-gh pr (view [<number>] [--comments] | list | diff | status | checks [<number>])
-gh pr create --title=<t> [--body=<b>] [--base=<b>] [--head=<h>] [--draft] [--fill] [--reviewer=<r>] [--label=<l>] [--assignee=<a>]
-gh pr edit [<number>] [--title=<t>] [--body=<b>] [--add-label=<l>] [--add-reviewer=<r>] [--add-assignee=<a>]
-gh pr comment <number> --body=<b>
-gh run (view [<number>] [--job=<number>] [--log] [--log-failed] | list)
+gh pr (view [<number>] [--comments] | list | diff [<number>] [--name-only] [--patch] | status | checks [<number>])
+gh pr create -t/--title=<t> [-b/--body=<b>] [-B/--base=<b>] [-H/--head=<h>] [-d/--draft] [-f/--fill] [-r/--reviewer=<r>] [-l/--label=<l>] [-a/--assignee=<a>]
+gh pr edit [<number>] [-t/--title=<t>] [-b/--body=<b>] [--add-label=<l>] [--add-reviewer=<r>] [--add-assignee=<a>]
+gh pr comment <number> -b/--body=<b>
+gh run (view [<number>] [-j/--job=<number>] [--log] [--log-failed] | list)
 gh issue (view [<number>] | list)
 gh api repos/<owner>/<repo>/pulls/<number>/comments
 ```

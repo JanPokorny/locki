@@ -129,7 +129,28 @@ assert_ok    "git show works"                locki x -m "$AUTH" git show
 assert_fail  "git checkout is blocked"       locki x -m "$AUTH" git checkout main
 assert_fail  "git reset --hard (no ref) is blocked" locki x -m "$AUTH" git reset --hard
 assert_ok    "git reset <ref> --hard works"  locki x -m "$AUTH" git reset HEAD --hard
-assert_fail  "short flags are blocked"       locki x -m "$AUTH" git commit -m test
+
+# Short-flag handling: registered aliases work in both `-x val` and `-xval` forms;
+# unregistered shorts are rejected.
+assert_ok    "known short flag works (-n 1)"    locki x -m "$AUTH" git log -n 1
+assert_ok    "known short flag glued (-n1)"     locki x -m "$AUTH" git log -n1
+assert_fail  "unknown short flag is blocked"    locki x -m "$AUTH" git log -z
+
+# Conservative pairing: `-x` before a `-`-prefixed next arg must NOT pair.  Git
+# would pair `-m --amend` (message="--amend"); we reject.  This keeps attackers
+# from smuggling flags into value positions.
+assert_fail  "-m does not pair with --amend"    locki x -m "$AUTH" git commit -m --amend
+assert_fail  "--message does not pair with --amend" locki x -m "$AUTH" git commit --message --amend
+
+# Pre-subcommand git flags (not in grammar) are rejected — no way to inject
+# `-c alias=...`, `--git-dir=...`, etc.
+assert_fail  "git -c config override blocked"   locki x -m "$AUTH" git -c alias.st=status status
+assert_fail  "git --git-dir blocked"            locki x -m "$AUTH" git --git-dir=/tmp/evil status
+
+# Stash: message must carry the sandbox suffix; pop/drop require an owned ref.
+assert_fail  "stash push without suffix"        locki x -m "$AUTH" git stash push -m plain
+assert_fail  "stash pop without ref"            locki x -m "$AUTH" git stash pop
+assert_fail  "stash pop of non-owned ref"       locki x -m "$AUTH" git stash pop 'stash@{99}'
 
 # ── git commit from sandbox ─────────────────────────────────────────────────
 

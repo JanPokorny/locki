@@ -118,6 +118,7 @@ class Compound:
 @dataclass
 class BoolFlag:
     name: str
+    short: str | None = None
 
     @property
     def key(self) -> str:
@@ -132,6 +133,7 @@ class BoolFlag:
 class ValueFlag:
     name: str
     parts: list[CompoundPart]
+    short: str | None = None
 
     @property
     def key(self) -> str:
@@ -141,14 +143,6 @@ class ValueFlag:
         val = mc.flags.get(self.key)
         if self.key not in used and val is not None and mc.ctx.compound(self.parts).fullmatch(val):
             yield pos, used | {self.key}
-
-
-@dataclass
-class Separator:
-    """Literal `--` in the grammar; no-op at match time (argv's `--` is pre-consumed)."""
-
-    def match(self, pos: int, used: frozenset[str], mc: MatchContext) -> Iterator[State]:
-        yield pos, used
 
 
 @dataclass
@@ -197,7 +191,7 @@ class Repetition:
         yield from go(pos, used)
 
 
-Node = Compound | BoolFlag | ValueFlag | Separator | Optional | Alternatives | Sequence | Repetition
+Node = Compound | BoolFlag | ValueFlag | Optional | Alternatives | Sequence | Repetition
 
 
 # ── Parser ────────────────────────────────────────────────────────────────────
@@ -207,14 +201,17 @@ class Parser:
     """Parse one grammar line into an AST node.
 
     Tokens:
-      `...`                                  ellipsis (postfix "one or more"; whitespace-separated)
-      `--flag`, `--flag=<compound>`, `--`    long flag (optionally with compound value) or bare separator
-      `(`, `)`, `[`, `]`, `|`                 grouping metacharacters
-      compound                                literal text interleaved with `<placeholder>`s
+      `...`                                   ellipsis (postfix "one or more"; whitespace-separated)
+      `-x/--flag`, `-x/--flag=<compound>`     long flag with a short alias
+      `--flag`, `--flag=<compound>`           long flag (optionally with compound value)
+      `(`, `)`, `[`, `]`, `|`                  grouping metacharacters
+      compound                                 literal text interleaved with `<placeholder>`s
     """
 
     _COMPOUND_BODY = r"(?:<[^>]+>|[^<>\s()\[\]|])+"
-    _TOKEN_RE = re.compile(rf"\.\.\.|--(?:[a-z][\w-]*(?:={_COMPOUND_BODY})?)?|[()|\[\]]|{_COMPOUND_BODY}")
+    _TOKEN_RE = re.compile(
+        rf"\.\.\.|(?:-[a-zA-Z]/)?--[a-z][\w-]*(?:={_COMPOUND_BODY})?|[()|\[\]]|{_COMPOUND_BODY}"
+    )
     _COMPOUND_PART_RE = re.compile(r"<([^>]+)>|([^<>]+)")
 
     def __init__(self, text: str) -> None:
@@ -258,19 +255,22 @@ class Parser:
     def _item(self) -> Node:
         tok = self._eat()
         node: Node
+        short: str | None = None
+        if tok.startswith("-") and not tok.startswith("--"):
+            # -x/--long form: strip the short alias and fall through to long-flag handling.
+            short = tok[1]
+            tok = tok[3:]
         if tok == "[":
             node = Optional(self._alt())
             self._expect("]")
         elif tok == "(":
             node = self._alt()
             self._expect(")")
-        elif tok == "--":
-            node = Separator()
         elif tok.startswith("--") and "=" in tok:
             name, _, val_text = tok[2:].partition("=")
-            node = ValueFlag(name, self._compound_parts(val_text))
+            node = ValueFlag(name, self._compound_parts(val_text), short)
         elif tok.startswith("--"):
-            node = BoolFlag(tok[2:])
+            node = BoolFlag(tok[2:], short)
         else:
             node = Compound(self._compound_parts(tok))
         if self._peek() == "...":
@@ -307,6 +307,82 @@ class Ruleset:
             elif in_block and line:
                 lines.append(line)
         return cls([Parser.parse_line(line) for line in lines])
+
+    @cached_property
+    def _flag_index(self) -> tuple[frozenset[str], dict[str, str]]:
+        """Discover every flag declared in the grammar: (value-flag long keys, short→long)."""
+        value_keys: set[str] = set()
+        short_aliases: dict[str, str] = {}
+        stack: list[Node] = list(self.rules)
+        while stack:
+            node = stack.pop()
+            if isinstance(node, BoolFlag | ValueFlag):
+                if isinstance(node, ValueFlag):
+                    value_keys.add(node.key)
+                if node.short is not None:
+                    prior = short_aliases.get(node.short)
+                    if prior is not None and prior != node.key:
+                        raise ValueError(f"Short flag -{node.short} maps to both --{prior} and --{node.name}")
+                    short_aliases[node.short] = node.key
+            elif isinstance(node, Optional | Repetition):
+                stack.append(node.inner)
+            elif isinstance(node, Alternatives):
+                stack.extend(node.alts)
+            elif isinstance(node, Sequence):
+                stack.extend(node.items)
+        return frozenset(value_keys), short_aliases
+
+    @property
+    def value_flag_keys(self) -> frozenset[str]:
+        return self._flag_index[0]
+
+    @property
+    def short_aliases(self) -> dict[str, str]:
+        return self._flag_index[1]
+
+    def split_argv(self, args: list[str]) -> tuple[list[str], dict[str, str]]:
+        """Split argv into positionals and long flags.
+
+        Short flags registered in the grammar (`-x/--long`) are normalized to their
+        long key.  For value-flags, `--flag value`, `--flag=value`, `-x value`, `-xvalue`
+        and `-x=value` all work; bool flags are standalone.
+        """
+        positionals: list[str] = []
+        flags: dict[str, str] = {}
+        rest_positional = False
+        i = 0
+        while i < len(args):
+            arg = args[i]
+            if rest_positional:
+                positionals.append(arg)
+            elif arg == "--":
+                rest_positional = True
+            elif arg.startswith("--"):
+                key, sep, value = arg[2:].partition("=")
+                key = key.replace("-", "_")
+                if sep == "" and key in self.value_flag_keys and i + 1 < len(args) and not args[i + 1].startswith("-"):
+                    value = args[i + 1]
+                    i += 1
+                flags[key] = value
+            elif len(arg) >= 2 and arg[0] == "-":
+                short = arg[1]
+                if short not in self.short_aliases:
+                    raise ValueError(f"Unknown short flag: {arg!r}")
+                key = self.short_aliases[short]
+                glued = arg[2:].removeprefix("=")
+                if glued:
+                    if key not in self.value_flag_keys:
+                        raise ValueError(f"Short flag -{short} does not take a value: {arg!r}")
+                    flags[key] = glued
+                elif key in self.value_flag_keys and i + 1 < len(args) and not args[i + 1].startswith("-"):
+                    flags[key] = args[i + 1]
+                    i += 1
+                else:
+                    flags[key] = ""
+            else:
+                positionals.append(arg)
+            i += 1
+        return positionals, flags
 
     def is_allowed(self, positionals: list[str], flags: dict[str, str], wt_id: str) -> bool:
         """`--help` is always allowed; every other flag must be consumed by the matching rule."""
@@ -363,26 +439,12 @@ def self_service_cmd():
     if not argv:
         print("Empty command.", file=sys.stderr)
         raise SystemExit(1)
-
-    # Split argv into positionals and long flags; short flags are rejected.
-    positionals: list[str] = []
-    flags: dict[str, str] = {}
-    rest_positional = False
-    for arg in argv[1:]:
-        if rest_positional:
-            positionals.append(arg)
-        elif arg == "--":
-            rest_positional = True
-        elif arg.startswith("--"):
-            key, _, value = arg[2:].partition("=")
-            flags[key.replace("-", "_")] = value
-        elif arg.startswith("-"):
-            print(f"Short flags not allowed: {arg!r}", file=sys.stderr)
-            raise SystemExit(1)
-        else:
-            positionals.append(arg)
-
     exe = pathlib.Path(argv[0]).name
+    try:
+        positionals, flags = RULESET.split_argv(argv[1:])
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        raise SystemExit(1) from None
 
     # chdir first so `gh repo view` and `git stash list` run inside the worktree.
     os.chdir(str(cwd))
