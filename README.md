@@ -114,16 +114,6 @@ Case study: [Kagenti ADK](https://github.com/kagenti/adk) uses Locki to run a fu
 
 &nbsp;
 
-## Tech
-
-- Python CLI
-- Single [Lima](https://lima-vm.io/) VM
-- Multiple [Incus](https://linuxcontainers.org/incus/introduction/) containers
-- [Mise](https://mise.jdx.dev) for ergonomic package installation
-- Host proxy for self-service commands (`git`, `gh`, port forwarding)
-
-&nbsp;
-
 ## Comparison
 
 Most sandboxing solutions use one of these techniques:
@@ -176,3 +166,13 @@ Locki uses a single Lima VM which can only access the `~/.local/share/locki/work
 Locki is designed to provide protection for the host operating system and files from being messed up by a malfunctioning AI agent. There is no exfiltration protection, so be aware that API keys exposed to the agents need to be treated as potentially exposed and disposable, with limited scope. (This is no different from running the agent locally, just specifying that Locki does not help here. Use a dedicated solution like [OneCLI](https://github.com/onecli/onecli) if interested.)
 
 Despite best effort, Locki provides no security guarantees and is provided "as is". That's the legal speak for "this is a random project by a random dude provided for free", you can't expect corporate-paid-support level security assurances. Random dude believes that while not perfect, using Locki is better than many existing sandboxing solutions and certainly better than going full `--yolo` on your bare machine and hoping for the best.
+
+&nbsp;
+
+## Tech
+
+- Python CLI
+- Single [Lima](https://lima-vm.io/) VM
+- Multiple [Incus](https://linuxcontainers.org/incus/introduction/) containers
+- [Mise](https://mise.jdx.dev) for ergonomic package installation
+- Host proxy for self-service commands (`git`, `gh`, port forwarding)
