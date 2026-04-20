@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import importlib.resources
 import os
 import pathlib
@@ -5,187 +7,48 @@ import re
 import shlex
 import subprocess
 import sys
+from collections.abc import Iterator
+from dataclasses import dataclass
+from functools import cached_property
 
 import click
 
 from locki.paths import WORKTREES, WORKTREES_META
 
-
-def _extract_grammar(md: str) -> list[str]:
-    """Return non-blank lines from all `locki-self-service-command-filter` code fences in *md*."""
-    rules: list[str] = []
-    in_block = False
-    for raw in md.splitlines():
-        line = raw.strip()
-        if line == "```locki-self-service-command-filter":
-            in_block = True
-        elif in_block and line.startswith("```"):
-            in_block = False
-        elif in_block and line:
-            rules.append(line)
-    return rules
-
-# Tokenizer: each token is one of
-#   `...`                                  ellipsis (postfix "one or more" operator; must be whitespace-separated)
-#   `--flag`, `--flag=<compound>`, `--`    long flag (optionally with a compound value pattern) or bare separator
-#   `(`, `)`, `[`, `]`, `|`                 grouping metacharacter
-#   compound                                literal-text chunks interleaved with `<placeholder>`s
-_COMPOUND_BODY = r"(?:<[^>]+>|[^<>\s()\[\]|])+"
-_TOKEN_RE = re.compile(rf"\.\.\.|--(?:[a-z][\w-]*(?:={_COMPOUND_BODY})?)?|[()|\[\]]|{_COMPOUND_BODY}")
-_COMPOUND_PART_RE = re.compile(r"<([^>]+)>|([^<>]+)")
-
-# Regex fragments for context-free validated placeholders. Any unknown
-# placeholder name falls back to `.+?` (non-empty, non-greedy).  Placeholders
-# that depend on runtime context (`wt-id`, `owner`, `repo`, `owned-stash-ref`)
-# are substituted in `_compound_pattern`.
-PLACEHOLDER_RE: dict[str, str] = {"number": r"\d+"}
+State = tuple[int, frozenset[str]]  # (positional cursor, used flag keys)
 
 
-def _parse_compound(text: str) -> list[tuple[str, str]]:
-    parts: list[tuple[str, str]] = []
-    for m in _COMPOUND_PART_RE.finditer(text):
-        ph, lit = m.group(1), m.group(2)
-        parts.append(("ph", ph) if ph is not None else ("lit", lit))
-    return parts
+# ── Compound parts ────────────────────────────────────────────────────────────
 
 
-def _compound_pattern(parts: list[tuple[str, str]], ctx: dict) -> str:
-    out: list[str] = []
-    for kind, val in parts:
-        if kind == "lit":
-            out.append(re.escape(val))
-        elif val == "wt-id":
-            out.append(re.escape(ctx["wt_id"]))
-        elif val == "owner":
-            out.append(re.escape(_ctx_gh(ctx)[0]))
-        elif val == "repo":
-            out.append(re.escape(_ctx_gh(ctx)[1]))
-        elif val == "owned-stash-ref":
-            refs = _ctx_stash_refs(ctx)
-            out.append("(?:" + "|".join(re.escape(r) for r in refs) + ")" if refs else r"(?!)")
-        else:
-            out.append(PLACEHOLDER_RE.get(val, r".+?"))
-    return "".join(out)
+@dataclass
+class Literal:
+    """Literal text segment inside a compound token."""
+
+    text: str
 
 
-def _parse(text: str):
-    """Parse one grammar line into an AST.
+@dataclass
+class Placeholder:
+    """A `<name>` segment inside a compound token."""
 
-    Node shapes:
-      ("cmp", [(kind, val), ...])  positional token; parts are literal text or <placeholder>
-      ("f", name)                   boolean long flag
-      ("fv", name, [parts])         long flag with a compound value pattern
-      ("sep",)                      literal `--` separator (no-op; argv's `--` is pre-consumed)
-      ("opt", node)                 optional
-      ("alt", [seq, ...])          alternatives
-      ("seq", [item, ...])         sequence
-      ("rep", node)                 one-or-more
-    """
-    tokens = _TOKEN_RE.findall(text)
-    idx = [0]
-
-    def peek():
-        return tokens[idx[0]] if idx[0] < len(tokens) else None
-
-    def eat():
-        tok = tokens[idx[0]]
-        idx[0] += 1
-        return tok
-
-    def p_alt():
-        seqs = [p_seq()]
-        while peek() == "|":
-            eat()
-            seqs.append(p_seq())
-        return ("alt", seqs) if len(seqs) > 1 else seqs[0]
-
-    def p_seq():
-        items = []
-        while peek() not in (None, ")", "]", "|"):
-            items.append(p_item())
-        return ("seq", items)
-
-    def p_item():
-        tok = eat()
-        if tok == "[":
-            node = ("opt", p_alt())
-            if eat() != "]":
-                raise ValueError(f"Expected ']' in grammar line: {text!r}")
-        elif tok == "(":
-            node = p_alt()
-            if eat() != ")":
-                raise ValueError(f"Expected ')' in grammar line: {text!r}")
-        elif tok == "--":
-            node = ("sep",)
-        elif tok.startswith("--") and "=" in tok:
-            name, _, val_text = tok[2:].partition("=")
-            node = ("fv", name, _parse_compound(val_text))
-        elif tok.startswith("--"):
-            node = ("f", tok[2:])
-        else:
-            node = ("cmp", _parse_compound(tok))
-        if peek() == "...":
-            eat()
-            node = ("rep", node)
-        return node
-
-    tree = p_alt()
-    if idx[0] != len(tokens):
-        raise ValueError(f"Unparsed trailing tokens in: {text!r}")
-    return tree
+    name: str
 
 
-def _match(node, positionals, pos, flags, used, ctx):
-    """Yield (new_pos, new_used_flags) for each successful match."""
-    kind = node[0]
-    if kind == "cmp":
-        if pos < len(positionals) and re.fullmatch(_compound_pattern(node[1], ctx), positionals[pos]):
-            yield pos + 1, used
-    elif kind == "f":
-        key = node[1].replace("-", "_")
-        if key not in used and flags.get(key) == "":
-            yield pos, used | {key}
-    elif kind == "fv":
-        key = node[1].replace("-", "_")
-        val = flags.get(key)
-        if key not in used and val is not None and re.fullmatch(_compound_pattern(node[2], ctx), val):
-            yield pos, used | {key}
-    elif kind == "sep":
-        yield pos, used
-    elif kind == "opt":
-        yield pos, used
-        yield from _match(node[1], positionals, pos, flags, used, ctx)
-    elif kind == "alt":
-        for alt in node[1]:
-            yield from _match(alt, positionals, pos, flags, used, ctx)
-    elif kind == "seq":
-        items = node[1]
-
-        def _seq_go(i, p, u):
-            if i == len(items):
-                yield p, u
-                return
-            for p2, u2 in _match(items[i], positionals, p, flags, u, ctx):
-                yield from _seq_go(i + 1, p2, u2)
-
-        yield from _seq_go(0, pos, used)
-    elif kind == "rep":
-        inner = node[1]
-
-        def _rep_go(p, u):
-            for p2, u2 in _match(inner, positionals, p, flags, u, ctx):
-                yield p2, u2
-                yield from _rep_go(p2, u2)
-
-        yield from _rep_go(pos, used)
+CompoundPart = Literal | Placeholder
 
 
-RULES = [_parse(line) for line in _extract_grammar((importlib.resources.files("locki") / "data" / "AGENTS.md").read_text())]
+# ── Context ───────────────────────────────────────────────────────────────────
 
 
-def _ctx_gh(ctx: dict) -> tuple[str, str]:
-    """Lazily resolve and cache the current gh repo as (owner, name)."""
-    if "_gh" not in ctx:
+class Context:
+    """Per-invocation placeholder resolver. Subprocess lookups are cached."""
+
+    def __init__(self, wt_id: str) -> None:
+        self.wt_id = wt_id
+
+    @cached_property
+    def gh_repo(self) -> tuple[str, str]:
         result = subprocess.run(
             ["gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"],
             capture_output=True,
@@ -198,53 +61,267 @@ def _ctx_gh(ctx: dict) -> tuple[str, str]:
         if not owner or not name:
             print(f"Invalid repo from gh: {result.stdout.strip()!r}.", file=sys.stderr)
             raise SystemExit(1)
-        ctx["_gh"] = (owner, name)
-    return ctx["_gh"]
+        return owner, name
 
-
-def _ctx_stash_refs(ctx: dict) -> list[str]:
-    """Lazily resolve and cache stash refs owned by the current worktree."""
-    if "_stash_refs" not in ctx:
-        tag = f"#locki-{ctx['wt_id']}"
+    @cached_property
+    def owned_stash_refs(self) -> list[str]:
+        tag = f"#locki-{self.wt_id}"
         result = subprocess.run(["git", "stash", "list"], capture_output=True, text=True)
-        refs = [line.split(":", 1)[0] for line in result.stdout.splitlines() if tag in line]
-        ctx["_stash_refs"] = refs
-    return ctx["_stash_refs"]
+        return [line.split(":", 1)[0] for line in result.stdout.splitlines() if tag in line]
+
+    def compound(self, parts: list[CompoundPart]) -> re.Pattern[str]:
+        """Build a `re.fullmatch`-ready pattern from compound parts."""
+        buf: list[str] = []
+        for part in parts:
+            if isinstance(part, Literal):
+                buf.append(re.escape(part.text))
+            elif part.name == "wt-id":
+                buf.append(re.escape(self.wt_id))
+            elif part.name == "owner":
+                buf.append(re.escape(self.gh_repo[0]))
+            elif part.name == "repo":
+                buf.append(re.escape(self.gh_repo[1]))
+            elif part.name == "owned-stash-ref":
+                refs = self.owned_stash_refs
+                buf.append("(?:" + "|".join(re.escape(r) for r in refs) + ")" if refs else r"(?!)")
+            elif part.name == "number":
+                buf.append(r"\d+")
+            else:
+                buf.append(r".+?")
+        return re.compile("".join(buf))
 
 
-def is_allowed(positionals: list[str], flags: dict[str, str], wt_id: str) -> bool:
-    """Test whether (positionals, flags) is matched by any grammar rule. `--help` is always allowed."""
-    effective = {k: v for k, v in flags.items() if k != "help"}
-    ctx = {"wt_id": wt_id}
-    expected_flags = set(effective)
-    for rule in RULES:
-        for p, used in _match(rule, positionals, 0, effective, set(), ctx):
-            if p == len(positionals) and used == expected_flags:
-                return True
-    return False
+@dataclass
+class MatchContext:
+    positionals: list[str]
+    flags: dict[str, str]
+    ctx: Context
 
 
-def parse_args(args: list[str]) -> tuple[list[str], dict[str, str]]:
-    """Split args into positionals and long flags.
+# ── AST ───────────────────────────────────────────────────────────────────────
+# Each node yields all successful continuations of a match as (pos, used) pairs;
+# backtracking falls out of `yield from`.
 
-    Raises ValueError for short flags.
+
+@dataclass
+class Compound:
+    """Positional: literal text interleaved with `<placeholder>`s."""
+
+    parts: list[CompoundPart]
+
+    def match(self, pos: int, used: frozenset[str], mc: MatchContext) -> Iterator[State]:
+        if pos < len(mc.positionals) and mc.ctx.compound(self.parts).fullmatch(mc.positionals[pos]):
+            yield pos + 1, used
+
+
+@dataclass
+class BoolFlag:
+    name: str
+
+    @property
+    def key(self) -> str:
+        return self.name.replace("-", "_")
+
+    def match(self, pos: int, used: frozenset[str], mc: MatchContext) -> Iterator[State]:
+        if self.key not in used and mc.flags.get(self.key) == "":
+            yield pos, used | {self.key}
+
+
+@dataclass
+class ValueFlag:
+    name: str
+    parts: list[CompoundPart]
+
+    @property
+    def key(self) -> str:
+        return self.name.replace("-", "_")
+
+    def match(self, pos: int, used: frozenset[str], mc: MatchContext) -> Iterator[State]:
+        val = mc.flags.get(self.key)
+        if self.key not in used and val is not None and mc.ctx.compound(self.parts).fullmatch(val):
+            yield pos, used | {self.key}
+
+
+@dataclass
+class Separator:
+    """Literal `--` in the grammar; no-op at match time (argv's `--` is pre-consumed)."""
+
+    def match(self, pos: int, used: frozenset[str], mc: MatchContext) -> Iterator[State]:
+        yield pos, used
+
+
+@dataclass
+class Optional:
+    inner: Node
+
+    def match(self, pos: int, used: frozenset[str], mc: MatchContext) -> Iterator[State]:
+        yield pos, used
+        yield from self.inner.match(pos, used, mc)
+
+
+@dataclass
+class Alternatives:
+    alts: list[Node]
+
+    def match(self, pos: int, used: frozenset[str], mc: MatchContext) -> Iterator[State]:
+        for alt in self.alts:
+            yield from alt.match(pos, used, mc)
+
+
+@dataclass
+class Sequence:
+    items: list[Node]
+
+    def match(self, pos: int, used: frozenset[str], mc: MatchContext) -> Iterator[State]:
+        def go(i: int, p: int, u: frozenset[str]) -> Iterator[State]:
+            if i == len(self.items):
+                yield p, u
+                return
+            for p2, u2 in self.items[i].match(p, u, mc):
+                yield from go(i + 1, p2, u2)
+
+        yield from go(0, pos, used)
+
+
+@dataclass
+class Repetition:
+    inner: Node
+
+    def match(self, pos: int, used: frozenset[str], mc: MatchContext) -> Iterator[State]:
+        def go(p: int, u: frozenset[str]) -> Iterator[State]:
+            for p2, u2 in self.inner.match(p, u, mc):
+                yield p2, u2
+                yield from go(p2, u2)
+
+        yield from go(pos, used)
+
+
+Node = Compound | BoolFlag | ValueFlag | Separator | Optional | Alternatives | Sequence | Repetition
+
+
+# ── Parser ────────────────────────────────────────────────────────────────────
+
+
+class Parser:
+    """Parse one grammar line into an AST node.
+
+    Tokens:
+      `...`                                  ellipsis (postfix "one or more"; whitespace-separated)
+      `--flag`, `--flag=<compound>`, `--`    long flag (optionally with compound value) or bare separator
+      `(`, `)`, `[`, `]`, `|`                 grouping metacharacters
+      compound                                literal text interleaved with `<placeholder>`s
     """
-    positionals: list[str] = []
-    flags: dict[str, str] = {}
-    rest_positional = False
-    for arg in args:
-        if rest_positional:
-            positionals.append(arg)
-        elif arg == "--":
-            rest_positional = True
-        elif arg.startswith("--"):
-            key, _, value = arg[2:].partition("=")
-            flags[key.replace("-", "_")] = value
-        elif arg.startswith("-"):
-            raise ValueError(f"Short flags not allowed: {arg!r}")
+
+    _COMPOUND_BODY = r"(?:<[^>]+>|[^<>\s()\[\]|])+"
+    _TOKEN_RE = re.compile(rf"\.\.\.|--(?:[a-z][\w-]*(?:={_COMPOUND_BODY})?)?|[()|\[\]]|{_COMPOUND_BODY}")
+    _COMPOUND_PART_RE = re.compile(r"<([^>]+)>|([^<>]+)")
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+        self.tokens = self._TOKEN_RE.findall(text)
+        self.idx = 0
+
+    @classmethod
+    def parse_line(cls, text: str) -> Node:
+        parser = cls(text)
+        tree = parser._alt()
+        if parser.idx != len(parser.tokens):
+            raise ValueError(f"Unparsed trailing tokens in: {text!r}")
+        return tree
+
+    def _peek(self) -> str | None:
+        return self.tokens[self.idx] if self.idx < len(self.tokens) else None
+
+    def _eat(self) -> str:
+        tok = self.tokens[self.idx]
+        self.idx += 1
+        return tok
+
+    def _expect(self, tok: str) -> None:
+        if self._eat() != tok:
+            raise ValueError(f"Expected {tok!r} in grammar line: {self.text!r}")
+
+    def _alt(self) -> Node:
+        seqs: list[Node] = [self._seq()]
+        while self._peek() == "|":
+            self._eat()
+            seqs.append(self._seq())
+        return Alternatives(seqs) if len(seqs) > 1 else seqs[0]
+
+    def _seq(self) -> Node:
+        items: list[Node] = []
+        while self._peek() not in (None, ")", "]", "|"):
+            items.append(self._item())
+        return Sequence(items)
+
+    def _item(self) -> Node:
+        tok = self._eat()
+        node: Node
+        if tok == "[":
+            node = Optional(self._alt())
+            self._expect("]")
+        elif tok == "(":
+            node = self._alt()
+            self._expect(")")
+        elif tok == "--":
+            node = Separator()
+        elif tok.startswith("--") and "=" in tok:
+            name, _, val_text = tok[2:].partition("=")
+            node = ValueFlag(name, self._compound_parts(val_text))
+        elif tok.startswith("--"):
+            node = BoolFlag(tok[2:])
         else:
-            positionals.append(arg)
-    return positionals, flags
+            node = Compound(self._compound_parts(tok))
+        if self._peek() == "...":
+            self._eat()
+            node = Repetition(node)
+        return node
+
+    @classmethod
+    def _compound_parts(cls, text: str) -> list[CompoundPart]:
+        return [
+            Placeholder(m.group(1)) if m.group(1) is not None else Literal(m.group(2))
+            for m in cls._COMPOUND_PART_RE.finditer(text)
+        ]
+
+
+# ── Ruleset ───────────────────────────────────────────────────────────────────
+
+
+class Ruleset:
+    def __init__(self, rules: list[Node]) -> None:
+        self.rules = rules
+
+    @classmethod
+    def from_markdown(cls, md: str) -> Ruleset:
+        """Parse every non-blank line inside ```locki-self-service-command-filter fences as a grammar rule."""
+        lines: list[str] = []
+        in_block = False
+        for raw in md.splitlines():
+            line = raw.strip()
+            if line == "```locki-self-service-command-filter":
+                in_block = True
+            elif in_block and line.startswith("```"):
+                in_block = False
+            elif in_block and line:
+                lines.append(line)
+        return cls([Parser.parse_line(line) for line in lines])
+
+    def is_allowed(self, positionals: list[str], flags: dict[str, str], wt_id: str) -> bool:
+        """`--help` is always allowed; every other flag must be consumed by the matching rule."""
+        effective = {k: v for k, v in flags.items() if k != "help"}
+        mc = MatchContext(positionals, effective, Context(wt_id))
+        expected = set(effective)
+        target = len(positionals)
+        return any(
+            p == target and used == expected for rule in self.rules for p, used in rule.match(0, frozenset(), mc)
+        )
+
+
+RULESET = Ruleset.from_markdown((importlib.resources.files("locki") / "data" / "AGENTS.md").read_text())
+
+
+# ── CLI entry point ───────────────────────────────────────────────────────────
 
 
 @click.command(hidden=True)
@@ -267,7 +344,6 @@ def self_service_cmd():
 
     cwd_str, *argv = parts
 
-    # Validate worktree
     cwd = pathlib.Path(cwd_str).resolve()
     if not cwd.is_relative_to(WORKTREES.resolve()):
         print(f"Not a locki worktree: {cwd_str!r}", file=sys.stderr)
@@ -283,20 +359,34 @@ def self_service_cmd():
         print("Worktree .git mismatch — possible tampering.", file=sys.stderr)
         raise SystemExit(1)
 
-    # Validate command against allowlist
     if not argv:
         print("Empty command.", file=sys.stderr)
         raise SystemExit(1)
-    exe = pathlib.Path(argv[0]).name
-    try:
-        positionals, flags = parse_args(argv[1:])
-    except ValueError as e:
-        print(str(e), file=sys.stderr)
-        raise SystemExit(1) from None
 
+    # Split argv into positionals and long flags; short flags are rejected.
+    positionals: list[str] = []
+    flags: dict[str, str] = {}
+    rest_positional = False
+    for arg in argv[1:]:
+        if rest_positional:
+            positionals.append(arg)
+        elif arg == "--":
+            rest_positional = True
+        elif arg.startswith("--"):
+            key, _, value = arg[2:].partition("=")
+            flags[key.replace("-", "_")] = value
+        elif arg.startswith("-"):
+            print(f"Short flags not allowed: {arg!r}", file=sys.stderr)
+            raise SystemExit(1)
+        else:
+            positionals.append(arg)
+
+    exe = pathlib.Path(argv[0]).name
+
+    # chdir first so `gh repo view` and `git stash list` run inside the worktree.
     os.chdir(str(cwd))
 
-    if not is_allowed([exe, *positionals], flags, wt_id):
+    if not RULESET.is_allowed([exe, *positionals], flags, wt_id):
         print(f"Command not allowed: {' '.join(argv)!r}", file=sys.stderr)
         raise SystemExit(1)
 
