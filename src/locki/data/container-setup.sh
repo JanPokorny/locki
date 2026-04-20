@@ -22,7 +22,7 @@ Some commands execute on the host using a self-service proxy. This lets you exec
   git status
   git diff [--staged] [--name-only] [--stat] [--name-status] [<ref> [<ref>]]
   git log [--oneline] [--all] [--graph] [--reverse] [--format=<fmt>] [--max-count=<n>] [<ref>]
-  git show [<ref>] [--stat] [--name-only] [--name-status] [--format=<fmt>]
+  git show [<ref>] [--stat] [--name-only] [--name-status] [--format=<fmt>] [-- <file>...]
   git blame <file>
   git reflog
   git add (--all | <file>...)
@@ -34,8 +34,8 @@ Some commands execute on the host using a self-service proxy. This lets you exec
   git fetch [--prune]
   git pull [--rebase] [--ff-only]
   git checkout --detach [<ref>]
-  git switch [--force-create] <branch>
-  git branch (<branch> [--move | --delete [--force]] | --show-current)
+  git switch [--create | --force-create] <branch> [<start-point>]
+  git branch (<branch> [<start-point> | --move | --delete [--force]] | --show-current)
   git reset [--hard] <ref>
   git cherry-pick [--no-commit] [--gpg-sign] <ref>
   git (rebase | merge) <ref>
