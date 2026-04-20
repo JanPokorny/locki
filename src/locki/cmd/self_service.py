@@ -1,5 +1,6 @@
 import os
 import pathlib
+import re
 import shlex
 import subprocess
 import sys
@@ -8,176 +9,236 @@ import click
 
 from locki.paths import WORKTREES, WORKTREES_META
 
-_required = bool  # --flag=<non-empty value>
-_flag = {None, ""}  # optional boolean flag (--flag or absent, no value)
-_present = {""}  # flag must be present (no value expected)
+GRAMMAR = """
+git status
+git diff [--staged] [--name-only] [--stat] [--name-status] [<ref> [<ref>]]
+git log [--oneline] [--all] [--graph] [--reverse] [--format=<fmt>] [--max-count=<n>] [<ref>]
+git show [<ref>] [--stat] [--name-only] [--name-status] [--format=<fmt>] [-- <file> ...]
+git blame <file>
+git reflog
+git add (--all | <file> ...)
+git restore [--staged] [--source=<ref>] <file> ...
+git commit (--message=<msg> [--signoff] | --reuse-message=<sha>) [--amend [--no-edit]] [--gpg-sign]
+git push [--force-with-lease]
+git fetch [--prune]
+git pull [--rebase] [--ff-only]
+git switch ([--create | --force-create] <name>#locki-<wt-id> [<start-point>] | --detach <ref>)
+git branch (<name>#locki-<wt-id> [<start-point> | --move | --delete [--force]] | --show-current)
+git reset [--hard] <ref>
+git cherry-pick [--no-commit] [--gpg-sign] <ref>
+git (rebase | merge) <ref>
+git (rebase | cherry-pick | merge) (--continue | --abort | --skip)
+git stash push --message=<text>#locki-<wt-id>
+git stash list
+git stash apply <stash-ref>
+git stash (pop | drop) <owned-stash-ref>
+gh pr (view [<number>] [--comments] | list | diff | status | checks [<number>])
+gh pr create --title=<t> [--body=<b>] [--base=<b>] [--head=<h>] [--draft] [--fill] [--reviewer=<r>] [--label=<l>] [--assignee=<a>]
+gh pr edit [<number>] [--title=<t>] [--body=<b>] [--add-label=<l>] [--add-reviewer=<r>] [--add-assignee=<a>]
+gh pr comment <number> --body=<b>
+gh run (view [<number>] [--log] [--log-failed] | list)
+gh issue (view [<number>] | list)
+gh api repos/<owner>/<repo>/pulls/<number>/comments
+locki port-forward :<number> ...
+"""
 
-_diff_flags = {"staged": _flag, "name_only": _flag, "stat": _flag, "name_status": _flag}
-_log_flags = {
-    "oneline": _flag,
-    "format": ...,
-    "max_count": ...,
-    "all": _flag,
-    "graph": _flag,
-    "reverse": _flag,
-}
-_pr_view_flags = {"comments": _flag}
-_run_view_flags = {"log": _flag, "log_failed": _flag}
-_commit_flags = {"message": _required, "signoff": _flag, "amend": _flag, "gpg_sign": _flag}
-_push_flags = {"force_with_lease": _flag}
-_fetch_flags = {"prune": _flag}
-_pull_flags = {"rebase": _flag, "ff_only": _flag}
-_state_flags = {"continue": _flag, "abort": _flag, "skip": _flag}  # rebase/cherry-pick/merge
-_pr_edit_flags = {"title": ..., "body": ..., "add_label": ..., "add_reviewer": ..., "add_assignee": ...}
+# Tokenizer: each token is one of
+#   `...`                                  ellipsis (postfix "one or more" operator; must be whitespace-separated)
+#   `--flag`, `--flag=<compound>`, `--`    long flag (optionally with a compound value pattern) or bare separator
+#   `(`, `)`, `[`, `]`, `|`                 grouping metacharacter
+#   compound                                literal-text chunks interleaved with `<placeholder>`s
+_COMPOUND_BODY = r"(?:<[^>]+>|[^<>\s()\[\]|])+"
+_TOKEN_RE = re.compile(rf"\.\.\.|--(?:[a-z][\w-]*(?:={_COMPOUND_BODY})?)?|[()|\[\]]|{_COMPOUND_BODY}")
+_COMPOUND_PART_RE = re.compile(r"<([^>]+)>|([^<>]+)")
 
-
-def _is_pr_comments_api_path(path: str) -> bool:
-    """Match repos/{owner}/{repo}/pulls/{number}/comments."""
-    parts = path.split("/")
-    return (
-        len(parts) == 6
-        and parts[0] == "repos"
-        and parts[3] == "pulls"
-        and parts[4].isdigit()
-        and parts[5] == "comments"
-    )
-
-
-RULES = [
-    # ── git read-only ────────────────────────────────────────────────────────
-    ("git", "status"),
-    ("git", "diff", _diff_flags),
-    ("git", "diff", str, _diff_flags),
-    ("git", "diff", str, str, _diff_flags),
-    ("git", "log", _log_flags),
-    ("git", "log", str, _log_flags),
-    ("git", "show", {"stat": _flag, "name_only": _flag, "name_status": _flag, "format": ...}),
-    ("git", "show", str, ..., {"stat": _flag, "name_only": _flag, "name_status": _flag, "format": ...}),
-    ("git", "blame", str),
-    ("git", "branch", {"show_current": _flag}),
-    ("git", "reflog"),
-    # ── git write (sandbox branch) ───────────────────────────────────────────
-    ("git", "add", {"all": _flag}),
-    ("git", "add", str, ...),
-    ("git", "commit", _commit_flags),
-    ("git", "commit", {"amend": _present, "no_edit": _flag, "gpg_sign": _flag}),
-    ("git", "commit", {"reuse_message": _required, "amend": _flag, "gpg_sign": _flag}),
-    ("git", "push", _push_flags),
-    ("git", "fetch", _fetch_flags),
-    ("git", "pull", _pull_flags),
-    ("git", "restore", str, ..., {"staged": _flag, "source": ...}),
-    ("git", "checkout", {"detach": _present}),
-    ("git", "checkout", str, {"detach": _present}),
-    ("git", "switch", str, {"force_create": _flag, "create": _flag}),
-    ("git", "switch", str, str, {"force_create": _flag, "create": _flag}),
-    ("git", "rebase", str),
-    ("git", "rebase", _state_flags),
-    ("git", "cherry-pick", str, {"no_commit": _flag, "gpg_sign": _flag}),
-    ("git", "cherry-pick", _state_flags),
-    ("git", "merge", str),
-    ("git", "merge", _state_flags),
-    ("git", "reset", str, {"hard": _flag}),
-    ("git", "branch", str),
-    ("git", "branch", str, str),
-    ("git", "branch", str, {"move": _flag, "delete": _flag, "force": _flag}),
-    ("git", "stash", "push", {"message": ...}),
-    ("git", "stash", "push"),
-    ("git", "stash", "list"),
-    ("git", "stash", "pop"),
-    ("git", "stash", "pop", str),
-    ("git", "stash", "apply"),
-    ("git", "stash", "apply", str),
-    ("git", "stash", "drop"),
-    ("git", "stash", "drop", str),
-    # ── gh read-only ─────────────────────────────────────────────────────────
-    ("gh", "pr", "view", _pr_view_flags),
-    ("gh", "pr", "view", str.isdigit, _pr_view_flags),
-    ("gh", "pr", "list"),
-    ("gh", "pr", "diff"),
-    ("gh", "pr", "status"),
-    ("gh", "pr", "checks"),
-    ("gh", "pr", "checks", str.isdigit),
-    ("gh", "run", "list"),
-    ("gh", "run", "view", _run_view_flags),
-    ("gh", "run", "view", str.isdigit, _run_view_flags),
-    ("gh", "issue", "view"),
-    ("gh", "issue", "view", str.isdigit),
-    ("gh", "issue", "list"),
-    ("gh", "api", _is_pr_comments_api_path),
-    # ── gh write (sandbox PR) ────────────────────────────────────────────────
-    (
-        "gh",
-        "pr",
-        "create",
-        {
-            "title": _required,
-            "body": ...,
-            "base": ...,
-            "draft": _flag,
-            "fill": _flag,
-            "reviewer": ...,
-            "label": ...,
-            "assignee": ...,
-            "head": ...,
-        },
-    ),
-    ("gh", "pr", "edit", _pr_edit_flags),
-    ("gh", "pr", "edit", str.isdigit, _pr_edit_flags),
-    ("gh", "pr", "comment", str.isdigit, {"body": _required}),
-    # ── locki ────────────────────────────────────────────────────────────────
-    ("locki", "port-forward", lambda s: s.startswith(":") and s[1:].isdigit(), ...),
-]
+# Regex fragments for context-free validated placeholders. Any unknown
+# placeholder name falls back to `.+?` (non-empty, non-greedy).  Placeholders
+# that depend on runtime context (`wt-id`, `owner`, `repo`, `owned-stash-ref`)
+# are substituted in `_compound_pattern`.
+PLACEHOLDER_RE: dict[str, str] = {"number": r"\d+"}
 
 
-def matches(rule: tuple, positionals: list[str], flags: dict[str, str]) -> bool:
-    """Test whether positionals+flags match a rule tuple.
+def _parse_compound(text: str) -> list[tuple[str, str]]:
+    parts: list[tuple[str, str]] = []
+    for m in _COMPOUND_PART_RE.finditer(text):
+        ph, lit = m.group(1), m.group(2)
+        parts.append(("ph", ph) if ph is not None else ("lit", lit))
+    return parts
 
-    A rule is a tuple of positional specs, optionally ending with a dict of
-    flag specs.  Positional specs: str (exact), set (membership), callable
-    (predicate).  Ellipsis (...) after a positional spec means zero or more
-    additional positionals are allowed.  --help is always permitted.
+
+def _compound_pattern(parts: list[tuple[str, str]], ctx: dict) -> str:
+    out: list[str] = []
+    for kind, val in parts:
+        if kind == "lit":
+            out.append(re.escape(val))
+        elif val == "wt-id":
+            out.append(re.escape(ctx["wt_id"]))
+        elif val == "owner":
+            out.append(re.escape(_ctx_gh(ctx)[0]))
+        elif val == "repo":
+            out.append(re.escape(_ctx_gh(ctx)[1]))
+        elif val == "owned-stash-ref":
+            refs = _ctx_stash_refs(ctx)
+            out.append("(?:" + "|".join(re.escape(r) for r in refs) + ")" if refs else r"(?!)")
+        else:
+            out.append(PLACEHOLDER_RE.get(val, r".+?"))
+    return "".join(out)
+
+
+def _parse(text: str):
+    """Parse one grammar line into an AST.
+
+    Node shapes:
+      ("cmp", [(kind, val), ...])  positional token; parts are literal text or <placeholder>
+      ("f", name)                   boolean long flag
+      ("fv", name, [parts])         long flag with a compound value pattern
+      ("sep",)                      literal `--` separator (no-op; argv's `--` is pre-consumed)
+      ("opt", node)                 optional
+      ("alt", [seq, ...])          alternatives
+      ("seq", [item, ...])         sequence
+      ("rep", node)                 one-or-more
     """
-    if rule and isinstance(rule[-1], dict):
-        spec_args, spec_flags = rule[:-1], {"help": _flag, **rule[-1]}
-    else:
-        spec_args, spec_flags = rule, {"help": _flag}
+    tokens = _TOKEN_RE.findall(text)
+    idx = [0]
 
-    has_varargs = ... in spec_args
-    if has_varargs:
-        fixed_specs = spec_args[: spec_args.index(...)]
-        if len(positionals) < len(fixed_specs):
-            return False
-        for val, spec in zip(positionals[: len(fixed_specs)], fixed_specs, strict=True):
-            if isinstance(spec, str) and val != spec:
-                return False
-            if isinstance(spec, set) and val not in spec:
-                return False
-            if callable(spec) and not spec(val):
-                return False
-    else:
-        if len(positionals) != len(spec_args):
-            return False
-        for val, spec in zip(positionals, spec_args, strict=True):
-            if isinstance(spec, str) and val != spec:
-                return False
-            if isinstance(spec, set) and val not in spec:
-                return False
-            if callable(spec) and not spec(val):
-                return False
+    def peek():
+        return tokens[idx[0]] if idx[0] < len(tokens) else None
 
-    if any(key not in spec_flags for key in flags):
-        return False
-    for key, spec in spec_flags.items():
+    def eat():
+        tok = tokens[idx[0]]
+        idx[0] += 1
+        return tok
+
+    def p_alt():
+        seqs = [p_seq()]
+        while peek() == "|":
+            eat()
+            seqs.append(p_seq())
+        return ("alt", seqs) if len(seqs) > 1 else seqs[0]
+
+    def p_seq():
+        items = []
+        while peek() not in (None, ")", "]", "|"):
+            items.append(p_item())
+        return ("seq", items)
+
+    def p_item():
+        tok = eat()
+        if tok == "[":
+            node = ("opt", p_alt())
+            if eat() != "]":
+                raise ValueError(f"Expected ']' in grammar line: {text!r}")
+        elif tok == "(":
+            node = p_alt()
+            if eat() != ")":
+                raise ValueError(f"Expected ')' in grammar line: {text!r}")
+        elif tok == "--":
+            node = ("sep",)
+        elif tok.startswith("--") and "=" in tok:
+            name, _, val_text = tok[2:].partition("=")
+            node = ("fv", name, _parse_compound(val_text))
+        elif tok.startswith("--"):
+            node = ("f", tok[2:])
+        else:
+            node = ("cmp", _parse_compound(tok))
+        if peek() == "...":
+            eat()
+            node = ("rep", node)
+        return node
+
+    tree = p_alt()
+    if idx[0] != len(tokens):
+        raise ValueError(f"Unparsed trailing tokens in: {text!r}")
+    return tree
+
+
+def _match(node, positionals, pos, flags, used, ctx):
+    """Yield (new_pos, new_used_flags) for each successful match."""
+    kind = node[0]
+    if kind == "cmp":
+        if pos < len(positionals) and re.fullmatch(_compound_pattern(node[1], ctx), positionals[pos]):
+            yield pos + 1, used
+    elif kind == "f":
+        key = node[1].replace("-", "_")
+        if key not in used and flags.get(key) == "":
+            yield pos, used | {key}
+    elif kind == "fv":
+        key = node[1].replace("-", "_")
         val = flags.get(key)
-        if spec is ...:
-            continue
-        if (
-            (callable(spec) and not spec(val))
-            or (isinstance(spec, set) and val not in spec)
-            or (isinstance(spec, str) and val != spec)
-        ):
-            return False
-    return True
+        if key not in used and val is not None and re.fullmatch(_compound_pattern(node[2], ctx), val):
+            yield pos, used | {key}
+    elif kind == "sep":
+        yield pos, used
+    elif kind == "opt":
+        yield pos, used
+        yield from _match(node[1], positionals, pos, flags, used, ctx)
+    elif kind == "alt":
+        for alt in node[1]:
+            yield from _match(alt, positionals, pos, flags, used, ctx)
+    elif kind == "seq":
+        items = node[1]
+
+        def _seq_go(i, p, u):
+            if i == len(items):
+                yield p, u
+                return
+            for p2, u2 in _match(items[i], positionals, p, flags, u, ctx):
+                yield from _seq_go(i + 1, p2, u2)
+
+        yield from _seq_go(0, pos, used)
+    elif kind == "rep":
+        inner = node[1]
+
+        def _rep_go(p, u):
+            for p2, u2 in _match(inner, positionals, p, flags, u, ctx):
+                yield p2, u2
+                yield from _rep_go(p2, u2)
+
+        yield from _rep_go(pos, used)
+
+
+RULES = [_parse(line) for line in GRAMMAR.strip().splitlines() if line.strip()]
+
+
+def _ctx_gh(ctx: dict) -> tuple[str, str]:
+    """Lazily resolve and cache the current gh repo as (owner, name)."""
+    if "_gh" not in ctx:
+        result = subprocess.run(
+            ["gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            print("Could not determine current gh repo.", file=sys.stderr)
+            raise SystemExit(1)
+        owner, _, name = result.stdout.strip().partition("/")
+        if not owner or not name:
+            print(f"Invalid repo from gh: {result.stdout.strip()!r}.", file=sys.stderr)
+            raise SystemExit(1)
+        ctx["_gh"] = (owner, name)
+    return ctx["_gh"]
+
+
+def _ctx_stash_refs(ctx: dict) -> list[str]:
+    """Lazily resolve and cache stash refs owned by the current worktree."""
+    if "_stash_refs" not in ctx:
+        tag = f"#locki-{ctx['wt_id']}"
+        result = subprocess.run(["git", "stash", "list"], capture_output=True, text=True)
+        refs = [line.split(":", 1)[0] for line in result.stdout.splitlines() if tag in line]
+        ctx["_stash_refs"] = refs
+    return ctx["_stash_refs"]
+
+
+def is_allowed(positionals: list[str], flags: dict[str, str], wt_id: str) -> bool:
+    """Test whether (positionals, flags) is matched by any grammar rule. `--help` is always allowed."""
+    effective = {k: v for k, v in flags.items() if k != "help"}
+    ctx = {"wt_id": wt_id}
+    expected_flags = set(effective)
+    for rule in RULES:
+        for p, used in _match(rule, positionals, 0, effective, set(), ctx):
+            if p == len(positionals) and used == expected_flags:
+                return True
+    return False
 
 
 def parse_args(args: list[str]) -> tuple[list[str], dict[str, str]]:
@@ -201,87 +262,6 @@ def parse_args(args: list[str]) -> tuple[list[str], dict[str, str]]:
         else:
             positionals.append(arg)
     return positionals, flags
-
-
-def _wt_tag(wt_id: str) -> str:
-    return f"#locki-{wt_id}"
-
-
-def _validate_branch_suffix(wt_id: str, target: str):
-    """Check that a branch name ends with #locki-<wt_id>."""
-    tag = _wt_tag(wt_id)
-    if not target.endswith(tag):
-        print(f"Branch '{target}' is not allowed. Must end with '{tag}'.", file=sys.stderr)
-        raise SystemExit(1)
-
-
-def _validate_branch_arg(wt_id: str, positionals: list[str]):
-    """Validate that the branch name argument ends with #locki-<wt_id>."""
-    target = positionals[2] if len(positionals) >= 3 else None
-    if not target:
-        print("No branch specified.", file=sys.stderr)
-        raise SystemExit(1)
-    _validate_branch_suffix(wt_id, target)
-
-
-def _validate_gh_api_repo(api_path: str):
-    """Verify that the repo in a gh api path matches the current repo."""
-    parts = api_path.split("/")
-    requested = f"{parts[1]}/{parts[2]}"
-    result = subprocess.run(
-        ["gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        print("Could not determine current repo.", file=sys.stderr)
-        raise SystemExit(1)
-    actual = result.stdout.strip()
-    if requested != actual:
-        print(f"API repo '{requested}' does not match current repo '{actual}'.", file=sys.stderr)
-        raise SystemExit(1)
-
-
-def _handle_stash_push(wt_id: str, flags: dict[str, str]):
-    """Auto-prefix stash message with worktree tag for wt-scoped stashing."""
-    tag = _wt_tag(wt_id)
-    msg = flags.get("message", "")
-    full_msg = f"[{tag}] {msg}" if msg else f"[{tag}]"
-    os.execvp("git", ["git", "stash", "push", f"--message={full_msg}"])
-
-
-def _handle_stash_list(wt_id: str):
-    """Show only stashes belonging to the current worktree."""
-    tag = _wt_tag(wt_id)
-    result = subprocess.run(["git", "stash", "list"], capture_output=True, text=True)
-    for line in result.stdout.splitlines():
-        if f"[{tag}]" in line:
-            print(line)
-    raise SystemExit(0 if result.returncode == 0 else result.returncode)
-
-
-def _handle_stash_pop_apply_drop(wt_id: str, positionals: list[str]):
-    """For pop/apply/drop: scope operations to the current worktree's stashes."""
-    action = positionals[2]  # "pop", "apply", or "drop"
-    ref = positionals[3] if len(positionals) >= 4 else None
-    tag = _wt_tag(wt_id)
-
-    result = subprocess.run(["git", "stash", "list"], capture_output=True, text=True)
-    stash_lines = result.stdout.splitlines()
-
-    if ref:
-        for line in stash_lines:
-            if line.startswith(ref + ":") and f"[{tag}]" in line:
-                os.execvp("git", ["git", "stash", action, ref])
-        print(f"Stash {ref} does not belong to worktree '{wt_id}'.", file=sys.stderr)
-        raise SystemExit(1)
-    else:
-        for line in stash_lines:
-            if f"[{tag}]" in line:
-                found_ref = line.split(":", 1)[0]
-                os.execvp("git", ["git", "stash", action, found_ref])
-        print(f"No stashes found for worktree '{wt_id}'.", file=sys.stderr)
-        raise SystemExit(1)
 
 
 @click.command(hidden=True)
@@ -330,33 +310,14 @@ def self_service_cmd():
     except ValueError as e:
         print(str(e), file=sys.stderr)
         raise SystemExit(1) from None
-    if not any(matches(rule, [exe, *positionals], flags) for rule in RULES):
-        print(f"Command not allowed: {' '.join(argv)!r}", file=sys.stderr)
-        raise SystemExit(1)
 
     os.chdir(str(cwd))
 
-    # Command-specific handlers
-    if exe == "git" and (
-        positionals[:1] == ["switch"] or (positionals[:1] == ["branch"] and "show_current" not in flags)
-    ):
-        _validate_branch_arg(wt_id, [exe, *positionals])
-        os.execvp(exe, [exe, *argv[1:]])
-    elif exe == "git" and positionals[:2] == ["stash", "push"]:
-        _handle_stash_push(wt_id, flags)
-    elif exe == "git" and positionals[:2] == ["stash", "list"]:
-        _handle_stash_list(wt_id)
-    elif (
-        exe == "git"
-        and positionals[:1] == ["stash"]
-        and len(positionals) >= 2
-        and positionals[1] in ("pop", "apply", "drop")
-    ):
-        _handle_stash_pop_apply_drop(wt_id, [exe, *positionals])
-    elif exe == "gh" and positionals[:1] == ["api"]:
-        _validate_gh_api_repo(positionals[1])
-        os.execvp(exe, [exe, *argv[1:]])
-    elif exe == "locki":
+    if not is_allowed([exe, *positionals], flags, wt_id):
+        print(f"Command not allowed: {' '.join(argv)!r}", file=sys.stderr)
+        raise SystemExit(1)
+
+    if exe == "locki":
         os.execvp(sys.executable, [sys.executable, "-m", "locki", *argv[1:]])
     else:
         os.execvp(exe, [exe, *argv[1:]])
