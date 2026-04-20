@@ -92,7 +92,7 @@ Perform always when starting a conversation.
 
 Perform when user asks you to cleanup the sandbox. This may come at the end, or even beginning of conversation, if the user forgot to cleanup before starting a new conversation.
 
-1. Check current branch name using `git branch --show-current`. If it is NOT `untitled#locki-<worktree-dirname>`, run `git branch untitled#locki-<worktree-dirname>` to create it, then `git switch untitled#locki-<worktree-dirname>` to switch to it and `git reset --hard main` to update it.
+1. Check current branch name using `git branch --show-current`. If it is NOT `untitled#locki-<worktree-dirname>`, run `git switch --force-create untitled#locki-<worktree-dirname> origin/main`.
 
 2. If the user assigned you more work after the cleanup, continue by following the startup checklist.
 
