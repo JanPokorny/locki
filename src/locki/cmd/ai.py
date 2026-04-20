@@ -13,8 +13,8 @@ from locki.utils import (
     match_sandbox_branch,
 )
 
-HARNESSES = ["claude", "gemini", "codex", "opencode"]
-RESUME_ARGS = {"claude": ["-c"], "gemini": ["-r"], "codex": ["resume"]}
+HARNESSES = ["claude", "gemini", "codex", "opencode", "pi"]
+RESUME_ARGS = {"claude": ["-c"], "gemini": ["-r"], "codex": ["resume"], "pi": ["-c"]}
 
 
 def _ask_harness() -> str:

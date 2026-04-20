@@ -96,7 +96,7 @@ Case study: [Kagenti ADK](https://github.com/kagenti/adk) uses Locki to run a fu
 
     <small>
 
-    (Supported harnesses: `claude`, `gemini`, `codex`, `opencode`.)
+    (Supported harnesses: `claude`, `gemini`, `codex`, `opencode`, `pi`.)
 
     </small>
 1. First start takes longer, wait a few minutes for the VM to boot.

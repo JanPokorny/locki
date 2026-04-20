@@ -169,6 +169,7 @@ __LOCKI_EOF__
 for pair in \
   "npm:@anthropic-ai/claude-code=claude --dangerously-skip-permissions" \
   "npm:@google/gemini-cli=gemini --yolo" \
+  "npm:@mariozechner/pi-coding-agent=pi" \
   "npm:@openai/codex=codex --yolo" \
 ; do
   pkg="${pair%%=*}"
