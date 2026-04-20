@@ -1,6 +1,6 @@
 <p align="right"><small><i>Locki is the first sandbox I've used where I genuinely forget I'm in one — until I try something I shouldn't.</i></small></p>
 
-<p align="right"><small><b>⸺ Claude Code (Opus 4.6)</b></small></p>
+<p align="right"><small><b>⸺ Claude Code</b></small></p>
 
 <div align="center">
     <h1>
