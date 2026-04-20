@@ -1,3 +1,4 @@
+import importlib.resources
 import os
 import pathlib
 import re
@@ -9,38 +10,20 @@ import click
 
 from locki.paths import WORKTREES, WORKTREES_META
 
-GRAMMAR = """
-git status
-git diff [--staged] [--name-only] [--stat] [--name-status] [<ref> [<ref>]]
-git log [--oneline] [--all] [--graph] [--reverse] [--format=<fmt>] [--max-count=<n>] [<ref>]
-git show [<ref>] [--stat] [--name-only] [--name-status] [--format=<fmt>] [-- <file> ...]
-git blame <file>
-git reflog
-git add (--all | <file> ...)
-git restore [--staged] [--source=<ref>] <file> ...
-git commit (--message=<msg> [--signoff] | --reuse-message=<sha>) [--amend [--no-edit]] [--gpg-sign]
-git push [--force-with-lease]
-git fetch [--prune]
-git pull [--rebase] [--ff-only]
-git switch ([--create | --force-create] <name>#locki-<wt-id> [<start-point>] | --detach <ref>)
-git branch (<name>#locki-<wt-id> [<start-point> | --move | --delete [--force]] | --show-current)
-git reset [--hard] <ref>
-git cherry-pick [--no-commit] [--gpg-sign] <ref>
-git (rebase | merge) <ref>
-git (rebase | cherry-pick | merge) (--continue | --abort | --skip)
-git stash push --message=<text>#locki-<wt-id>
-git stash list
-git stash apply <stash-ref>
-git stash (pop | drop) <owned-stash-ref>
-gh pr (view [<number>] [--comments] | list | diff | status | checks [<number>])
-gh pr create --title=<t> [--body=<b>] [--base=<b>] [--head=<h>] [--draft] [--fill] [--reviewer=<r>] [--label=<l>] [--assignee=<a>]
-gh pr edit [<number>] [--title=<t>] [--body=<b>] [--add-label=<l>] [--add-reviewer=<r>] [--add-assignee=<a>]
-gh pr comment <number> --body=<b>
-gh run (view [<number>] [--log] [--log-failed] | list)
-gh issue (view [<number>] | list)
-gh api repos/<owner>/<repo>/pulls/<number>/comments
-locki port-forward :<number> ...
-"""
+
+def _extract_grammar(md: str) -> list[str]:
+    """Return non-blank lines from all `locki-self-service-command-filter` code fences in *md*."""
+    rules: list[str] = []
+    in_block = False
+    for raw in md.splitlines():
+        line = raw.strip()
+        if line == "```locki-self-service-command-filter":
+            in_block = True
+        elif in_block and line.startswith("```"):
+            in_block = False
+        elif in_block and line:
+            rules.append(line)
+    return rules
 
 # Tokenizer: each token is one of
 #   `...`                                  ellipsis (postfix "one or more" operator; must be whitespace-separated)
@@ -197,7 +180,7 @@ def _match(node, positionals, pos, flags, used, ctx):
         yield from _rep_go(pos, used)
 
 
-RULES = [_parse(line) for line in GRAMMAR.strip().splitlines() if line.strip()]
+RULES = [_parse(line) for line in _extract_grammar((importlib.resources.files("locki") / "data" / "AGENTS.md").read_text())]
 
 
 def _ctx_gh(ctx: dict) -> tuple[str, str]:
