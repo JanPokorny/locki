@@ -67,7 +67,7 @@ gh pr (view [<number>] [--comments] | list | diff | status | checks [<number>])
 gh pr create --title=<t> [--body=<b>] [--base=<b>] [--head=<h>] [--draft] [--fill] [--reviewer=<r>] [--label=<l>] [--assignee=<a>]
 gh pr edit [<number>] [--title=<t>] [--body=<b>] [--add-label=<l>] [--add-reviewer=<r>] [--add-assignee=<a>]
 gh pr comment <number> --body=<b>
-gh run (view [<number>] [--log] [--log-failed] | list)
+gh run (view [<number>] [--job=<number>] [--log] [--log-failed] | list)
 gh issue (view [<number>] | list)
 gh api repos/<owner>/<repo>/pulls/<number>/comments
 ```

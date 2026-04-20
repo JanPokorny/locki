@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 import importlib.resources
 import os
 import pathlib
@@ -13,7 +14,7 @@ from functools import cached_property
 
 import click
 
-from locki.paths import WORKTREES, WORKTREES_META
+from locki.paths import DENIED_LOG, WORKTREES, WORKTREES_META
 
 State = tuple[int, frozenset[str]]  # (positional cursor, used flag keys)
 
@@ -387,6 +388,13 @@ def self_service_cmd():
     os.chdir(str(cwd))
 
     if not RULESET.is_allowed([exe, *positionals], flags, wt_id):
+        try:
+            DENIED_LOG.parent.mkdir(parents=True, exist_ok=True)
+            with DENIED_LOG.open("a") as fh:
+                ts = datetime.datetime.now().isoformat(timespec="seconds")
+                fh.write(f"{ts}\t{wt_id}\t{shlex.join(argv)}\n")
+        except OSError:
+            pass
         print(f"Command not allowed: {' '.join(argv)!r}", file=sys.stderr)
         raise SystemExit(1)
 
