@@ -27,22 +27,19 @@ Some commands execute on the host using a self-service proxy. This lets you exec
   git reflog
   git add (--all | <file>...)
   git restore [--staged] [--source=<ref>] <file>...
-  git commit --message=<msg> [--signoff] [--amend] [--gpg-sign]
-  git commit --amend [--no-edit] [--gpg-sign]
-  git commit --reuse-message=<sha> [--amend] [--gpg-sign]
+  git commit (--message=<msg> [--signoff] | --reuse-message=<sha>) [--amend [--no-edit]] [--gpg-sign]
   git push [--force-with-lease]
   git fetch [--prune]
   git pull [--rebase] [--ff-only]
-  git checkout --detach [<ref>]
-  git switch [--create | --force-create] <branch> [<start-point>]
-  git branch (<branch> [<start-point> | --move | --delete [--force]] | --show-current)
+  git switch ([--create | --force-create] <owned-branch> [<start-point>] | --detach <ref>)
+  git branch (<owned-branch> [<start-point> | --move | --delete [--force]] | --show-current)
   git reset [--hard] <ref>
   git cherry-pick [--no-commit] [--gpg-sign] <ref>
   git (rebase | merge) <ref>
   git (rebase | cherry-pick | merge) (--continue | --abort | --skip)
   git stash (push [--message=<msg>] | list | pop [<ref>] | apply [<ref>] | drop [<ref>])
 
-Branches you create, modify, or switch to must end with `#locki-<id>` (where `<id>` is the last segment of the worktree path). You may read from any ref. Stashes are sandbox-scoped.
+Branches you create, modify, or switch to (`<owned-branch>`) must end with `#locki-<id>` (where `<id>` is the last segment of the worktree path). You may read from any ref. Stashes are sandbox-scoped.
 
 ### Interactive rebase
 
