@@ -2,8 +2,6 @@
 
 You are running inside a Locki sandbox -- an Incus LXC container running in a Lima VM. This environment is designed to give you free reign -- you are running as `root` -- while preventing accidental damage to files on the host machine.
 
-# Git
-
 You are operating on a separated worktree folder of a git repo lying outside of the sandbox -- for this reason, `.git` is just a file pointer and you can't access the actual `.git` folder. Git operations are only possible using the self-service proxy, see below.
 
 # Self-service proxy
@@ -81,6 +79,14 @@ locki port-forward :<number> ...
 ```
 
 When you start a network service the user should access, forward the port to host. Host port will be picked automatically and shown in stderr output. Give the user a full URL with the host port, e.g. `http://localhost:<host_port>`.
+
+## Web browser
+
+You can open, inspect and interact with websites using Rodney. When in need of a browser, start by running `rodney --help`.
+
+## Other
+
+Useful tools preinstalled: `docker`, `fd`, `rg`, `yq`, `kubectl`, `pnpm`, `uv`.
 
 # Startup checklist
 

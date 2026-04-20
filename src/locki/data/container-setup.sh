@@ -73,6 +73,22 @@ systemctl enable --now docker
 exec docker "$@"
 __LOCKI_EOF__
 
+## JIT shim for rodney -- go-rod can't self-download Chrome on aarch64 Linux.
+## (preinstall on Fedora, other OS may need manual Chromium install, agent will figure it out)
+cat > /opt/locki/bin/jit/rodney << '__LOCKI_EOF__'
+#!/bin/sh
+export MISE_STATUS_MESSAGE_MISSING_TOOLS=never
+if ! test -x /usr/lib64/chromium-browser/headless_shell && command -v dnf >/dev/null 2>&1; then
+  dnf install -y chromium-headless
+fi
+if test -x /usr/lib64/chromium-browser/headless_shell; then
+  export ROD_CHROME_BIN=/usr/lib64/chromium-browser/headless_shell
+fi
+target="$(pwd)"
+cd /
+exec mise x -C "$target" github:simonw/rodney -- rodney "$@"
+__LOCKI_EOF__
+
 ## JIT shims for nodejs-based tools
 for pair in \
   "npm:@anthropic-ai/claude-code=claude --dangerously-skip-permissions" \
