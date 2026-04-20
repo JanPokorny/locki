@@ -78,7 +78,7 @@ Finish:
 
   locki port-forward :<port> [:<port>]...
 
-When you start a network service the user should access, forward the port to host. Host port will be picked automatically and shown in output as `<host_port>:<sandbox_port>`. Give the user a full URL with the host port, e.g. `http://localhost:<host_port>`.)
+When you start a network service the user should access, forward the port to host. Host port will be picked automatically and shown in stderr output. Give the user a full URL with the host port, e.g. `http://localhost:<host_port>`.)
 
 # Startup checklist
 
