@@ -157,7 +157,7 @@ hostnamectl set-hostname locki 2>/dev/null || echo locki > /etc/hostname
 echo '192.168.5.2 host.lima.internal' >> /etc/hosts
 
 ## network is not available for a short while, wait for it
-timeout 30s sh -c 'while ! ping -c1 -W1 1.1.1.1 >/dev/null 2>&1; do sleep 1; done'
+timeout 30s sh -c 'while ! ping -c1 -W1 1.1.1.1 >/dev/null 2>&1; do sleep 1; done' || true
 
 # MARK: Mise
 
