@@ -2,7 +2,7 @@ import pathlib
 
 import click
 
-from locki.paths import WORKTREES
+from locki.paths import HOME, WORKTREES, _normalized_path
 from locki.utils import git_root, run_command
 
 
@@ -16,21 +16,20 @@ def list_cmd():
         quiet=True,
     )
 
-    home = pathlib.Path.home()
     rows: list[tuple[str, str]] = []
     current_path: pathlib.Path | None = None
     current_branch: str | None = None
     for line in result.stdout.decode().splitlines():
         if line.startswith("worktree "):
-            current_path = pathlib.Path(line.split(" ", 1)[1])
+            current_path = _normalized_path(line.split(" ", 1)[1])
             current_branch = None
         elif line.startswith("branch refs/heads/"):
             current_branch = line.removeprefix("branch refs/heads/")
         elif line == "" and current_path and current_branch:
             if current_path.is_relative_to(WORKTREES):
                 path_str = str(current_path)
-                if current_path.is_relative_to(home):
-                    path_str = "~/" + str(current_path.relative_to(home))
+                if current_path.is_relative_to(HOME):
+                    path_str = "~/" + str(current_path.relative_to(HOME))
                 rows.append((current_branch, path_str))
 
     if not rows:
