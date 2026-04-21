@@ -95,6 +95,7 @@ echo "Testing cache persistence..."
 locki x -m "$AUTH" mkdir -p /var/cache/locki
 assert_ok "write to cache" bash -c "echo 42 | locki x -m '$AUTH' tee /var/cache/locki/test >/dev/null"
 assert_ok "cached file persists" locki x -m "$AUTH" test -f /var/cache/locki/test
+assert_ok "cached file persists via -b alias" locki x -b "$AUTH" test -f /var/cache/locki/test
 
 # ── hook execution in guest ──────────────────────────────────────────────────
 
@@ -245,6 +246,7 @@ locki x -m "$LOGIN" bash -c "nohup bash -c 'while true; do echo pf-ok | ncat -l 
 
 # Forward host 9111 -> container 9111
 assert_ok    "port-forward adds device" locki port-forward -m "$LOGIN" 9111
+assert_ok    "port-forward --list works via -b alias" bash -c "locki port-forward -b '$LOGIN' --list | grep -q '^9111:9111$'"
 
 # Wait for Lima to detect and forward the new listening port
 pf_ok=false
@@ -278,13 +280,14 @@ echo "Testing sandbox creation with --create..."
 
 assert_output "--create creates sandbox" "create-ok" locki x --create echo create-ok
 assert_fail "unknown substring rejects" locki x -m nonexistent-branch echo nope
+assert_fail "unknown substring rejects via -b alias" locki x -b nonexistent-branch echo nope
 
 # ── worktree cleanup ─────────────────────────────────────────────────────────
 
 echo
 echo "Testing worktree removal..."
 
-assert_ok "locki remove works" locki remove -m "$AUTH" --force
+assert_ok "locki remove works via -b alias" locki remove -b "$AUTH" --force
 assert_fail "removed worktree dir is gone" test -d "$WORKTREE"
 
 # ── summary ──────────────────────────────────────────────────────────────────

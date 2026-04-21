@@ -63,7 +63,15 @@ def _list_forwards(wt_id: str):
 
 
 @click.command(context_settings={"allow_extra_args": True})
-@click.option("-m", "--match", "match", default=None, help="Sandbox branch (substring match).")
+@click.option(
+    "-m",
+    "--match",
+    "-b",
+    "--branch",
+    "match",
+    default=None,
+    help="Sandbox branch or sandbox ID (substring match).",
+)
 @click.option("--clear", is_flag=True, help="Remove all existing port forwards before adding new ones.")
 @click.option("--list", "list_forwards", is_flag=True, help="List active port forwards.")
 @click.pass_context
@@ -83,7 +91,9 @@ def port_forward_cmd(ctx, match, clear, list_forwards):
         logger.error("Did not match an existing sandbox.")
         sys.exit(1)
     if "RUNNING" not in lines:
-        logger.error(f"Sandbox is not running. Run {click.style(f"locki x -m {wt_id} true", fg="green")} to start it.")
+        logger.error(
+            f"Sandbox is not running. Run {click.style(f'locki x -b {wt_id} true', fg='green')} to start it."
+        )
         sys.exit(1)
 
     if clear:
@@ -126,5 +136,7 @@ def port_forward_cmd(ctx, match, clear, list_forwards):
     if list_forwards:
         _list_forwards(wt_id)
     elif not ctx.args and not clear:
-        logger.error("No ports specified. Usage: locki port-forward -b <branch> [--list] [--clear] [port[:port]...]")
+        logger.error(
+            "No ports specified. Usage: locki port-forward -m/-b <query> [--list] [--clear] [port[:port]...]"
+        )
         sys.exit(1)

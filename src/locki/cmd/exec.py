@@ -114,11 +114,12 @@ def _gen_wt_id() -> str:
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True, "allow_interspersed_args": False},
 )
 @click.option("-m", "--match", "match", default=None, help="Substring match on existing sandbox branch.")
+@click.option("-b", "--branch-id", "branch_id", default=None, help="Return to sandbox by worktree ID.")
 @click.option("-s", "--select", is_flag=True, default=False, help="Show interactive sandbox selector.")
 @click.option("-c", "--create", is_flag=True, default=False, help="Create a new sandbox.")
 @click.option("-f", "--id-file", default=None, type=click.Path(), help="Write the generated sandbox ID to this file.")
 @click.pass_context
-def exec_cmd(ctx, match, select, create, id_file):
+def exec_cmd(ctx, match, branch_id, select, create, id_file):
     """Run a command in the per-branch sandbox container.
 
     \b
@@ -126,13 +127,14 @@ def exec_cmd(ctx, match, select, create, id_file):
       locki x bash                    # interactive shell (sandbox picker)
       locki x claude                  # run Claude Code
       locki x -m feat bash            # match sandbox by substring
+      locki x -b <id> bash            # return to sandbox by worktree ID
       locki x -s bash                 # force sandbox selector
       locki x -c bash                 # create new sandbox
       locki x bash -c "echo hello"    # run a one-liner
     """
-    if create and match:
+    if sum([create, match is not None, branch_id is not None]) > 1:
         click.echo(
-            f"{click.style('ᛞ', fg='red', bold=True)} --create and --match cannot be used together.",
+            f"{click.style('ᛞ', fg='red', bold=True)} --create, --match, and --branch-id cannot be used together.",
             err=True,
         )
         sys.exit(1)
@@ -145,12 +147,22 @@ def exec_cmd(ctx, match, select, create, id_file):
         branch = f"untitled#locki-{wt_id}"
         if id_file:
             pathlib.Path(id_file).write_text(wt_id)
+    elif branch_id:
+        wt_id = branch_id
+        meta_branch = WORKTREES_META / branch_id / "branch"
+        if not meta_branch.exists():
+            click.echo(
+                f"{click.style('ᛞ', fg='red', bold=True)} No worktree found with ID {click.style(branch_id, fg='yellow')!r}.",
+                err=True,
+            )
+            sys.exit(1)
+        branch = meta_branch.read_text().strip()
     elif match:
         branch = match_sandbox_branch(match)
     elif select or not current_worktree():
         if not sys.stdin.isatty():
             click.echo(
-                f"{click.style('ᛞ', fg='red', bold=True)} No branch specified. Use -m <query> in non-interactive mode.",
+                f"{click.style('ᛞ', fg='red', bold=True)} No branch specified. Use -m <query> or -b <id> in non-interactive mode.",
                 file=sys.stderr,
             )
             sys.exit(1)

@@ -45,7 +45,15 @@ def _ask_harness() -> str:
 
 
 @click.command("ai", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
-@click.option("-m", "--match", "match", default=None, help="Substring match on existing sandbox branch.")
+@click.option(
+    "-m",
+    "--match",
+    "-b",
+    "--branch",
+    "match",
+    default=None,
+    help="Substring match on existing sandbox branch or sandbox ID.",
+)
 @click.option("-s", "--select", is_flag=True, default=False, help="Show interactive sandbox selector.")
 @click.option("-c", "--create", is_flag=True, default=False, help="Create a new sandbox.")
 @click.option("-f", "--id-file", default=None, type=click.Path(), help="Write the generated sandbox ID to this file.")
@@ -100,7 +108,7 @@ def ai_cmd(ctx, match, select, create, id_file):
                 branch = selected
         else:
             click.echo(
-                f"{click.style('ᛞ', fg='red', bold=True)} No branch specified. Use -m <query> in non-interactive mode.",
+                f"{click.style('ᛞ', fg='red', bold=True)} No branch specified. Use -m/-b <query> in non-interactive mode.",
                 err=True,
             )
             sys.exit(1)

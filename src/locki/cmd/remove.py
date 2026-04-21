@@ -35,7 +35,15 @@ def _select_worktree_branch() -> str | None:
 
 
 @click.command()
-@click.option("-m", "--match", "match", default=None, help="Sandbox branch (substring match).")
+@click.option(
+    "-m",
+    "--match",
+    "-b",
+    "--branch",
+    "match",
+    default=None,
+    help="Sandbox branch or sandbox ID (substring match).",
+)
 @click.option("--force", "-f", is_flag=True, help="Skip safety checks.")
 @click.option("--delete-branch", is_flag=True, help="Also delete the git branch.")
 def remove_cmd(match, force, delete_branch):
@@ -48,7 +56,7 @@ def remove_cmd(match, force, delete_branch):
         wt_path = current_worktree()
         if wt_path is None:
             if not sys.stdin.isatty():
-                logger.error("No branch specified. Use -m <query> in non-interactive mode.")
+                logger.error("No branch specified. Use -m/-b <query> in non-interactive mode.")
                 sys.exit(1)
             branch = _select_worktree_branch()
             if branch is None:
