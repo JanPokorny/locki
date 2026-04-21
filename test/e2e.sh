@@ -261,11 +261,17 @@ assert_ok    "port-forward --clear removes device" locki port-forward -m "$LOGIN
 sleep 3
 assert_fail  "cleared forward is unreachable" bash -c "nc -4 -w2 127.0.0.1 9111"
 
-# Random host port with :container_port syntax
-random_output=$(locki port-forward -m "$LOGIN" :9222 2>/dev/null) || true
-random_host_port=$(echo "$random_output" | grep -oE '^[0-9]+')
-if [[ "$random_host_port" -ge 1024 ]]; then pass ":port assigns random host port >= 1024"; else fail ":port assigns random host port >= 1024 (got '$random_host_port')"; fi
-assert_output ":port output shows container port" ":9222" echo "$random_output"
+# Random host port with :sandbox_port syntax.  `port-forward` prints its
+# assigned host port only via the stderr spinner; the authoritative readback is
+# `--list`, which prints `host:sandbox` pairs on stdout.
+locki port-forward -m "$LOGIN" :9222 >/dev/null 2>&1 || true
+list_output=$(locki port-forward -m "$LOGIN" --list 2>/dev/null || true)
+random_host_port=$(printf '%s\n' "$list_output" | awk -F: '$2 == "9222" { print $1; exit }')
+if [[ -n "$random_host_port" && "$random_host_port" -ge 1024 ]]; then
+    pass ":port assigns random host port >= 1024"
+else
+    fail ":port assigns random host port >= 1024 (got '$random_host_port')"
+fi
 assert_ok    ":port forward cleaned up" locki port-forward -m "$LOGIN" --clear
 
 # Reject privileged ports
