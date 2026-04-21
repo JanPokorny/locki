@@ -3,78 +3,11 @@ set -eux
 
 # MARK: AI CLIs
 
+# AGENTS.md is injected as base64 (silenced to keep xtrace output readable).
 mkdir -p /etc/claude-code /etc/gemini-cli /etc/codex /etc/opencode
-tee /etc/claude-code/CLAUDE.md /etc/gemini-cli/GEMINI.md /etc/codex/AGENTS.md /etc/opencode/AGENTS.md > /dev/null << '__LOCKI_EOF__'
-# Sandbox environment
-
-You are running inside a Locki sandbox -- an Incus LXC container running in a Lima VM. This environment is designed to give you free reign -- you are running as `root` -- while preventing accidental damage to files on the host machine.
-
-# Git
-
-You are operating on a separated worktree folder of a git repo lying outside of the sandbox -- for this reason, `.git` is just a file pointer and you can't access the actual `.git` folder. Git operations are only possible using the self-service proxy, see below.
-
-# Self-service proxy
-
-Some commands execute on the host using a self-service proxy. This lets you execute a limited safe set of higher-priviledged commands. Run them as usual -- the executables present in sandbox are shims that call out to the self-service proxy. The proxy will reject the command if it does not exactly match an allowed pattern. If user asks you to perform an operation you can't do, you can always prepare commands for them to run on host (worktree path matches 1:1).
-
-## Git
-
-  git status
-  git diff [--staged] [--name-only] [--stat] [--name-status] [<ref> [<ref>]]
-  git log [--oneline] [--all] [--graph] [--format=<fmt>] [--max-count=<n>] [<ref>]
-  git show [<ref>] [--stat] [--name-only] [--name-status] [--format=<fmt>]
-  git blame <file>
-  git add (--all | <file>...)
-  git restore [--staged] [--source=<ref>] <file>...
-  git commit --message=<msg> [--signoff] [--amend]
-  git commit --amend [--no-edit]
-  git push [--force-with-lease]
-  git fetch [--prune]
-  git pull [--rebase] [--ff-only]
-  git switch <branch>
-  git branch (<branch> | --show-current | --move <branch>)
-  git reset [--hard] <ref>
-  git (rebase | cherry-pick | merge) <ref>
-  git (rebase | cherry-pick | merge) (--continue | --abort | --skip)
-  git stash (push [--message=<msg>] | list | pop [<ref>] | apply [<ref>] | drop [<ref>])
-
-Branches you create, modify, or switch to must end with `#locki-<id>` (where `<id>` is the last segment of the worktree path). You may read from any ref. Stashes are sandbox-scoped.
-
-## GitHub CLI
-
-  gh pr (view [<number>] [--comments] | list | diff | status | checks [<number>])
-  gh pr create [--title=<t>] [--body=<b>] [--base=<b>] [--head=<h>] [--draft] [--fill] [--reviewer=<r>] [--label=<l>] [--assignee=<a>]
-  gh pr edit [<number>] [--title=<t>] [--body=<b>] [--add-label=<l>] [--add-reviewer=<r>] [--add-assignee=<a>]
-  gh pr comment <number> --body=<b>
-  gh run (view [<number>] [--log] [--log-failed] | list)
-  gh issue (view [<number>] | list)
-  gh api repos/<owner>/<repo>/pulls/<number>/comments
-
-`<owner>/<repo>` may only be the current repo.
-
-## Port forwarding
-
-  locki port-forward :<port> [:<port>]...
-
-When you start a network service the user should access, forward the port to host. Host port will be picked automatically and shown in output as `<host_port>:<sandbox_port>`. Give the user a full URL with the host port, e.g. `http://localhost:<host_port>`.)
-
-# Startup checklist
-
-Perform always when starting a conversation.
-
-1. Check project metadata (`mise.toml`, `.tool-versions`, `.nvmrc`, `pyproject.toml`, etc.), CI definitions (`.github/workflows/*.yaml`, etc.) or docs (`README.md`, `CONTRIBUTING.md`, `*.md`, `docs/*`, etc.) to determine needed tools and their versions, and setup commands. If there is `mise.toml`, run `mise install` to set up all tools. Otherwise manually enable specific tool versions using e.g.: `mise use -g python@3.12.1`, `mise use -g node@22`, `mise use -g jq`, falling back to OS package manager if `mise` does not have the tool (`dnf` by default, unless running on a custom image). Docker is pre-installed.
-
-2. Check current branch name using `git branch --show-current`. If it is `untitled#locki-<worktree-dirname>`, reset it to main using `git reset --hard main`, then rename using `branch --move <new-name>#locki-<worktree-dirname>`. Pick `<new-name>` based on the task at hand.
-
-# Cleanup checklist
-
-Perform when user asks you to cleanup the sandbox. This may come at the end, or even beginning of conversation, if the user forgot to cleanup before starting a new conversation.
-
-1. Check current branch name using `git branch --show-current`. If it is NOT `untitled#locki-<worktree-dirname>`, run `git branch untitled#locki-<worktree-dirname>` to create it, then `git switch untitled#locki-<worktree-dirname>` to switch to it and `git reset --hard main` to update it.
-
-2. If the user assigned you more work after the cleanup, continue by following the startup checklist.
-
-__LOCKI_EOF__
+set +x
+echo '__AGENTS_MD_B64__' | base64 -d | tee /etc/claude-code/CLAUDE.md /etc/gemini-cli/GEMINI.md /etc/codex/AGENTS.md /etc/opencode/AGENTS.md > /dev/null
+set -x
 
 cat > /etc/gemini-cli/settings.json << '__LOCKI_EOF__'
 {"security": {"folderTrust": {"enabled": false}}, "tools": {"sandbox": false}}
@@ -140,10 +73,27 @@ systemctl enable --now docker
 exec docker "$@"
 __LOCKI_EOF__
 
+## JIT shim for rodney -- go-rod can't self-download Chrome on aarch64 Linux.
+## (preinstall on Fedora, other OS may need manual Chromium install, agent will figure it out)
+cat > /opt/locki/bin/jit/rodney << '__LOCKI_EOF__'
+#!/bin/sh
+export MISE_STATUS_MESSAGE_MISSING_TOOLS=never
+if ! test -x /usr/lib64/chromium-browser/headless_shell && command -v dnf >/dev/null 2>&1; then
+  dnf install -y chromium-headless
+fi
+if test -x /usr/lib64/chromium-browser/headless_shell; then
+  export ROD_CHROME_BIN=/usr/lib64/chromium-browser/headless_shell
+fi
+target="$(pwd)"
+cd /
+exec mise x -C "$target" github:simonw/rodney -- rodney "$@"
+__LOCKI_EOF__
+
 ## JIT shims for nodejs-based tools
 for pair in \
   "npm:@anthropic-ai/claude-code=claude --dangerously-skip-permissions" \
   "npm:@google/gemini-cli=gemini --yolo" \
+  "npm:@mariozechner/pi-coding-agent=pi" \
   "npm:@openai/codex=codex --yolo" \
 ; do
   pkg="${pair%%=*}"

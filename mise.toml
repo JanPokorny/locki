@@ -4,6 +4,7 @@ lima = "2.1.0"
 yq = "latest"
 
 [settings]
+experimental = true
 task.disable_spec_from_run_scripts = true
 
 [hooks]

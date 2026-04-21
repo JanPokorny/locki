@@ -1,3 +1,4 @@
+import base64
 import getpass
 import importlib.resources
 import json
@@ -381,6 +382,8 @@ def exec_cmd(ctx, match, select, create, id_file):
         )
 
         setup_script = (importlib.resources.files("locki") / "data" / "container-setup.sh").read_bytes()
+        agents_md = (importlib.resources.files("locki") / "data" / "AGENTS.md").read_bytes()
+        setup_script = setup_script.replace(b"__AGENTS_MD_B64__", base64.b64encode(agents_md))
         env_flags = [flag for k, v in CONTAINER_ENV.items() for flag in ("--env", f"{k}={v}")]
         run_in_vm(
             ["incus", "exec", wt_id, *env_flags, "--env", f"LOCKI_WORKTREES_HOME={WORKTREES}", "--", "/bin/sh"],

@@ -1,6 +1,6 @@
 <p align="right"><small><i>Locki is the first sandbox I've used where I genuinely forget I'm in one — until I try something I shouldn't.</i></small></p>
 
-<p align="right"><small><b>⸺ Claude Code (Opus 4.6)</b></small></p>
+<p align="right"><small><b>⸺ Claude Code</b></small></p>
 
 <div align="center">
     <h1>
@@ -76,28 +76,19 @@ locki x claude "fix issue #42"
 
 &nbsp;
 
-**Locki** gives you:
-- **Maximum UX** (user experience): no permission prompts, isolated worktrees automatically managed.
-- **Maximum AX** (agent experience): run real-world software, including systemd, Docker, or Kubernetes.
+## Selling Points
 
-&nbsp;
-
-## How is Locki different than other sandboxes?
-
-Others run either: \
-*a)* full VM per sandbox: resource-heavy and slow to start\
-*b)* OS-level jail (Landlock, Bubblewrap, etc.): not isolated (ports collide, image tags get overwritten, etc.) \
-*c)* OCI container / microVM: limited support for background services (i.e. no `systemd`), containers, Kubernetes, ...
-
-**Locki** runs Incus containers (full OS) inside a single shared VM. While the VM layer isolates host from AI mischief, Incus containers are a lightweight layer on top to isolate sandboxes from each other. Spawn a real non-micro OS in <5s and run anything in it.
-
-Furthermore, Locki protects your Git history from tampering while still allowing safe operations like commits to the worktree branch. Be able to fall back on earlier commits when an agent goes haywire, while not giving up the convenience of arriving at a fully baked pull request.
+- **First-class DX**: `locki ai`, work in your CLI of choice. Zero config. No sign Locki is even there.
+- **No compromises**: Run anything including `systemd`, containers, even Kubernetes clusters.
+- **Safe Git**: Sandboxes are only able to modify namespaced branches. Stash is scoped. Hooks are redirected.
+- **Visibility and control**: Worktrees live on your computer, see and modify them right there.
+- **Agent-friendly**: Bundled hand-picked tools and sandbox-specific instructions for best behavior.
 
 Case study: [Kagenti ADK](https://github.com/kagenti/adk) uses Locki to run a full MicroShift node, allowing agents to verify their work using E2E tests on a real cluster. Something breaks? The agent can `kubectl` right in and debug, all contained within the Locki sandbox.
 
 &nbsp;
 
-## How to install and use Locki?
+## Tutorial
 
 1. Install: `uv tool install locki`. ([Install uv](https://docs.astral.sh/uv/getting-started/installation/) first if you don't have it.)
 1. If you're on Linux, also install [OpenSSH](https://repology.org/project/openssh/versions) (usually preinstalled) and [QEMU](https://www.qemu.org/download/#linux).
@@ -105,7 +96,7 @@ Case study: [Kagenti ADK](https://github.com/kagenti/adk) uses Locki to run a fu
 
     <small>
 
-    (Supported harnesses: `claude`, `gemini`, `codex`, `opencode`.)
+    (Supported harnesses: `claude`, `gemini`, `codex`, `opencode`, `pi`.)
 
     </small>
 1. First start takes longer, wait a few minutes for the VM to boot.
@@ -123,26 +114,39 @@ Case study: [Kagenti ADK](https://github.com/kagenti/adk) uses Locki to run a fu
 
 &nbsp;
 
+## Comparison
+
+Most sandboxing solutions use one of these techniques:
+
+- Full VM per sandbox: resource-heavy, slow to start
+- MicroVM per sandbox: none or limited support for building, running and orchestrating containers
+- OCI container per sandbox: none or limited support for building, running and orchestrating containers; potentially unsafe if runing VM-less on Linux
+- OS-level jail (Landlock, Bubblewrap, etc.): just restriction, not isolation (ports collide, image tags get overwritten, etc.)
+
+To my knowledge Locki is the only one packing a fully vertically integrated Incus-based solution. Seriously, stop reading this README and run `uvx locki ai`, that's all there is.
+
+&nbsp;
+
 ## Pro-tips for power users
 
-- `locki exec` runs a command inside a sandbox (e.g. `locki exec bash` for an interactive shell, or `locki exec pytest` to one-shot a command). Without a command it opens a picker to select an existing sandbox or create a new one. Use `locki exec -c` to create a new sandbox non-interactively, or `locki exec -m <substring>` to match an existing sandbox by any part of its branch name (e.g. the branch name or the 8-char ID). `cd` to a worktree folder (`~/.local/share/locki/worktrees/...`) to operate on it directly. Run `locki list` to see Locki worktrees in the current repo.
+- Editors like VSCode show worktrees in the sidebar, useful as a quick UI for reviewing and modifying changes.\
+  *(⚠️ VSCode 1.115.0+ requires setting `"git.detectWorktrees": true` for this to work.)*
+
+- `locki list` shows worktree paths. `cd` to a worktree folder (`~/.local/share/locki/worktrees/...`) to operate on it directly. `locki` commands default to operating on the corresponding sandbox when in worktree folder.
+
+- While `locki ai` opens a coding agent, `locki exec` (or short `locki x`) is the low-level version which can run any command. Pass a command to run in a sandbox, use `--match`/`-m` to select by branch substring or sandbox id: `locki exec -m big-refactor -- pytest`.
 
 - The first `locki ai` run prompts you to pick a default harness; change it later in `~/.config/locki/config.toml` under `[ai] harness = "..."`.
 
-- Editors like VSCode show worktrees in the sidebar, useful as a quick UI for reviewing and modifying changes.
-  *(⚠️ VSCode 1.115.0+ requires setting `"git.detectWorktrees": true` for this to work.)*
+- Ask your agent to forward ports, or use `locki port-forward` for more control.
 
-- Locki sandboxes provide [Mise](https://mise.jdx.dev) for tool version management -- replacing `nvm`, `rbenv`, `brew` etc. with a single tool. To make your agents' (and humans') lives easier, optionally <small>(ask your agent to)</small> create `mise.toml` with tool versions and project tasks.
+- Locki sandboxes provide [Mise](https://mise.jdx.dev) for tool version management -- replacing `nvm`, `rbenv`, `brew` etc. with a single tool. Adding `mise.toml` to your repo with tool versions and task definitions will help agents and humans alike: ask your agent to do it!
 
 - Want to use custom AI configuration in the VM -- instructions, skills, MCP servers, ...? Sandboxes share a home folder accessible at `~/.local/share/locki/home` on host (or `$XDG_DATA_HOME/locki/home`). For example, you can run `cp ~/.claude/CLAUDE.md ~/.local/share/locki/home/.claude/CLAUDE.md` to copy your custom instructions for use in sandboxes.
 
-- Forward ports from a sandbox to your host: `locki port-forward -m <substring> 8080` or `locki port-forward -m <substring> :3000` for a random host port. Use `--clear` to remove all forwards. Agent in sandbox can forward via self-service, just ask them.
+- Something is broken? Try `locki vm delete` -- it will preserve your worktrees and settings, but the VM and sandboxes will be recreated from scratch on next run.
 
-- Using Git hooks? Locki worktrees are automatically configured to run these inside the sandbox, even if you run `git` from outside. You won't be surprised by a `.venv` or `node_modules` containing incompatible binaries.
-
-- Something is broken? Try `locki vm delete` -- it will preserve your worktrees and settings (under the XDG base directories, e.g. `~/.config/locki` and `~/.local/share/locki`), but the VM will be recreated from scratch on next run.
-
-- Sandboxes run on Fedora 43. Want a different OS? Create a `locki.toml` file referencing either [an available OS image](https://images.linuxcontainers.org/), or a local Incus rootfs tarball by path. Example:
+- Sandboxes run on Fedora 43. Want a different OS? Create a `locki.toml` file in repo root referencing either [an available OS image](https://images.linuxcontainers.org/), or a local Incus rootfs tarball by path. Example:
 
   ```toml
   # locki.toml
@@ -162,3 +166,13 @@ Locki uses a single Lima VM which can only access the `~/.local/share/locki/work
 Locki is designed to provide protection for the host operating system and files from being messed up by a malfunctioning AI agent. There is no exfiltration protection, so be aware that API keys exposed to the agents need to be treated as potentially exposed and disposable, with limited scope. (This is no different from running the agent locally, just specifying that Locki does not help here. Use a dedicated solution like [OneCLI](https://github.com/onecli/onecli) if interested.)
 
 Despite best effort, Locki provides no security guarantees and is provided "as is". That's the legal speak for "this is a random project by a random dude provided for free", you can't expect corporate-paid-support level security assurances. Random dude believes that while not perfect, using Locki is better than many existing sandboxing solutions and certainly better than going full `--yolo` on your bare machine and hoping for the best.
+
+&nbsp;
+
+## Tech
+
+- Python CLI
+- Single [Lima](https://lima-vm.io/) VM
+- Multiple [Incus](https://linuxcontainers.org/incus/introduction/) containers
+- [Mise](https://mise.jdx.dev) for ergonomic package installation
+- Host proxy for self-service commands (`git`, `gh`, port forwarding)

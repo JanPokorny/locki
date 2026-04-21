@@ -18,7 +18,7 @@ def _free_port() -> int:
 
 
 def _parse_port_spec(spec: str) -> tuple[int, int]:
-    """Parse port spec into (host_port, container_port). Host port 0 means random."""
+    """Parse port spec into (host_port, sandbox_port). Host port 0 means random."""
     parts = spec.split(":")
     if len(parts) == 1:
         port = int(parts[0])
@@ -27,7 +27,7 @@ def _parse_port_spec(spec: str) -> tuple[int, int]:
         host = _free_port() if parts[0] == "" else int(parts[0])
         return host, int(parts[1])
     raise click.BadParameter(
-        f"Invalid port spec '{spec}'. Use 'port', 'host_port:container_port', or ':container_port'."
+        f"Invalid port spec '{spec}'. Use 'port', 'host_port:sandbox_port', or ':sandbox_port'."
     )
 
 
@@ -58,8 +58,8 @@ def _list_forwards(wt_id: str):
         connect = dev_result.stdout.decode().strip()
         # listen=tcp:0.0.0.0:8080  connect=tcp:127.0.0.1:3000
         host_port = listen.rsplit(":", 1)[-1] if listen else "?"
-        container_port = connect.rsplit(":", 1)[-1] if connect else "?"
-        print(f"{host_port}:{container_port}")
+        sandbox_port = connect.rsplit(":", 1)[-1] if connect else "?"
+        print(f"{host_port}:{sandbox_port}")
 
 
 @click.command(context_settings={"allow_extra_args": True})
@@ -68,22 +68,22 @@ def _list_forwards(wt_id: str):
 @click.option("--list", "list_forwards", is_flag=True, help="List active port forwards.")
 @click.pass_context
 def port_forward_cmd(ctx, match, clear, list_forwards):
-    """Forward ports from the host to a branch's container."""
+    """Forward ports from the host to a sandbox."""
     _, wt_path = resolve_branch(match)
     wt_id = wt_path.relative_to(WORKTREES).parts[0]
 
-    # Ensure container is running
+    # Ensure sandbox is running
     result = run_in_vm(
         ["incus", "list", "--format=csv", "--columns=ns", wt_id],
-        "Checking container",
+        "Checking sandbox",
         check=False,
     )
     lines = result.stdout.decode().strip()
     if wt_id not in lines:
-        logger.error("Container for branch not found. Run 'locki x' first to create it.")
+        logger.error("Did not match an existing sandbox.")
         sys.exit(1)
     if "RUNNING" not in lines:
-        logger.error("Container is not running. Run 'locki x' first to start it.")
+        logger.error(f"Sandbox is not running. Run {click.style(f"locki x -m {wt_id} true", fg="green")} to start it.")
         sys.exit(1)
 
     if clear:
@@ -103,7 +103,7 @@ def port_forward_cmd(ctx, match, clear, list_forwards):
             return
 
     for spec in ctx.args:
-        host_port, container_port = _parse_port_spec(spec)
+        host_port, sandbox_port = _parse_port_spec(spec)
         if host_port < 1024:
             logger.error("Host port %d is not allowed (must be >= 1024).", host_port)
             sys.exit(1)
@@ -118,12 +118,10 @@ def port_forward_cmd(ctx, match, clear, list_forwards):
                 device_name,
                 "proxy",
                 f"listen=tcp:0.0.0.0:{host_port}",
-                f"connect=tcp:127.0.0.1:{container_port}",
+                f"connect=tcp:127.0.0.1:{sandbox_port}",
             ],
-            f"Forwarding host port {host_port} -> container port {container_port}",
+            f"Forwarding host port {host_port} -> sandbox port {sandbox_port}",
         )
-        if not list_forwards:
-            print(f"{host_port}:{container_port}")
 
     if list_forwards:
         _list_forwards(wt_id)

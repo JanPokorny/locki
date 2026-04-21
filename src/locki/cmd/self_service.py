@@ -1,269 +1,404 @@
+from __future__ import annotations
+
+import datetime
+import importlib.resources
 import os
 import pathlib
+import re
 import shlex
 import subprocess
 import sys
+from collections.abc import Iterator
+from dataclasses import dataclass
+from functools import cached_property
 
 import click
 
-from locki.paths import WORKTREES, WORKTREES_META
+from locki.paths import DENIED_LOG, WORKTREES, WORKTREES_META
 
-_required = bool  # --flag=<non-empty value>
-_flag = {None, ""}  # optional boolean flag (--flag or absent, no value)
-_present = {""}  # flag must be present (no value expected)
-
-_diff_flags = {"staged": _flag, "name_only": _flag, "stat": _flag, "name_status": _flag}
-_log_flags = {"oneline": _flag, "format": ..., "max_count": ..., "all": _flag, "graph": _flag}
-_pr_view_flags = {"comments": _flag}
-_run_view_flags = {"log": _flag, "log_failed": _flag}
-_commit_flags = {"message": _required, "signoff": _flag, "amend": _flag}
-_push_flags = {"force_with_lease": _flag}
-_fetch_flags = {"prune": _flag}
-_pull_flags = {"rebase": _flag, "ff_only": _flag}
-_state_flags = {"continue": _flag, "abort": _flag, "skip": _flag}  # rebase/cherry-pick/merge
-_pr_edit_flags = {"title": ..., "body": ..., "add_label": ..., "add_reviewer": ..., "add_assignee": ...}
+State = tuple[int, frozenset[str]]  # (positional cursor, used flag keys)
 
 
-def _is_pr_comments_api_path(path: str) -> bool:
-    """Match repos/{owner}/{repo}/pulls/{number}/comments."""
-    parts = path.split("/")
-    return (
-        len(parts) == 6
-        and parts[0] == "repos"
-        and parts[3] == "pulls"
-        and parts[4].isdigit()
-        and parts[5] == "comments"
+# ── Compound parts ────────────────────────────────────────────────────────────
+
+
+@dataclass
+class Literal:
+    """Literal text segment inside a compound token."""
+
+    text: str
+
+
+@dataclass
+class Placeholder:
+    """A `<name>` segment inside a compound token."""
+
+    name: str
+
+
+CompoundPart = Literal | Placeholder
+
+
+# ── Context ───────────────────────────────────────────────────────────────────
+
+
+class Context:
+    """Per-invocation placeholder resolver. Subprocess lookups are cached."""
+
+    def __init__(self, wt_id: str) -> None:
+        self.wt_id = wt_id
+
+    @cached_property
+    def gh_repo(self) -> tuple[str, str]:
+        result = subprocess.run(
+            ["gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            print("Could not determine current gh repo.", file=sys.stderr)
+            raise SystemExit(1)
+        owner, _, name = result.stdout.strip().partition("/")
+        if not owner or not name:
+            print(f"Invalid repo from gh: {result.stdout.strip()!r}.", file=sys.stderr)
+            raise SystemExit(1)
+        return owner, name
+
+    @cached_property
+    def owned_stash_refs(self) -> list[str]:
+        tag = f"#locki-{self.wt_id}"
+        result = subprocess.run(["git", "stash", "list"], capture_output=True, text=True)
+        return [line.split(":", 1)[0] for line in result.stdout.splitlines() if tag in line]
+
+    def compound(self, parts: list[CompoundPart]) -> re.Pattern[str]:
+        """Build a `re.fullmatch`-ready pattern from compound parts."""
+        buf: list[str] = []
+        for part in parts:
+            if isinstance(part, Literal):
+                buf.append(re.escape(part.text))
+            elif part.name == "wt-id":
+                buf.append(re.escape(self.wt_id))
+            elif part.name == "owner":
+                buf.append(re.escape(self.gh_repo[0]))
+            elif part.name == "repo":
+                buf.append(re.escape(self.gh_repo[1]))
+            elif part.name == "owned-stash-ref":
+                refs = self.owned_stash_refs
+                buf.append("(?:" + "|".join(re.escape(r) for r in refs) + ")" if refs else r"(?!)")
+            elif part.name == "number":
+                buf.append(r"\d+")
+            else:
+                buf.append(r".+?")
+        return re.compile("".join(buf))
+
+
+@dataclass
+class MatchContext:
+    positionals: list[str]
+    flags: dict[str, str]
+    ctx: Context
+
+
+# ── AST ───────────────────────────────────────────────────────────────────────
+# Each node yields all successful continuations of a match as (pos, used) pairs;
+# backtracking falls out of `yield from`.
+
+
+@dataclass
+class Compound:
+    """Positional: literal text interleaved with `<placeholder>`s."""
+
+    parts: list[CompoundPart]
+
+    def match(self, pos: int, used: frozenset[str], mc: MatchContext) -> Iterator[State]:
+        if pos < len(mc.positionals) and mc.ctx.compound(self.parts).fullmatch(mc.positionals[pos]):
+            yield pos + 1, used
+
+
+@dataclass
+class BoolFlag:
+    name: str
+    short: str | None = None
+
+    @property
+    def key(self) -> str:
+        return self.name.replace("-", "_")
+
+    def match(self, pos: int, used: frozenset[str], mc: MatchContext) -> Iterator[State]:
+        if self.key not in used and mc.flags.get(self.key) == "":
+            yield pos, used | {self.key}
+
+
+@dataclass
+class ValueFlag:
+    name: str
+    parts: list[CompoundPart]
+    short: str | None = None
+
+    @property
+    def key(self) -> str:
+        return self.name.replace("-", "_")
+
+    def match(self, pos: int, used: frozenset[str], mc: MatchContext) -> Iterator[State]:
+        val = mc.flags.get(self.key)
+        if self.key not in used and val is not None and mc.ctx.compound(self.parts).fullmatch(val):
+            yield pos, used | {self.key}
+
+
+@dataclass
+class Optional:
+    inner: Node
+
+    def match(self, pos: int, used: frozenset[str], mc: MatchContext) -> Iterator[State]:
+        yield pos, used
+        yield from self.inner.match(pos, used, mc)
+
+
+@dataclass
+class Alternatives:
+    alts: list[Node]
+
+    def match(self, pos: int, used: frozenset[str], mc: MatchContext) -> Iterator[State]:
+        for alt in self.alts:
+            yield from alt.match(pos, used, mc)
+
+
+@dataclass
+class Sequence:
+    items: list[Node]
+
+    def match(self, pos: int, used: frozenset[str], mc: MatchContext) -> Iterator[State]:
+        def go(i: int, p: int, u: frozenset[str]) -> Iterator[State]:
+            if i == len(self.items):
+                yield p, u
+                return
+            for p2, u2 in self.items[i].match(p, u, mc):
+                yield from go(i + 1, p2, u2)
+
+        yield from go(0, pos, used)
+
+
+@dataclass
+class Repetition:
+    inner: Node
+
+    def match(self, pos: int, used: frozenset[str], mc: MatchContext) -> Iterator[State]:
+        def go(p: int, u: frozenset[str]) -> Iterator[State]:
+            for p2, u2 in self.inner.match(p, u, mc):
+                yield p2, u2
+                yield from go(p2, u2)
+
+        yield from go(pos, used)
+
+
+Node = Compound | BoolFlag | ValueFlag | Optional | Alternatives | Sequence | Repetition
+
+
+# ── Parser ────────────────────────────────────────────────────────────────────
+
+
+class Parser:
+    """Parse one grammar line into an AST node.
+
+    Tokens:
+      `...`                                   ellipsis (postfix "one or more"; whitespace-separated)
+      `-x/--flag`, `-x/--flag=<compound>`     long flag with a short alias
+      `--flag`, `--flag=<compound>`           long flag (optionally with compound value)
+      `(`, `)`, `[`, `]`, `|`                  grouping metacharacters
+      compound                                 literal text interleaved with `<placeholder>`s
+    """
+
+    _COMPOUND_BODY = r"(?:<[^>]+>|[^<>\s()\[\]|])+"
+    _TOKEN_RE = re.compile(
+        rf"\.\.\.|(?:-[a-zA-Z]/)?--[a-z][\w-]*(?:={_COMPOUND_BODY})?|[()|\[\]]|{_COMPOUND_BODY}"
     )
+    _COMPOUND_PART_RE = re.compile(r"<([^>]+)>|([^<>]+)")
 
+    def __init__(self, text: str) -> None:
+        self.text = text
+        self.tokens = self._TOKEN_RE.findall(text)
+        self.idx = 0
 
-RULES = [
-    # ── git read-only ────────────────────────────────────────────────────────
-    ("git", "status"),
-    ("git", "diff", _diff_flags),
-    ("git", "diff", str, _diff_flags),
-    ("git", "diff", str, str, _diff_flags),
-    ("git", "log", _log_flags),
-    ("git", "log", str, _log_flags),
-    ("git", "show", {"stat": _flag, "name_only": _flag, "name_status": _flag, "format": ...}),
-    ("git", "show", str, {"stat": _flag, "name_only": _flag, "name_status": _flag, "format": ...}),
-    ("git", "blame", str),
-    ("git", "branch", {"show_current": _flag}),
-    # ── git write (sandbox branch) ───────────────────────────────────────────
-    ("git", "add", {"all": _flag}),
-    ("git", "add", str, ...),
-    ("git", "commit", _commit_flags),
-    ("git", "commit", {"amend": _present, "no_edit": _flag}),
-    ("git", "push", _push_flags),
-    ("git", "fetch", _fetch_flags),
-    ("git", "pull", _pull_flags),
-    ("git", "restore", str, ..., {"staged": _flag, "source": ...}),
-    ("git", "switch", str),
-    ("git", "rebase", str),
-    ("git", "rebase", _state_flags),
-    ("git", "cherry-pick", str),
-    ("git", "cherry-pick", _state_flags),
-    ("git", "merge", str),
-    ("git", "merge", _state_flags),
-    ("git", "reset", str, {"hard": _flag}),
-    ("git", "branch", str),
-    ("git", "branch", str, {"move": _flag}),
-    ("git", "stash", "push", {"message": ...}),
-    ("git", "stash", "push"),
-    ("git", "stash", "list"),
-    ("git", "stash", "pop"),
-    ("git", "stash", "pop", str),
-    ("git", "stash", "apply"),
-    ("git", "stash", "apply", str),
-    ("git", "stash", "drop"),
-    ("git", "stash", "drop", str),
-    # ── gh read-only ─────────────────────────────────────────────────────────
-    ("gh", "pr", "view", _pr_view_flags),
-    ("gh", "pr", "view", str.isdigit, _pr_view_flags),
-    ("gh", "pr", "list"),
-    ("gh", "pr", "diff"),
-    ("gh", "pr", "status"),
-    ("gh", "pr", "checks"),
-    ("gh", "pr", "checks", str.isdigit),
-    ("gh", "run", "list"),
-    ("gh", "run", "view", _run_view_flags),
-    ("gh", "run", "view", str.isdigit, _run_view_flags),
-    ("gh", "issue", "view"),
-    ("gh", "issue", "view", str.isdigit),
-    ("gh", "issue", "list"),
-    ("gh", "api", _is_pr_comments_api_path),
-    # ── gh write (sandbox PR) ────────────────────────────────────────────────
-    (
-        "gh",
-        "pr",
-        "create",
-        {
-            "title": _required,
-            "body": ...,
-            "base": ...,
-            "draft": _flag,
-            "fill": _flag,
-            "reviewer": ...,
-            "label": ...,
-            "assignee": ...,
-            "head": ...,
-        },
-    ),
-    ("gh", "pr", "edit", _pr_edit_flags),
-    ("gh", "pr", "edit", str.isdigit, _pr_edit_flags),
-    ("gh", "pr", "comment", str.isdigit, {"body": _required}),
-    # ── locki ────────────────────────────────────────────────────────────────
-    ("locki", "port-forward", lambda s: s.startswith(":") and s[1:].isdigit(), ...),
-]
+    @classmethod
+    def parse_line(cls, text: str) -> Node:
+        parser = cls(text)
+        tree = parser._alt()
+        if parser.idx != len(parser.tokens):
+            raise ValueError(f"Unparsed trailing tokens in: {text!r}")
+        return tree
 
+    def _peek(self) -> str | None:
+        return self.tokens[self.idx] if self.idx < len(self.tokens) else None
 
-def matches(rule: tuple, positionals: list[str], flags: dict[str, str]) -> bool:
-    """Test whether positionals+flags match a rule tuple.
+    def _eat(self) -> str:
+        tok = self.tokens[self.idx]
+        self.idx += 1
+        return tok
 
-    A rule is a tuple of positional specs, optionally ending with a dict of
-    flag specs.  Positional specs: str (exact), set (membership), callable
-    (predicate).  Ellipsis (...) after a positional spec means zero or more
-    additional positionals are allowed.  --help is always permitted.
-    """
-    if rule and isinstance(rule[-1], dict):
-        spec_args, spec_flags = rule[:-1], {"help": _flag, **rule[-1]}
-    else:
-        spec_args, spec_flags = rule, {"help": _flag}
+    def _expect(self, tok: str) -> None:
+        if self._eat() != tok:
+            raise ValueError(f"Expected {tok!r} in grammar line: {self.text!r}")
 
-    has_varargs = ... in spec_args
-    if has_varargs:
-        fixed_specs = spec_args[: spec_args.index(...)]
-        if len(positionals) < len(fixed_specs):
-            return False
-        for val, spec in zip(positionals[: len(fixed_specs)], fixed_specs, strict=True):
-            if isinstance(spec, str) and val != spec:
-                return False
-            if isinstance(spec, set) and val not in spec:
-                return False
-            if callable(spec) and not spec(val):
-                return False
-    else:
-        if len(positionals) != len(spec_args):
-            return False
-        for val, spec in zip(positionals, spec_args, strict=True):
-            if isinstance(spec, str) and val != spec:
-                return False
-            if isinstance(spec, set) and val not in spec:
-                return False
-            if callable(spec) and not spec(val):
-                return False
+    def _alt(self) -> Node:
+        seqs: list[Node] = [self._seq()]
+        while self._peek() == "|":
+            self._eat()
+            seqs.append(self._seq())
+        return Alternatives(seqs) if len(seqs) > 1 else seqs[0]
 
-    if any(key not in spec_flags for key in flags):
-        return False
-    for key, spec in spec_flags.items():
-        val = flags.get(key)
-        if spec is ...:
-            continue
-        if (
-            (callable(spec) and not spec(val))
-            or (isinstance(spec, set) and val not in spec)
-            or (isinstance(spec, str) and val != spec)
-        ):
-            return False
-    return True
+    def _seq(self) -> Node:
+        items: list[Node] = []
+        while self._peek() not in (None, ")", "]", "|"):
+            items.append(self._item())
+        return Sequence(items)
 
-
-def parse_args(args: list[str]) -> tuple[list[str], dict[str, str]]:
-    """Split args into positionals and long flags.
-
-    Raises ValueError for short flags.
-    """
-    positionals: list[str] = []
-    flags: dict[str, str] = {}
-    for arg in args:
-        if arg.startswith("--"):
-            key, _, value = arg[2:].partition("=")
-            flags[key.replace("-", "_")] = value
-        elif arg.startswith("-"):
-            raise ValueError(f"Short flags not allowed: {arg!r}")
+    def _item(self) -> Node:
+        tok = self._eat()
+        node: Node
+        short: str | None = None
+        if tok.startswith("-") and not tok.startswith("--"):
+            # -x/--long form: strip the short alias and fall through to long-flag handling.
+            short = tok[1]
+            tok = tok[3:]
+        if tok == "[":
+            node = Optional(self._alt())
+            self._expect("]")
+        elif tok == "(":
+            node = self._alt()
+            self._expect(")")
+        elif tok.startswith("--") and "=" in tok:
+            name, _, val_text = tok[2:].partition("=")
+            node = ValueFlag(name, self._compound_parts(val_text), short)
+        elif tok.startswith("--"):
+            node = BoolFlag(tok[2:], short)
         else:
-            positionals.append(arg)
-    return positionals, flags
+            node = Compound(self._compound_parts(tok))
+        if self._peek() == "...":
+            self._eat()
+            node = Repetition(node)
+        return node
+
+    @classmethod
+    def _compound_parts(cls, text: str) -> list[CompoundPart]:
+        return [
+            Placeholder(m.group(1)) if m.group(1) is not None else Literal(m.group(2))
+            for m in cls._COMPOUND_PART_RE.finditer(text)
+        ]
 
 
-def _wt_tag(wt_id: str) -> str:
-    return f"#locki-{wt_id}"
+# ── Ruleset ───────────────────────────────────────────────────────────────────
 
 
-def _validate_branch_suffix(wt_id: str, target: str):
-    """Check that a branch name ends with #locki-<wt_id>."""
-    tag = _wt_tag(wt_id)
-    if not target.endswith(tag):
-        print(f"Branch '{target}' is not allowed. Must end with '{tag}'.", file=sys.stderr)
-        raise SystemExit(1)
+class Ruleset:
+    def __init__(self, rules: list[Node]) -> None:
+        self.rules = rules
+
+    @classmethod
+    def from_markdown(cls, md: str) -> Ruleset:
+        """Parse every non-blank line inside ```locki-self-service-command-filter fences as a grammar rule."""
+        lines: list[str] = []
+        in_block = False
+        for raw in md.splitlines():
+            line = raw.strip()
+            if line == "```locki-self-service-command-filter":
+                in_block = True
+            elif in_block and line.startswith("```"):
+                in_block = False
+            elif in_block and line:
+                lines.append(line)
+        return cls([Parser.parse_line(line) for line in lines])
+
+    @cached_property
+    def _flag_index(self) -> tuple[frozenset[str], dict[str, str]]:
+        """Discover every flag declared in the grammar: (value-flag long keys, short→long)."""
+        value_keys: set[str] = set()
+        short_aliases: dict[str, str] = {}
+        stack: list[Node] = list(self.rules)
+        while stack:
+            node = stack.pop()
+            if isinstance(node, BoolFlag | ValueFlag):
+                if isinstance(node, ValueFlag):
+                    value_keys.add(node.key)
+                if node.short is not None:
+                    prior = short_aliases.get(node.short)
+                    if prior is not None and prior != node.key:
+                        raise ValueError(f"Short flag -{node.short} maps to both --{prior} and --{node.name}")
+                    short_aliases[node.short] = node.key
+            elif isinstance(node, Optional | Repetition):
+                stack.append(node.inner)
+            elif isinstance(node, Alternatives):
+                stack.extend(node.alts)
+            elif isinstance(node, Sequence):
+                stack.extend(node.items)
+        return frozenset(value_keys), short_aliases
+
+    @property
+    def value_flag_keys(self) -> frozenset[str]:
+        return self._flag_index[0]
+
+    @property
+    def short_aliases(self) -> dict[str, str]:
+        return self._flag_index[1]
+
+    def split_argv(self, args: list[str]) -> tuple[list[str], dict[str, str]]:
+        """Split argv into positionals and long flags.
+
+        Short flags registered in the grammar (`-x/--long`) are normalized to their
+        long key.  For value-flags, `--flag value`, `--flag=value`, `-x value`, `-xvalue`
+        and `-x=value` all work; bool flags are standalone.
+        """
+        positionals: list[str] = []
+        flags: dict[str, str] = {}
+        rest_positional = False
+        i = 0
+        while i < len(args):
+            arg = args[i]
+            if rest_positional:
+                positionals.append(arg)
+            elif arg == "--":
+                rest_positional = True
+            elif arg.startswith("--"):
+                key, sep, value = arg[2:].partition("=")
+                key = key.replace("-", "_")
+                if sep == "" and key in self.value_flag_keys and i + 1 < len(args) and not args[i + 1].startswith("-"):
+                    value = args[i + 1]
+                    i += 1
+                flags[key] = value
+            elif len(arg) >= 2 and arg[0] == "-":
+                short = arg[1]
+                if short not in self.short_aliases:
+                    raise ValueError(f"Unknown short flag: {arg!r}")
+                key = self.short_aliases[short]
+                glued = arg[2:].removeprefix("=")
+                if glued:
+                    if key not in self.value_flag_keys:
+                        raise ValueError(f"Short flag -{short} does not take a value: {arg!r}")
+                    flags[key] = glued
+                elif key in self.value_flag_keys and i + 1 < len(args) and not args[i + 1].startswith("-"):
+                    flags[key] = args[i + 1]
+                    i += 1
+                else:
+                    flags[key] = ""
+            else:
+                positionals.append(arg)
+            i += 1
+        return positionals, flags
+
+    def is_allowed(self, positionals: list[str], flags: dict[str, str], wt_id: str) -> bool:
+        """`--help` is always allowed; every other flag must be consumed by the matching rule."""
+        effective = {k: v for k, v in flags.items() if k != "help"}
+        mc = MatchContext(positionals, effective, Context(wt_id))
+        expected = set(effective)
+        target = len(positionals)
+        return any(
+            p == target and used == expected for rule in self.rules for p, used in rule.match(0, frozenset(), mc)
+        )
 
 
-def _validate_branch_arg(wt_id: str, positionals: list[str]):
-    """Validate that the branch name argument ends with #locki-<wt_id>."""
-    target = positionals[2] if len(positionals) >= 3 else None
-    if not target:
-        print("No branch specified.", file=sys.stderr)
-        raise SystemExit(1)
-    _validate_branch_suffix(wt_id, target)
+RULESET = Ruleset.from_markdown((importlib.resources.files("locki") / "data" / "AGENTS.md").read_text())
 
 
-def _validate_gh_api_repo(api_path: str):
-    """Verify that the repo in a gh api path matches the current repo."""
-    parts = api_path.split("/")
-    requested = f"{parts[1]}/{parts[2]}"
-    result = subprocess.run(
-        ["gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        print("Could not determine current repo.", file=sys.stderr)
-        raise SystemExit(1)
-    actual = result.stdout.strip()
-    if requested != actual:
-        print(f"API repo '{requested}' does not match current repo '{actual}'.", file=sys.stderr)
-        raise SystemExit(1)
-
-
-def _handle_stash_push(wt_id: str, flags: dict[str, str]):
-    """Auto-prefix stash message with worktree tag for wt-scoped stashing."""
-    tag = _wt_tag(wt_id)
-    msg = flags.get("message", "")
-    full_msg = f"[{tag}] {msg}" if msg else f"[{tag}]"
-    os.execvp("git", ["git", "stash", "push", f"--message={full_msg}"])
-
-
-def _handle_stash_list(wt_id: str):
-    """Show only stashes belonging to the current worktree."""
-    tag = _wt_tag(wt_id)
-    result = subprocess.run(["git", "stash", "list"], capture_output=True, text=True)
-    for line in result.stdout.splitlines():
-        if f"[{tag}]" in line:
-            print(line)
-    raise SystemExit(0 if result.returncode == 0 else result.returncode)
-
-
-def _handle_stash_pop_apply_drop(wt_id: str, positionals: list[str]):
-    """For pop/apply/drop: scope operations to the current worktree's stashes."""
-    action = positionals[2]  # "pop", "apply", or "drop"
-    ref = positionals[3] if len(positionals) >= 4 else None
-    tag = _wt_tag(wt_id)
-
-    result = subprocess.run(["git", "stash", "list"], capture_output=True, text=True)
-    stash_lines = result.stdout.splitlines()
-
-    if ref:
-        for line in stash_lines:
-            if line.startswith(ref + ":") and f"[{tag}]" in line:
-                os.execvp("git", ["git", "stash", action, ref])
-        print(f"Stash {ref} does not belong to worktree '{wt_id}'.", file=sys.stderr)
-        raise SystemExit(1)
-    else:
-        for line in stash_lines:
-            if f"[{tag}]" in line:
-                found_ref = line.split(":", 1)[0]
-                os.execvp("git", ["git", "stash", action, found_ref])
-        print(f"No stashes found for worktree '{wt_id}'.", file=sys.stderr)
-        raise SystemExit(1)
+# ── CLI entry point ───────────────────────────────────────────────────────────
 
 
 @click.command(hidden=True)
@@ -286,7 +421,6 @@ def self_service_cmd():
 
     cwd_str, *argv = parts
 
-    # Validate worktree
     cwd = pathlib.Path(cwd_str).resolve()
     try:
         relative = cwd.relative_to(WORKTREES)
@@ -304,43 +438,31 @@ def self_service_cmd():
         print("Worktree .git mismatch — possible tampering.", file=sys.stderr)
         raise SystemExit(1)
 
-    # Validate command against allowlist
     if not argv:
         print("Empty command.", file=sys.stderr)
         raise SystemExit(1)
     exe = pathlib.Path(argv[0]).name
     try:
-        positionals, flags = parse_args(argv[1:])
+        positionals, flags = RULESET.split_argv(argv[1:])
     except ValueError as e:
         print(str(e), file=sys.stderr)
         raise SystemExit(1) from None
-    if not any(matches(rule, [exe, *positionals], flags) for rule in RULES):
+
+    # chdir first so `gh repo view` and `git stash list` run inside the worktree.
+    os.chdir(str(cwd))
+
+    if not RULESET.is_allowed([exe, *positionals], flags, wt_id):
+        try:
+            DENIED_LOG.parent.mkdir(parents=True, exist_ok=True)
+            with DENIED_LOG.open("a") as fh:
+                ts = datetime.datetime.now().isoformat(timespec="seconds")
+                fh.write(f"{ts}\t{wt_id}\t{shlex.join(argv)}\n")
+        except OSError:
+            pass
         print(f"Command not allowed: {' '.join(argv)!r}", file=sys.stderr)
         raise SystemExit(1)
 
-    os.chdir(str(cwd))
-
-    # Command-specific handlers
-    if exe == "git" and (
-        positionals[:1] == ["switch"] or (positionals[:1] == ["branch"] and "show_current" not in flags)
-    ):
-        _validate_branch_arg(wt_id, [exe, *positionals])
-        os.execvp(exe, [exe, *argv[1:]])
-    elif exe == "git" and positionals[:2] == ["stash", "push"]:
-        _handle_stash_push(wt_id, flags)
-    elif exe == "git" and positionals[:2] == ["stash", "list"]:
-        _handle_stash_list(wt_id)
-    elif (
-        exe == "git"
-        and positionals[:1] == ["stash"]
-        and len(positionals) >= 2
-        and positionals[1] in ("pop", "apply", "drop")
-    ):
-        _handle_stash_pop_apply_drop(wt_id, [exe, *positionals])
-    elif exe == "gh" and positionals[:1] == ["api"]:
-        _validate_gh_api_repo(positionals[1])
-        os.execvp(exe, [exe, *argv[1:]])
-    elif exe == "locki":
+    if exe == "locki":
         os.execvp(sys.executable, [sys.executable, "-m", "locki", *argv[1:]])
     else:
         os.execvp(exe, [exe, *argv[1:]])
