@@ -2,7 +2,7 @@ import os
 import pathlib
 
 def _normalized_path(path: str | pathlib.Path) -> pathlib.Path:
-    return pathlib.Path(path).expanduser().resolve()
+    return pathlib.Path(path).resolve()
 
 
 HOME = _normalized_path(pathlib.Path.home())
