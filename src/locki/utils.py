@@ -269,17 +269,27 @@ def list_locki_worktree_branches() -> list[str]:
 
 
 def match_sandbox_branch(query: str) -> str:
-    """Substring-match *query* against existing Locki worktree branches.
+    """Resolve *query* to a Locki-managed branch name.
 
-    Returns the unique match.  Exits with an error on zero or ambiguous matches.
+    Tried in order:
+      1. Exact worktree id — the `<wt-id>` suffix trailing `#locki-` in the branch name.
+      2. Exact branch name.
+      3. Unique substring of a branch name.
+
+    Exits with an error on zero or ambiguous matches.
     """
     wt_branches = list_locki_worktree_branches()
-    matches = [b for b in wt_branches if query in b]
-    if len(matches) == 1:
-        return matches[0]
-    if len(matches) == 0:
+    by_wt_id = [b for b in wt_branches if b.rsplit("#locki-", 1)[-1] == query]
+    if len(by_wt_id) == 1:
+        return by_wt_id[0]
+    if query in wt_branches:
+        return query
+    substring_matches = [b for b in wt_branches if query in b]
+    if len(substring_matches) == 1:
+        return substring_matches[0]
+    if not substring_matches:
         click.echo(
-            f"{click.style('ᛞ', fg='red', bold=True)} No sandbox branch matching {click.style(query, fg='yellow')!r}.",
+            f"{click.style('ᛞ', fg='red', bold=True)} No sandbox matching {click.style(query, fg='yellow')!r}.",
             err=True,
         )
     else:
@@ -287,6 +297,6 @@ def match_sandbox_branch(query: str) -> str:
             f"{click.style('ᛞ', fg='red', bold=True)} Ambiguous match for {click.style(query, fg='yellow')!r}:",
             err=True,
         )
-        for m in sorted(matches):
+        for m in sorted(substring_matches):
             click.echo(f"  {m}", err=True)
     sys.exit(1)
