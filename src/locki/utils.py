@@ -240,7 +240,7 @@ def find_worktree_for_branch(branch: str) -> pathlib.Path | None:
     current_path: pathlib.Path | None = None
     for line in result.stdout.decode().splitlines():
         if line.startswith("worktree "):
-            current_path = pathlib.Path(line.split(" ", 1)[1])
+            current_path = pathlib.Path(line.split(" ", 1)[1]).expanduser().resolve()
         elif (
             line.startswith("branch refs/heads/")
             and line.removeprefix("branch refs/heads/") == branch
@@ -262,7 +262,7 @@ def list_locki_worktree_branches() -> list[str]:
     current_path: pathlib.Path | None = None
     for line in result.stdout.splitlines():
         if line.startswith("worktree "):
-            current_path = pathlib.Path(line.split(" ", 1)[1])
+            current_path = pathlib.Path(line.split(" ", 1)[1]).expanduser().resolve()
         elif line.startswith("branch refs/heads/") and current_path and current_path.is_relative_to(WORKTREES):
             branches.append(line.removeprefix("branch refs/heads/"))
     return branches

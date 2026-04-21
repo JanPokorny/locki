@@ -18,7 +18,7 @@ import tempfile
 import click
 
 from locki.config import load_config
-from locki.paths import DATA, LIMA, RUNTIME, STATE, WORKTREES, WORKTREES_META
+from locki.paths import DATA, HOME, LIMA, RUNTIME, STATE, WORKTREES, WORKTREES_META
 from locki.utils import (
     current_worktree,
     file_lock,
@@ -408,7 +408,7 @@ def exec_cmd(ctx, match, select, create, id_file):
     locki_bin = shutil.which("locki") or f"{sys.executable} -m locki"
     # Forward HOME and any XDG base-dir vars so self-service resolves the same paths.
     # sshd strips env by default; only vars baked into the command= reach the child.
-    cmd_env = f"HOME={shlex.quote(str(pathlib.Path.home()))}"
+    cmd_env = f"HOME={shlex.quote(str(HOME))}"
     for var in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR"):
         val = os.environ.get(var)
         if val:
@@ -494,10 +494,9 @@ def exec_cmd(ctx, match, select, create, id_file):
         f"{click.style('ᛃ', fg='cyan', bold=True)}   via shell: {click.style(f'locki x {f" -b {wt_id}" if branch else ""}', fg='green')}",
         err=True,
     )
-    wt_full = WORKTREES / wt_id
     try:
-        wt_display = "~/" + str(wt_full.relative_to(pathlib.Path.home()))
+        wt_display = str(pathlib.Path("~") / (WORKTREES / wt_id).relative_to(HOME))
     except ValueError:
-        wt_display = str(wt_full)
+        wt_display = str(WORKTREES / wt_id)
     click.echo(f"{click.style('ᛃ', fg='cyan', bold=True)}     on disk: {click.style(wt_display, fg='green')}", err=True)
     raise SystemExit(result.returncode)
