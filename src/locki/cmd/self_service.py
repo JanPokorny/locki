@@ -89,7 +89,7 @@ class Context:
                 buf.append(r"\d+")
             else:
                 buf.append(r".+?")
-        return re.compile("".join(buf))
+        return re.compile("".join(buf), re.DOTALL)
 
 
 @dataclass
