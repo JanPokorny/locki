@@ -20,6 +20,19 @@ from locki.paths import RUNTIME, WORKTREES, WORKTREES_META
 logger = logging.getLogger(__name__)
 
 
+def _normalized_path(path: pathlib.Path | str) -> pathlib.Path:
+    return pathlib.Path(path).expanduser().resolve()
+
+
+def _worktree_root_for_path(path: pathlib.Path | str) -> pathlib.Path | None:
+    normalized = _normalized_path(path)
+    try:
+        relative = normalized.relative_to(WORKTREES)
+    except ValueError:
+        return None
+    return WORKTREES / relative.parts[0]
+
+
 class AliasGroup(click.Group):
     """Click group that supports pipe-separated command aliases (e.g. 'shell | sh | bash')."""
 
@@ -179,9 +192,8 @@ def file_lock(name: str, wait_message: str):
 
 @functools.cache
 def git_root() -> pathlib.Path:
-    cwd = pathlib.Path.cwd().resolve()
-    if cwd.is_relative_to(WORKTREES.resolve()):
-        wt_path = WORKTREES / cwd.relative_to(WORKTREES).parts[0]
+    cwd = _normalized_path(pathlib.Path.cwd())
+    if wt_path := _worktree_root_for_path(cwd):
         meta_git = WORKTREES_META / wt_path.name / ".git"
         if not meta_git.exists():
             logger.error("No worktree metadata found for '%s'.", wt_path.name)
@@ -209,10 +221,7 @@ def git_root() -> pathlib.Path:
 
 def current_worktree() -> pathlib.Path | None:
     """If cwd is inside a Locki-managed worktree, return its path."""
-    cwd = pathlib.Path.cwd().resolve()
-    if not cwd.is_relative_to(WORKTREES.resolve()):
-        return None
-    return WORKTREES / cwd.relative_to(WORKTREES).parts[0]
+    return _worktree_root_for_path(pathlib.Path.cwd())
 
 
 def resolve_branch(branch: str | None) -> tuple[str, pathlib.Path]:
@@ -240,12 +249,12 @@ def find_worktree_for_branch(branch: str) -> pathlib.Path | None:
     current_path: pathlib.Path | None = None
     for line in result.stdout.decode().splitlines():
         if line.startswith("worktree "):
-            current_path = pathlib.Path(line.split(" ", 1)[1])
+            current_path = _normalized_path(line.split(" ", 1)[1])
         elif (
             line.startswith("branch refs/heads/")
             and line.removeprefix("branch refs/heads/") == branch
             and current_path
-            and current_path.is_relative_to(WORKTREES)
+            and _worktree_root_for_path(current_path)
         ):
             return current_path
     return None
@@ -262,8 +271,8 @@ def list_locki_worktree_branches() -> list[str]:
     current_path: pathlib.Path | None = None
     for line in result.stdout.splitlines():
         if line.startswith("worktree "):
-            current_path = pathlib.Path(line.split(" ", 1)[1])
-        elif line.startswith("branch refs/heads/") and current_path and current_path.is_relative_to(WORKTREES):
+            current_path = _normalized_path(line.split(" ", 1)[1])
+        elif line.startswith("branch refs/heads/") and current_path and _worktree_root_for_path(current_path):
             branches.append(line.removeprefix("branch refs/heads/"))
     return branches
 

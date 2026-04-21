@@ -288,10 +288,12 @@ def self_service_cmd():
 
     # Validate worktree
     cwd = pathlib.Path(cwd_str).resolve()
-    if not cwd.is_relative_to(WORKTREES.resolve()):
+    try:
+        relative = cwd.relative_to(WORKTREES)
+    except ValueError:
         print(f"Not a locki worktree: {cwd_str!r}", file=sys.stderr)
         raise SystemExit(1)
-    wt_root = WORKTREES / cwd.relative_to(WORKTREES).parts[0]
+    wt_root = WORKTREES / relative.parts[0]
     wt_id = wt_root.name
     meta_git = WORKTREES_META / wt_id / ".git"
     dot_git = wt_root / ".git"

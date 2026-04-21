@@ -3,7 +3,7 @@ import pathlib
 
 import click
 
-from locki.paths import LIMA, WORKTREES, WORKTREES_META
+from locki.paths import HOME, LIMA, WORKTREES, WORKTREES_META
 from locki.utils import AliasGroup, limactl, run_command, run_in_vm
 
 
@@ -46,7 +46,6 @@ def vm_status_cmd():
     except Exception:
         return
 
-    home = pathlib.Path.home()
     rows: list[tuple[str, str, str, str, str]] = []
     for line in result.stdout.decode().splitlines():
         parts = line.split(",", 1)
@@ -61,11 +60,11 @@ def vm_status_cmd():
         repo_path = pathlib.Path(repo_file.read_text().strip()) if repo_file.exists() else None
         repo = ""
         if repo_path:
-            repo = "~/" + str(repo_path.relative_to(home)) if repo_path.is_relative_to(home) else str(repo_path)
+            repo = "~/" + str(repo_path.relative_to(HOME)) if repo_path.is_relative_to(HOME) else str(repo_path)
         wt_path = WORKTREES / wt_id
         path_str = str(wt_path)
-        if wt_path.is_relative_to(home):
-            path_str = "~/" + str(wt_path.relative_to(home))
+        if wt_path.is_relative_to(HOME):
+            path_str = "~/" + str(wt_path.relative_to(HOME))
         rows.append((wt_id, status, repo, branch, path_str))
 
     if not rows:
