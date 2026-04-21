@@ -494,10 +494,9 @@ def exec_cmd(ctx, match, select, create, id_file):
         f"{click.style('ᛃ', fg='cyan', bold=True)}   via shell: {click.style(f'locki x {f" -b {wt_id}" if branch else ""}', fg='green')}",
         err=True,
     )
-    wt_full = WORKTREES / wt_id
     try:
-        wt_display = "~/" + str(wt_full.relative_to(HOME))
+        wt_display = str(pathlib.Path("~") / (WORKTREES / wt_id).relative_to(HOME))
     except ValueError:
-        wt_display = str(wt_full)
+        wt_display = str(WORKTREES / wt_id)
     click.echo(f"{click.style('ᛃ', fg='cyan', bold=True)}     on disk: {click.style(wt_display, fg='green')}", err=True)
     raise SystemExit(result.returncode)

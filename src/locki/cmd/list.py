@@ -2,7 +2,7 @@ import pathlib
 
 import click
 
-from locki.paths import HOME, WORKTREES, _normalized_path
+from locki.paths import HOME, WORKTREES
 from locki.utils import git_root, run_command
 
 
@@ -21,7 +21,7 @@ def list_cmd():
     current_branch: str | None = None
     for line in result.stdout.decode().splitlines():
         if line.startswith("worktree "):
-            current_path = _normalized_path(line.split(" ", 1)[1])
+            current_path = pathlib.Path(line.split(" ", 1)[1]).expanduser().resolve()
             current_branch = None
         elif line.startswith("branch refs/heads/"):
             current_branch = line.removeprefix("branch refs/heads/")
