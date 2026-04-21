@@ -486,12 +486,12 @@ def exec_cmd(ctx, match, select, create, id_file):
     click.echo(f"{click.style('ᛟ', fg='magenta', bold=True)} Exited Locki sandbox.", err=True)
     click.echo(f"{click.style('ᛃ', fg='cyan', bold=True)} Return to this worktree:", err=True)
     click.echo(
-        f"{click.style('ᛃ', fg='cyan', bold=True)}      via AI: {click.style(f'locki ai{f" -b {wt_id}" if branch else ""}', fg='green')}"
+        f"{click.style('ᛃ', fg='cyan', bold=True)}      via AI: {click.style(f'locki ai{f" -m {wt_id}" if branch else ""}', fg='green')}"
         + (f" (or just {click.style('locki ai', fg='green')} and find it in the list)" if branch else ""),
         err=True,
     )
     click.echo(
-        f"{click.style('ᛃ', fg='cyan', bold=True)}   via shell: {click.style(f'locki x {f" -b {wt_id}" if branch else ""}', fg='green')}",
+        f"{click.style('ᛃ', fg='cyan', bold=True)}   via shell: {click.style(f'locki x {f" -m {wt_id}" if branch else ""}', fg='green')}",
         err=True,
     )
     try:

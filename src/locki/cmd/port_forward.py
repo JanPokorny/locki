@@ -126,5 +126,5 @@ def port_forward_cmd(ctx, match, clear, list_forwards):
     if list_forwards:
         _list_forwards(wt_id)
     elif not ctx.args and not clear:
-        logger.error("No ports specified. Usage: locki port-forward -b <branch> [--list] [--clear] [port[:port]...]")
+        logger.error("No ports specified. Usage: locki port-forward [-m <sandbox-name-part>] [--list] [--clear] [port[:port]] ...")
         sys.exit(1)
