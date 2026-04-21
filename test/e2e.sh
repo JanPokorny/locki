@@ -69,6 +69,8 @@ REMOTE="$TMPDIR_ROOT/my_repo.v2-test"
 echo "Creating test repo..."
 git init --bare "$REMOTE"
 git clone "$REMOTE" "$REPO"
+git -C "$REPO" config user.name "Locki Test"
+git -C "$REPO" config user.email "locki@example.com"
 git -C "$REPO" commit --allow-empty -m "initial"
 git -C "$REPO" push
 
