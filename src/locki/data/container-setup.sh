@@ -86,7 +86,7 @@ if test -x /usr/lib64/chromium-browser/headless_shell; then
 fi
 target="$(pwd)"
 cd /
-exec mise x -C "$target" github:simonw/rodney -- rodney "$@"
+exec mise x github:simonw/rodney -- bash -c 'cd "$1" && shift && exec rodney "$@"' _ "$target" "$@"
 __LOCKI_EOF__
 
 ## JIT shims for nodejs-based tools
@@ -107,7 +107,7 @@ target="\$(pwd)"
 cd /
 # set global node version to avoid broken mise shim
 if test "\$(mise tool node --requested)" = "[none]"; then mise use -g node@24; fi
-exec mise x -C "\$target" nodejs@24 -- mise x $pkg@\$version -- $cmd "\$@"
+exec mise x nodejs@24 -- mise x $pkg@\$version -- bash -c 'cd "\$1" && shift && exec $cmd "\$@"' _ "\$target" "\$@"
 EOF
 done
 
@@ -134,7 +134,7 @@ export MISE_STATUS_MESSAGE_MISSING_TOOLS=never
 # run from root to avoid mise discovering mise.toml and triggering full install
 target="\$(pwd)"
 cd /  
-exec mise x -C "\$target" $pkg -- $cmd "\$@"
+exec mise x $pkg -- bash -c 'cd "\$1" && shift && exec $cmd "\$@"' _ "\$target" "\$@"
 EOF
 done
 
