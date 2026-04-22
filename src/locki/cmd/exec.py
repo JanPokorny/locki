@@ -5,20 +5,18 @@ import json
 import logging
 import os
 import pathlib
-import re
 import secrets
 import shlex
-import shutil
-import socket
 import string
 import subprocess
 import sys
 import tempfile
+import time
 
 import click
 
 from locki.config import load_config
-from locki.paths import DATA, HOME, LIMA, RUNTIME, STATE, WORKTREES, WORKTREES_META
+from locki.paths import DATA, HOME, LIMA, RUNTIME, WORKTREES, WORKTREES_META
 from locki.utils import (
     current_worktree,
     file_lock,
@@ -107,6 +105,41 @@ logger = logging.getLogger(__name__)
 
 def _gen_wt_id() -> str:
     return "".join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(8))
+
+
+def _ensure_daemon_running() -> int:
+    """Idempotently start the Locki host daemon; return its SSH port (0 on failure)."""
+    pid_file = RUNTIME / "daemon.pid"
+    port_file = RUNTIME / "daemon.port"
+    with file_lock("daemon", "Waiting for daemon start"):
+        alive = False
+        if pid_file.exists():
+            try:
+                os.kill(int(pid_file.read_text().strip()), 0)
+                alive = True
+            except (ProcessLookupError, ValueError, PermissionError, FileNotFoundError):
+                pid_file.unlink(missing_ok=True)
+                port_file.unlink(missing_ok=True)
+        if not alive:
+            port_file.unlink(missing_ok=True)
+            subprocess.Popen(
+                [sys.executable, "-m", "locki", "_daemon"],
+                start_new_session=True,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        for _ in range(100):  # up to 10s
+            if port_file.exists():
+                try:
+                    port = int(port_file.read_text().strip())
+                    if port:
+                        return port
+                except ValueError:
+                    pass
+            time.sleep(0.1)
+    logger.warning("Locki daemon did not report a port in time. Self-service proxy is disabled in this sandbox.")
+    return 0
 
 
 @click.command(
@@ -391,60 +424,11 @@ def exec_cmd(ctx, match, select, create, id_file):
             input=setup_script,
         )
 
-    # Start SSH proxy (sshd) for git/gh command forwarding
-    ssh_dir = STATE / "ssh"
-    ssh_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    # Start Locki host daemon (SSH forced-command proxy + periodic cleanup).
+    RUNTIME.mkdir(parents=True, exist_ok=True)
     client_ssh_dir = DATA / "home" / ".ssh"
     client_ssh_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-    host_key = ssh_dir / "host_key"
-    client_key = client_ssh_dir / "id_locki"
-    if not host_key.exists():
-        subprocess.run(["ssh-keygen", "-t", "ed25519", "-f", str(host_key), "-N", ""], check=True, capture_output=True)
-    if not client_key.exists():
-        subprocess.run(
-            ["ssh-keygen", "-t", "ed25519", "-f", str(client_key), "-N", ""], check=True, capture_output=True
-        )
-    auth_keys = ssh_dir / "authorized_keys"
-    locki_bin = shutil.which("locki") or f"{sys.executable} -m locki"
-    # Forward HOME and any XDG base-dir vars so self-service resolves the same paths.
-    # sshd strips env by default; only vars baked into the command= reach the child.
-    cmd_env = f"HOME={shlex.quote(str(HOME))}"
-    for var in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR"):
-        val = os.environ.get(var)
-        if val:
-            cmd_env += f" {var}={shlex.quote(val)}"
-    auth_keys.write_text(
-        f'command="{cmd_env} {locki_bin} self-service",no-port-forwarding,no-X11-forwarding,no-agent-forwarding '
-        f"{client_key.with_suffix('.pub').read_text().strip()}\n"
-    )
-    auth_keys.chmod(0o600)
-    RUNTIME.mkdir(parents=True, exist_ok=True)
-    pid_file = RUNTIME / "sshd.pid"
-    sshd_running = False
-    ssh_port = 0
-    if pid_file.exists():
-        try:
-            os.kill(int(pid_file.read_text().strip()), 0)
-            sshd_running = True
-            match = re.search(r"^Port (\d+)", (ssh_dir / "sshd_config").read_text(), re.MULTILINE)
-            if match:
-                ssh_port = int(match.group(1))
-        except ProcessLookupError, ValueError, PermissionError, FileNotFoundError:
-            pass
-    sshd_path = shutil.which("sshd")
-    if sshd_path is None:
-        logger.warning("sshd was not found on the host. Self-service proxy is disabled in this sandbox.")
-    elif not sshd_running:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.bind(("127.0.0.1", 0))
-            ssh_port = s.getsockname()[1]
-        (ssh_dir / "sshd_config").write_text(
-            f"Port {ssh_port}\nListenAddress 0.0.0.0\nHostKey {host_key}\n"
-            f"AuthorizedKeysFile {auth_keys}\nPidFile {pid_file}\n"
-            f"PasswordAuthentication no\nPubkeyAuthentication yes\n"
-            f"StrictModes no\nUsePAM no\nLogLevel ERROR\n"
-        )
-        subprocess.Popen([sshd_path, "-f", str(ssh_dir / "sshd_config")], start_new_session=True)
+    ssh_port = _ensure_daemon_running()
     ssh_config_dst = client_ssh_dir / "locki-ssh-config"
     ssh_config_template = (importlib.resources.files("locki") / "data" / "locki-ssh-config").read_text()
     ssh_config_dst.write_text(ssh_config_template + f"    Port {ssh_port}\n    User {getpass.getuser()}\n")
