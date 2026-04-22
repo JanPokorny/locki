@@ -107,41 +107,6 @@ def _gen_wt_id() -> str:
     return "".join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(8))
 
 
-def _ensure_daemon_running() -> int:
-    """Idempotently start the Locki host daemon; return its SSH port (0 on failure)."""
-    pid_file = RUNTIME / "daemon.pid"
-    port_file = RUNTIME / "daemon.port"
-    with file_lock("daemon", "Waiting for daemon start"):
-        alive = False
-        if pid_file.exists():
-            try:
-                os.kill(int(pid_file.read_text().strip()), 0)
-                alive = True
-            except (ProcessLookupError, ValueError, PermissionError, FileNotFoundError):
-                pid_file.unlink(missing_ok=True)
-                port_file.unlink(missing_ok=True)
-        if not alive:
-            port_file.unlink(missing_ok=True)
-            subprocess.Popen(
-                [sys.executable, "-m", "locki", "_daemon"],
-                start_new_session=True,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-        for _ in range(100):  # up to 10s
-            if port_file.exists():
-                try:
-                    port = int(port_file.read_text().strip())
-                    if port:
-                        return port
-                except ValueError:
-                    pass
-            time.sleep(0.1)
-    logger.warning("Locki daemon did not report a port in time. Self-service proxy is disabled in this sandbox.")
-    return 0
-
-
 @click.command(
     "exec | x",
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True, "allow_interspersed_args": False},
@@ -424,14 +389,46 @@ def exec_cmd(ctx, match, select, create, id_file):
             input=setup_script,
         )
 
-    # Start Locki host daemon (SSH forced-command proxy + periodic cleanup).
+    # Idempotently start the Locki host daemon (SSH forced-command proxy + periodic cleanup).
     RUNTIME.mkdir(parents=True, exist_ok=True)
     client_ssh_dir = DATA / "home" / ".ssh"
     client_ssh_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-    ssh_port = _ensure_daemon_running()
-    ssh_config_dst = client_ssh_dir / "locki-ssh-config"
+    pid_file = RUNTIME / "daemon.pid"
+    port_file = RUNTIME / "daemon.port"
+    ssh_port = 0
+    with file_lock("daemon", "Waiting for daemon start"):
+        alive = False
+        if pid_file.exists():
+            try:
+                os.kill(int(pid_file.read_text().strip()), 0)
+                alive = True
+            except (ProcessLookupError, ValueError, PermissionError, FileNotFoundError):
+                pid_file.unlink(missing_ok=True)
+                port_file.unlink(missing_ok=True)
+        if not alive:
+            port_file.unlink(missing_ok=True)
+            subprocess.Popen(
+                [sys.executable, "-m", "locki", "_daemon"],
+                start_new_session=True,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        for _ in range(100):  # up to 10s for the daemon to write its port
+            if port_file.exists():
+                try:
+                    ssh_port = int(port_file.read_text().strip())
+                    if ssh_port:
+                        break
+                except ValueError:
+                    pass
+            time.sleep(0.1)
+    if not ssh_port:
+        logger.warning("Locki daemon did not report a port in time. Self-service proxy is disabled in this sandbox.")
     ssh_config_template = (importlib.resources.files("locki") / "data" / "locki-ssh-config").read_text()
-    ssh_config_dst.write_text(ssh_config_template + f"    Port {ssh_port}\n    User {getpass.getuser()}\n")
+    (client_ssh_dir / "locki-ssh-config").write_text(
+        ssh_config_template + f"    Port {ssh_port}\n    User {getpass.getuser()}\n"
+    )
 
     forwarded_env = {"TERM", "COLORTERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION", "LANG", "SSH_TTY"}
 

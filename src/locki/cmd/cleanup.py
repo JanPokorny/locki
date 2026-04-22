@@ -17,25 +17,11 @@ logger = logging.getLogger(__name__)
 IDLE_TIMEOUT = 600
 VM_IDLE_TIMEOUT = 600
 
-CLEANUP_STATE = STATE / "cleanup"
-LAST_ACTIVE_FILE = CLEANUP_STATE / "last-active.json"
-VM_IDLE_SINCE_FILE = CLEANUP_STATE / "vm-idle-since"
+LAST_ACTIVE_FILE = STATE / "cleanup" / "last-active.json"
+VM_IDLE_SINCE_FILE = STATE / "cleanup" / "vm-idle-since"
 
-EXIT_OK = 0
 EXIT_VM_POWERED_OFF = 2
 EXIT_VM_NOT_RUNNING = 3
-
-
-def _vm_running() -> bool:
-    result = subprocess.run([limactl(), "list", "--json"], capture_output=True, text=True)
-    for line in result.stdout.splitlines():
-        try:
-            vm = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if vm.get("name") == "locki" and vm.get("status") == "Running":
-            return True
-    return False
 
 
 def _incus(args: list[str]) -> subprocess.CompletedProcess[str]:
@@ -48,9 +34,8 @@ def _incus(args: list[str]) -> subprocess.CompletedProcess[str]:
 
 def _list_containers() -> list[tuple[str, str]]:
     """Return (name, status) for every container."""
-    result = _incus(["list", "--format=csv", "--columns=n,s"])
     pairs: list[tuple[str, str]] = []
-    for line in result.stdout.splitlines():
+    for line in _incus(["list", "--format=csv", "--columns=n,s"]).stdout.splitlines():
         name, _, status = line.partition(",")
         name, status = name.strip(), status.strip()
         if name:
@@ -58,38 +43,20 @@ def _list_containers() -> list[tuple[str, str]]:
     return pairs
 
 
-def _container_worktree_source(name: str) -> str | None:
-    result = _incus(["config", "device", "get", name, "worktree", "source"])
-    if result.returncode != 0:
-        return None
-    source = result.stdout.strip()
-    return source or None
-
-
-def _active_container_names() -> set[str]:
-    """Names of containers that have a running incus operation attached."""
-    result = _incus(["operation", "list", "--format=json"])
-    if result.returncode != 0 or not result.stdout.strip():
-        return set()
-    try:
-        ops = json.loads(result.stdout)
-    except json.JSONDecodeError:
-        return set()
-    active: set[str] = set()
-    for op in ops:
-        if op.get("status") != "Running":
-            continue
-        resources = op.get("resources") or {}
-        for key in ("containers", "instances"):
-            for path in resources.get(key) or []:
-                active.add(path.rsplit("/", 1)[-1])
-    return active
-
-
 @click.command(hidden=True)
 def cleanup_cmd():
     """One-shot: stop idle containers, remove orphans, power off idle VM."""
-    if not _vm_running():
+    vm_list = subprocess.run([limactl(), "list", "--json"], capture_output=True, text=True)
+    vm_running = False
+    for line in vm_list.stdout.splitlines():
+        try:
+            vm = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if vm.get("name") == "locki" and vm.get("status") == "Running":
+            vm_running = True
+            break
+    if not vm_running:
         sys.exit(EXIT_VM_NOT_RUNNING)
 
     try:
@@ -99,20 +66,28 @@ def cleanup_cmd():
 
     worktrees_root = WORKTREES.resolve()
     for name, _status in _list_containers():
-        source = _container_worktree_source(name)
-        if source is None:
+        r = _incus(["config", "device", "get", name, "worktree", "source"])
+        if r.returncode != 0 or not r.stdout.strip():
             continue
-        source_path = pathlib.Path(source).resolve()
-        # Only consider managed worktrees; never touch containers mounted elsewhere.
-        if not source_path.is_relative_to(worktrees_root):
-            continue
-        if not source_path.exists():
-            logger.info("Deleting orphaned container %r (worktree %s is gone).", name, source)
+        source_path = pathlib.Path(r.stdout.strip()).resolve()
+        if source_path.is_relative_to(worktrees_root) and not source_path.exists():
+            logger.info("Deleting orphaned container %r (worktree %s is gone).", name, source_path)
             _incus(["delete", "--force", name])
             last_active.pop(name, None)
 
     running = {name for name, status in _list_containers() if status == "RUNNING"}
-    active = _active_container_names()
+    active: set[str] = set()
+    ops = _incus(["operation", "list", "--format=json"])
+    if ops.returncode == 0 and ops.stdout.strip():
+        try:
+            for op in json.loads(ops.stdout):
+                if op.get("status") != "Running":
+                    continue
+                for key in ("containers", "instances"):
+                    for path in (op.get("resources") or {}).get(key) or []:
+                        active.add(path.rsplit("/", 1)[-1])
+        except json.JSONDecodeError:
+            pass
     now = time.time()
     for name in running:
         if name in active or name not in last_active:
@@ -125,13 +100,12 @@ def cleanup_cmd():
         if name not in running:
             last_active.pop(name)
 
-    CLEANUP_STATE.mkdir(parents=True, exist_ok=True)
+    LAST_ACTIVE_FILE.parent.mkdir(parents=True, exist_ok=True)
     LAST_ACTIVE_FILE.write_text(json.dumps(last_active))
 
-    still_running = {name for name, status in _list_containers() if status == "RUNNING"}
-    if still_running:
+    if any(status == "RUNNING" for _name, status in _list_containers()):
         VM_IDLE_SINCE_FILE.unlink(missing_ok=True)
-        sys.exit(EXIT_OK)
+        return
 
     try:
         idle_since = float(VM_IDLE_SINCE_FILE.read_text())
@@ -143,4 +117,3 @@ def cleanup_cmd():
         subprocess.run([limactl(), "stop", "locki"], capture_output=True)
         VM_IDLE_SINCE_FILE.unlink(missing_ok=True)
         sys.exit(EXIT_VM_POWERED_OFF)
-    sys.exit(EXIT_OK)
