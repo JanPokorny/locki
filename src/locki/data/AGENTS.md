@@ -82,7 +82,7 @@ When you start a network service the user should access, forward the port to hos
 
 ## Web browser
 
-You can open, inspect and interact with websites using Rodney. When in need of a browser, start by running `rodney --help`.
+You can open, inspect and interact with websites using agent-browser. When in need of a browser, start by running `agent-browser --help`.
 
 ## Other
 
