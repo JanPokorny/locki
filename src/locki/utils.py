@@ -294,9 +294,7 @@ def match_sandbox_branch(query: str) -> str:
         )
     else:
         click.echo(
-            f"{click.style('ᛞ', fg='red', bold=True)} Ambiguous match for {click.style(query, fg='yellow')!r}:",
+            f"{click.style('ᛞ', fg='red', bold=True)} Ambiguous match for {click.style(query, fg='yellow')!r}: {", ".join(substring_matches)}",
             err=True,
         )
-        for m in sorted(substring_matches):
-            click.echo(f"  {m}", err=True)
     sys.exit(1)
