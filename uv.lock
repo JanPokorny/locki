@@ -3,7 +3,7 @@ revision = 3
 requires-python = ">=3.11, <3.15"
 
 [options]
-exclude-newer = "2026-04-16T10:58:57.631043Z"
+exclude-newer = "2026-04-16T17:11:04.331318Z"
 exclude-newer-span = "P7D"
 
 [options.exclude-newer-package]
@@ -197,7 +197,7 @@ wheels = [
 
 [[package]]
 name = "locki"
-version = "0.0.11"
+version = "0.0.12"
 source = { editable = "." }
 dependencies = [
     { name = "asyncssh" },
