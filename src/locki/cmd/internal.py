@@ -27,6 +27,7 @@ from functools import cached_property
 
 import asyncssh
 import click
+from lark import Lark, Transformer
 
 from locki.paths import DATA, DENIED_LOG, RUNTIME, STATE, WORKTREES, WORKTREES_META
 from locki.utils import limactl
@@ -139,16 +140,42 @@ class MatchContext:
     ctx: Context
 
 
-# ── Tokenizer ────────────────────────────────────────────────────────────────
+# ── Grammar ──────────────────────────────────────────────────────────────────
 #
-# A grammar line is tokenized into a flat list of strings.  Structural tokens
-# are `(`, `)`, `[`, `]`, `|`, `...`; everything else is a flag declaration
-# (`--flag`, `--flag=<val>`, `-x/--flag`, `-x/--flag=<val>`) or a compound
-# positional (literal text with embedded `<placeholder>`s).  The matcher walks
-# the flat list directly, using a precomputed bracket-pair map — no AST.
+# Each line is parsed with Lark into an AST of `Alt`/`Seq`/`Item` nodes whose
+# leaves are `Flag` or `Positional`.  An `Item` carries the `[...]` (optional)
+# and `...` (one-or-more) modifiers so the matcher can treat both uniformly.
 
-_COMPOUND_BODY = r"(?:<[^>]+>|[^<>\s()\[\]|])+"
-_TOKEN_RE = re.compile(rf"\.\.\.|(?:-[a-zA-Z]/)?--[a-z][\w-]*(?:={_COMPOUND_BODY})?|[()|\[\]]|{_COMPOUND_BODY}")
+
+@dataclass
+class Alt:
+    options: list[Seq]
+
+
+@dataclass
+class Seq:
+    items: list[Item]
+
+
+@dataclass
+class Flag:
+    key: str
+    short: str | None
+    value: list[CompoundPart] | None  # None for bool flags.
+
+
+@dataclass
+class Positional:
+    parts: list[CompoundPart]
+
+
+@dataclass
+class Item:
+    body: Alt | Flag | Positional
+    optional: bool
+    repeat: bool
+
+
 _COMPOUND_PART_RE = re.compile(r"<([^>]+)>|([^<>]+)")
 
 
@@ -159,127 +186,150 @@ def _compound_parts(text: str) -> list[CompoundPart]:
     ]
 
 
-def _pair_map(tokens: list[str]) -> dict[int, int]:
-    """Map each `(` / `[` index to its matching `)` / `]` index."""
-    pairs: dict[int, int] = {}
-    stack: list[int] = []
-    for i, tok in enumerate(tokens):
-        if tok in "([":
-            stack.append(i)
-        elif tok in ")]":
-            if not stack:
-                raise ValueError(f"Unmatched {tok!r}: {tokens!r}")
-            pairs[stack.pop()] = i
-    if stack:
-        raise ValueError(f"Unclosed {tokens[stack[0]]!r}: {tokens!r}")
-    return pairs
+_GRAMMAR = r"""
+alt: seq ("|" seq)*
+seq: item*
+item: atom ELLIPSIS?
+?atom: group | opt | flag | compound
+group: "(" alt ")"
+opt:   "[" alt "]"
+flag: FLAG
+compound: COMPOUND
+
+ELLIPSIS: "..."
+FLAG.2:   /(?:-[a-zA-Z]\/)?--[a-z][\w-]*(?:=(?:<[^>]+>|[^<>\s()\[\]|])+)?/
+COMPOUND: /(?:<[^>]+>|[^<>\s()\[\]|])+/
+
+%ignore /\s+/
+"""
+
+
+@dataclass
+class _OptWrapper:
+    """Sentinel used only while building the AST — unwrapped by `_ASTBuilder.item`."""
+
+    body: Alt
+
+
+class _ASTBuilder(Transformer):
+    def alt(self, c: list[Seq]) -> Alt:
+        return Alt(list(c))
+
+    def seq(self, c: list[Item]) -> Seq:
+        return Seq(list(c))
+
+    def item(self, c: list[Alt | Flag | Positional | _OptWrapper]) -> Item:
+        atom = c[0]
+        repeat = len(c) > 1
+        if isinstance(atom, _OptWrapper):
+            return Item(atom.body, optional=True, repeat=repeat)
+        return Item(atom, optional=False, repeat=repeat)
+
+    def group(self, c: list[Alt]) -> Alt:
+        return c[0]
+
+    def opt(self, c: list[Alt]) -> _OptWrapper:
+        return _OptWrapper(c[0])
+
+    def flag(self, c: list[str]) -> Flag:
+        tok = str(c[0])
+        short: str | None = None
+        if tok.startswith("-") and not tok.startswith("--"):
+            short = tok[1]
+            tok = tok[3:]
+        name, sep, value_text = tok[2:].partition("=")
+        value = _compound_parts(value_text) if sep == "=" else None
+        return Flag(key=name.replace("-", "_"), short=short, value=value)
+
+    def compound(self, c: list[str]) -> Positional:
+        return Positional(parts=_compound_parts(str(c[0])))
+
+
+_PARSER = Lark(_GRAMMAR, start="alt", parser="lalr", transformer=_ASTBuilder())
 
 
 # ── Matcher ──────────────────────────────────────────────────────────────────
 #
-# Every helper yields all successful continuations of a match; backtracking
-# falls out of `yield from`.  `_match_alts` handles top-level `|`, `_match_seq`
-# concatenation, `_match_item` one item (with optional `...` postfix),
-# `_match_atom` flag/compound leaves.
+# Each helper yields `(pos, used)` for every way to match the node; backtracking
+# falls out of `yield from`.  `_match` dispatches on node type, `_match_seq`
+# concatenates, `_match_item` handles `[...]` and `...` modifiers.
 
 
-def _match_alts(
-    tokens: list[str], pairs: dict[int, int], i: int, end: int, pos: int, used: frozenset[str], mc: MatchContext
+def _match(
+    node: Alt | Seq | Item | Flag | Positional, pos: int, used: frozenset[str], mc: MatchContext
 ) -> Iterator[tuple[int, frozenset[str]]]:
-    starts = [i]
-    depth = 0
-    for j in range(i, end):
-        t = tokens[j]
-        if t in "([":
-            depth += 1
-        elif t in ")]":
-            depth -= 1
-        elif t == "|" and depth == 0:
-            starts.append(j + 1)
-    alt_ends = [starts[k + 1] - 1 for k in range(len(starts) - 1)] + [end]
-    for s, e in zip(starts, alt_ends, strict=True):
-        yield from _match_seq(tokens, pairs, s, e, pos, used, mc)
+    if isinstance(node, Alt):
+        for seq in node.options:
+            yield from _match(seq, pos, used, mc)
+    elif isinstance(node, Seq):
+        yield from _match_seq(node.items, 0, pos, used, mc)
+    elif isinstance(node, Item):
+        yield from _match_item(node, pos, used, mc)
+    elif isinstance(node, Flag):
+        if node.key in used:
+            return
+        val = mc.flags.get(node.key)
+        if node.value is None:
+            if val == "":
+                yield pos, used | {node.key}
+        elif val is not None and mc.ctx.compound(node.value).fullmatch(val):
+            yield pos, used | {node.key}
+    elif pos < len(mc.positionals) and mc.ctx.compound(node.parts).fullmatch(mc.positionals[pos]):
+        yield pos + 1, used
 
 
 def _match_seq(
-    tokens: list[str], pairs: dict[int, int], i: int, end: int, pos: int, used: frozenset[str], mc: MatchContext
+    items: list[Item], i: int, pos: int, used: frozenset[str], mc: MatchContext
 ) -> Iterator[tuple[int, frozenset[str]]]:
-    if i >= end:
+    if i >= len(items):
         yield pos, used
         return
-    for ni, p2, u2 in _match_item(tokens, pairs, i, pos, used, mc):
-        yield from _match_seq(tokens, pairs, ni, end, p2, u2, mc)
+    for p2, u2 in _match(items[i], pos, used, mc):
+        yield from _match_seq(items, i + 1, p2, u2, mc)
 
 
-def _match_item(
-    tokens: list[str], pairs: dict[int, int], i: int, pos: int, used: frozenset[str], mc: MatchContext
-) -> Iterator[tuple[int, int, frozenset[str]]]:
-    """Yield (next_i, pos, used) for every way to match ONE item at tokens[i]."""
-    tok = tokens[i]
-    if tok == "[":
-        close = pairs[i]
-        after_base = close + 1
+def _match_item(item: Item, pos: int, used: frozenset[str], mc: MatchContext) -> Iterator[tuple[int, frozenset[str]]]:
+    def once(p: int, u: frozenset[str]) -> Iterator[tuple[int, frozenset[str]]]:
+        if item.optional:
+            yield p, u
+        yield from _match(item.body, p, u, mc)
 
-        def once(p: int, u: frozenset[str]) -> Iterator[tuple[int, frozenset[str]]]:
-            yield p, u  # optional: skip
-            yield from _match_alts(tokens, pairs, i + 1, close, p, u, mc)
-    elif tok == "(":
-        close = pairs[i]
-        after_base = close + 1
-
-        def once(p: int, u: frozenset[str]) -> Iterator[tuple[int, frozenset[str]]]:
-            yield from _match_alts(tokens, pairs, i + 1, close, p, u, mc)
-    else:
-        after_base = i + 1
-
-        def once(p: int, u: frozenset[str]) -> Iterator[tuple[int, frozenset[str]]]:
-            yield from _match_atom(tok, p, u, mc)
-
-    if after_base < len(tokens) and tokens[after_base] == "...":
-        # `...` is "one or more": yield only after each successful match of `once`.
-        after = after_base + 1
-
-        def go(p: int, u: frozenset[str]) -> Iterator[tuple[int, int, frozenset[str]]]:
+    if item.repeat:
+        # `...` is "one or more": yield only after each successful match.
+        def go(p: int, u: frozenset[str]) -> Iterator[tuple[int, frozenset[str]]]:
             for p2, u2 in once(p, u):
-                yield after, p2, u2
+                yield p2, u2
                 yield from go(p2, u2)
 
         yield from go(pos, used)
     else:
-        for p2, u2 in once(pos, used):
-            yield after_base, p2, u2
+        yield from once(pos, used)
 
 
-def _match_atom(tok: str, pos: int, used: frozenset[str], mc: MatchContext) -> Iterator[tuple[int, frozenset[str]]]:
-    """Match a flag or compound-positional leaf token."""
-    # Strip `-x/` short-alias prefix — split_argv already normalized short→long.
-    if tok.startswith("-") and not tok.startswith("--"):
-        tok = tok[3:]
-    if tok.startswith("--") and "=" in tok:
-        name, _, val_text = tok[2:].partition("=")
-        key = name.replace("-", "_")
-        val = mc.flags.get(key)
-        if key not in used and val is not None and mc.ctx.compound(_compound_parts(val_text)).fullmatch(val):
-            yield pos, used | {key}
-    elif tok.startswith("--"):
-        key = tok[2:].replace("-", "_")
-        if key not in used and mc.flags.get(key) == "":
-            yield pos, used | {key}
-    elif pos < len(mc.positionals) and mc.ctx.compound(_compound_parts(tok)).fullmatch(mc.positionals[pos]):
-        yield pos + 1, used
+def _walk_flags(node: Alt | Seq | Item | Flag | Positional) -> Iterator[Flag]:
+    if isinstance(node, Flag):
+        yield node
+    elif isinstance(node, Alt):
+        for seq in node.options:
+            yield from _walk_flags(seq)
+    elif isinstance(node, Seq):
+        for item in node.items:
+            yield from _walk_flags(item)
+    elif isinstance(node, Item):
+        yield from _walk_flags(node.body)
 
 
 # ── Ruleset ──────────────────────────────────────────────────────────────────
 
 
 class Ruleset:
-    def __init__(self, rules: list[tuple[list[str], dict[int, int]]]) -> None:
+    def __init__(self, rules: list[Alt]) -> None:
         self.rules = rules
 
     @classmethod
     def from_markdown(cls, md: str) -> Ruleset:
         """Parse every non-blank line inside ```locki-self-service-command-filter fences as a grammar rule."""
-        lines: list[str] = []
+        rules: list[Alt] = []
         in_block = False
         for raw in md.splitlines():
             line = raw.strip()
@@ -288,11 +338,7 @@ class Ruleset:
             elif in_block and line.startswith("```"):
                 in_block = False
             elif in_block and line:
-                lines.append(line)
-        rules: list[tuple[list[str], dict[int, int]]] = []
-        for line in lines:
-            tokens = _TOKEN_RE.findall(line)
-            rules.append((tokens, _pair_map(tokens)))
+                rules.append(_PARSER.parse(line))  # pyrefly: ignore
         return cls(rules)
 
     @cached_property
@@ -300,23 +346,15 @@ class Ruleset:
         """Discover every flag declared in the grammar: (value-flag long keys, short→long)."""
         value_keys: set[str] = set()
         short_aliases: dict[str, str] = {}
-        for tokens, _ in self.rules:
-            for tok in tokens:
-                short: str | None = None
-                if tok.startswith("-") and not tok.startswith("--"):
-                    short = tok[1]
-                    tok = tok[3:]
-                if not tok.startswith("--"):
-                    continue
-                name, sep, _ = tok[2:].partition("=")
-                key = name.replace("-", "_")
-                if sep == "=":
-                    value_keys.add(key)
-                if short is not None:
-                    prior = short_aliases.get(short)
-                    if prior is not None and prior != key:
-                        raise ValueError(f"Short flag -{short} maps to both --{prior} and --{name}")
-                    short_aliases[short] = key
+        for rule in self.rules:
+            for flag in _walk_flags(rule):
+                if flag.value is not None:
+                    value_keys.add(flag.key)
+                if flag.short is not None:
+                    prior = short_aliases.get(flag.short)
+                    if prior is not None and prior != flag.key:
+                        raise ValueError(f"Short flag -{flag.short} maps to both --{prior} and --{flag.key}")
+                    short_aliases[flag.short] = flag.key
         return frozenset(value_keys), short_aliases
 
     @property
@@ -378,9 +416,7 @@ class Ruleset:
         expected = set(effective)
         target = len(positionals)
         return any(
-            p == target and used == expected
-            for tokens, pairs in self.rules
-            for p, used in _match_alts(tokens, pairs, 0, len(tokens), 0, frozenset(), mc)
+            p == target and used == expected for rule in self.rules for p, used in _match(rule, 0, frozenset(), mc)
         )
 
 
