@@ -5,6 +5,7 @@ description = "AI sandboxing without the taste of sand"
 readme = "README.md"
 requires-python = ">=3.11,<3.15"
 dependencies = [
+    "asyncssh>=2.18",
     "click>=8.1",
     "InquirerPy>=0.3",
     "pydantic>=2.12.5",

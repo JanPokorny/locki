@@ -1,25 +1,74 @@
+"""Internal commands invoked by Locki itself — not for direct end-user use.
+
+* `locki internal cleanup` — one-shot: stop idle containers, remove orphans, power off idle VM.
+* `locki internal daemon`  — long-running host daemon: asyncssh forced-command proxy + cleanup scheduler.
+* `locki internal self-service` — SSH forced command handler: validate and run a whitelisted command.
+"""
+
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import datetime
 import importlib.resources
+import json
+import logging
 import os
 import pathlib
 import re
 import shlex
+import signal
 import subprocess
 import sys
+import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 from functools import cached_property
 
+import asyncssh
 import click
 
-from locki.paths import DENIED_LOG, WORKTREES, WORKTREES_META
+from locki.paths import DATA, DENIED_LOG, RUNTIME, STATE, WORKTREES, WORKTREES_META
+from locki.utils import limactl
+
+logger = logging.getLogger(__name__)
+
+IDLE_TIMEOUT = 600
+VM_IDLE_TIMEOUT = 600
+CLEANUP_INTERVAL = 60
+EXIT_VM_POWERED_OFF = 2
+EXIT_VM_NOT_RUNNING = 3
+
+LAST_ACTIVE_FILE = STATE / "cleanup" / "last-active.json"
+VM_IDLE_SINCE_FILE = STATE / "cleanup" / "vm-idle-since"
+HOST_KEY = STATE / "ssh" / "host_key"
+CLIENT_KEY = DATA / "home" / ".ssh" / "id_locki"
+AUTHORIZED_KEYS_FILE = STATE / "ssh" / "authorized_keys"
+PID_FILE = RUNTIME / "daemon.pid"
+PORT_FILE = RUNTIME / "daemon.port"
+
+
+def _incus(args: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [limactl(), "shell", "--tty=false", "locki", "--", "sudo", "incus", *args],
+        capture_output=True,
+        text=True,
+    )
+
+
+def _list_containers() -> list[tuple[str, str]]:
+    """Return (name, status) for every container."""
+    pairs: list[tuple[str, str]] = []
+    for line in _incus(["list", "--format=csv", "--columns=n,s"]).stdout.splitlines():
+        name, _, status = line.partition(",")
+        if name := name.strip():
+            pairs.append((name, status.strip()))
+    return pairs
+
+
+# ── Self-service grammar engine ───────────────────────────────────────────────
 
 State = tuple[int, frozenset[str]]  # (positional cursor, used flag keys)
-
-
-# ── Compound parts ────────────────────────────────────────────────────────────
 
 
 @dataclass
@@ -39,9 +88,6 @@ class Placeholder:
 CompoundPart = Literal | Placeholder
 
 
-# ── Context ───────────────────────────────────────────────────────────────────
-
-
 class Context:
     """Per-invocation placeholder resolver. Subprocess lookups are cached."""
 
@@ -56,12 +102,10 @@ class Context:
             text=True,
         )
         if result.returncode != 0:
-            print("Could not determine current gh repo.", file=sys.stderr)
-            raise SystemExit(1)
+            sys.exit("Could not determine current gh repo.")
         owner, _, name = result.stdout.strip().partition("/")
         if not owner or not name:
-            print(f"Invalid repo from gh: {result.stdout.strip()!r}.", file=sys.stderr)
-            raise SystemExit(1)
+            sys.exit(f"Invalid repo from gh: {result.stdout.strip()!r}.")
         return owner, name
 
     @cached_property
@@ -99,8 +143,7 @@ class MatchContext:
     ctx: Context
 
 
-# ── AST ───────────────────────────────────────────────────────────────────────
-# Each node yields all successful continuations of a match as (pos, used) pairs;
+# AST — each node yields all successful continuations of a match as (pos, used) pairs;
 # backtracking falls out of `yield from`.
 
 
@@ -194,9 +237,6 @@ class Repetition:
 Node = Compound | BoolFlag | ValueFlag | Optional | Alternatives | Sequence | Repetition
 
 
-# ── Parser ────────────────────────────────────────────────────────────────────
-
-
 class Parser:
     """Parse one grammar line into an AST node.
 
@@ -209,9 +249,7 @@ class Parser:
     """
 
     _COMPOUND_BODY = r"(?:<[^>]+>|[^<>\s()\[\]|])+"
-    _TOKEN_RE = re.compile(
-        rf"\.\.\.|(?:-[a-zA-Z]/)?--[a-z][\w-]*(?:={_COMPOUND_BODY})?|[()|\[\]]|{_COMPOUND_BODY}"
-    )
+    _TOKEN_RE = re.compile(rf"\.\.\.|(?:-[a-zA-Z]/)?--[a-z][\w-]*(?:={_COMPOUND_BODY})?|[()|\[\]]|{_COMPOUND_BODY}")
     _COMPOUND_PART_RE = re.compile(r"<([^>]+)>|([^<>]+)")
 
     def __init__(self, text: str) -> None:
@@ -284,9 +322,6 @@ class Parser:
             Placeholder(m.group(1)) if m.group(1) is not None else Literal(m.group(2))
             for m in cls._COMPOUND_PART_RE.finditer(text)
         ]
-
-
-# ── Ruleset ───────────────────────────────────────────────────────────────────
 
 
 class Ruleset:
@@ -398,67 +433,242 @@ class Ruleset:
 RULESET = Ruleset.from_markdown((importlib.resources.files("locki") / "data" / "AGENTS.md").read_text())
 
 
-# ── CLI entry point ───────────────────────────────────────────────────────────
+# ── Daemon helpers ────────────────────────────────────────────────────────────
 
 
-@click.command(hidden=True)
-def self_service_cmd():
+async def _pump(reader, write, close) -> None:
+    try:
+        while data := await reader.read(65536):
+            write(data)
+    except asyncssh.BreakReceived, asyncssh.SignalReceived, asyncssh.TerminalSizeChanged:
+        pass
+    except Exception:
+        logger.exception("pump failed")
+    finally:
+        with contextlib.suppress(Exception):
+            close()
+
+
+# ── CLI ───────────────────────────────────────────────────────────────────────
+
+
+@click.group("internal", hidden=True)
+def internal_app() -> None:
+    """Internal commands (invoked by Locki itself)."""
+
+
+@internal_app.command("cleanup")
+def internal_cleanup() -> None:
+    """One-shot: stop idle containers, remove orphans, power off idle VM."""
+    lines = subprocess.run([limactl(), "list", "--json"], capture_output=True, text=True).stdout.splitlines()
+    for line in lines:
+        with contextlib.suppress(json.JSONDecodeError):
+            vm = json.loads(line)
+            if vm.get("name") == "locki" and vm.get("status") == "Running":
+                break
+    else:
+        sys.exit(EXIT_VM_NOT_RUNNING)
+
+    try:
+        last_active = json.loads(LAST_ACTIVE_FILE.read_text())
+    except FileNotFoundError, json.JSONDecodeError:
+        last_active = {}
+
+    worktrees_root = WORKTREES.resolve()
+    for name, _ in _list_containers():
+        r = _incus(["config", "device", "get", name, "worktree", "source"])
+        if r.returncode != 0 or not r.stdout.strip():
+            continue
+        src = pathlib.Path(r.stdout.strip()).resolve()
+        if src.is_relative_to(worktrees_root) and not src.exists():
+            logger.info("Deleting orphaned container %r (worktree %s is gone).", name, src)
+            _incus(["delete", "--force", name])
+            last_active.pop(name, None)
+
+    running = {name for name, status in _list_containers() if status == "RUNNING"}
+    active: set[str] = set()
+    ops = _incus(["operation", "list", "--format=json"])
+    if ops.returncode == 0 and ops.stdout.strip():
+        with contextlib.suppress(json.JSONDecodeError):
+            for op in json.loads(ops.stdout):
+                if op.get("status") == "Running":
+                    for key in ("containers", "instances"):
+                        for path in (op.get("resources") or {}).get(key) or []:
+                            active.add(path.rsplit("/", 1)[-1])
+
+    now = time.time()
+    for name in running:
+        if name in active or name not in last_active:
+            last_active[name] = now
+        elif now - last_active[name] >= IDLE_TIMEOUT:
+            logger.info("Stopping idle container %r (idle %.0fs).", name, now - last_active[name])
+            _incus(["stop", name])
+            last_active.pop(name, None)
+    last_active = {n: t for n, t in last_active.items() if n in running}
+    LAST_ACTIVE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    LAST_ACTIVE_FILE.write_text(json.dumps(last_active))
+
+    if any(status == "RUNNING" for _, status in _list_containers()):
+        VM_IDLE_SINCE_FILE.unlink(missing_ok=True)
+        return
+
+    try:
+        idle_since = float(VM_IDLE_SINCE_FILE.read_text())
+    except FileNotFoundError, ValueError:
+        idle_since = now
+        VM_IDLE_SINCE_FILE.write_text(str(now))
+    if now - idle_since >= VM_IDLE_TIMEOUT:
+        logger.info("No running containers for %.0fs — stopping VM.", now - idle_since)
+        subprocess.run([limactl(), "stop", "locki"], capture_output=True)
+        VM_IDLE_SINCE_FILE.unlink(missing_ok=True)
+        sys.exit(EXIT_VM_POWERED_OFF)
+
+
+@internal_app.command("daemon")
+def internal_daemon() -> None:
+    """Host daemon: SSH forced-command proxy + periodic cleanup."""
+    log_file = STATE / "logs" / "daemon.log"
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    handler = logging.FileHandler(log_file)
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    logging.getLogger().addHandler(handler)
+
+    async def main() -> None:
+        HOST_KEY.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        CLIENT_KEY.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        for path in (HOST_KEY, CLIENT_KEY):
+            if not path.exists():
+                key = asyncssh.generate_private_key("ssh-ed25519")
+                key.write_private_key(str(path))
+                key.write_public_key(str(path.with_suffix(".pub")))
+                os.chmod(path, 0o600)
+        AUTHORIZED_KEYS_FILE.write_text(CLIENT_KEY.with_suffix(".pub").read_text())
+        os.chmod(AUTHORIZED_KEYS_FILE, 0o600)
+        RUNTIME.mkdir(parents=True, exist_ok=True)
+
+        async def handle(process: asyncssh.SSHServerProcess) -> None:
+            try:
+                env = {**os.environ, "SSH_ORIGINAL_COMMAND": process.command or ""}
+                sub = await asyncio.create_subprocess_exec(
+                    sys.executable,
+                    "-m",
+                    "locki",
+                    "internal",
+                    "self-service",
+                    env=env,
+                    stdin=asyncio.subprocess.PIPE,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                assert sub.stdin is not None and sub.stdout is not None and sub.stderr is not None
+                await asyncio.gather(
+                    _pump(process.stdin, sub.stdin.write, sub.stdin.close),
+                    _pump(sub.stdout, process.stdout.write, process.stdout.close),
+                    _pump(sub.stderr, process.stderr.write, process.stderr.close),
+                )
+                process.exit(await sub.wait() or 0)
+            except Exception:
+                logger.exception("SSH session failed")
+                with contextlib.suppress(Exception):
+                    process.exit(1)
+
+        server = await asyncssh.listen(
+            host="0.0.0.0",
+            port=0,
+            server_host_keys=[str(HOST_KEY)],
+            authorized_client_keys=str(AUTHORIZED_KEYS_FILE),
+            process_factory=handle,
+            encoding=None,
+            allow_scp=False,
+            agent_forwarding=False,
+            x11_forwarding=False,
+        )
+        port = next(iter(server.sockets)).getsockname()[1]
+        PORT_FILE.write_text(str(port))
+        PID_FILE.write_text(str(os.getpid()))
+        logger.info("Locki daemon listening on 0.0.0.0:%d", port)
+
+        stop = asyncio.Event()
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            with contextlib.suppress(NotImplementedError):
+                loop.add_signal_handler(sig, stop.set)
+
+        async def cleanup_loop() -> None:
+            while not stop.is_set():
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(stop.wait(), timeout=CLEANUP_INTERVAL)
+                if stop.is_set():
+                    return
+                try:
+                    proc = await asyncio.create_subprocess_exec(sys.executable, "-m", "locki", "internal", "cleanup")
+                    rc = await proc.wait()
+                except Exception:
+                    logger.exception("Cleanup tick failed")
+                    continue
+                if rc in (EXIT_VM_POWERED_OFF, EXIT_VM_NOT_RUNNING):
+                    logger.info("VM no longer running (rc=%d); exiting daemon.", rc)
+                    stop.set()
+                    return
+
+        cleanup_task = asyncio.create_task(cleanup_loop())
+        await stop.wait()
+        server.close()
+        await server.wait_closed()
+        cleanup_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await cleanup_task
+
+    try:
+        asyncio.run(main())
+    finally:
+        PID_FILE.unlink(missing_ok=True)
+        PORT_FILE.unlink(missing_ok=True)
+
+
+@internal_app.command("self-service")
+def internal_self_service() -> None:
     """SSH forced command: validate and execute an allowed self-service command."""
     cmd = os.environ.get("SSH_ORIGINAL_COMMAND", "")
     if not cmd:
-        print("No command specified.", file=sys.stderr)
-        raise SystemExit(1)
-
+        sys.exit("No command specified.")
     try:
         parts = shlex.split(cmd)
     except ValueError as e:
-        print(f"Failed to parse command: {e}", file=sys.stderr)
-        raise SystemExit(1) from e
-
+        sys.exit(f"Failed to parse command: {e}")
     if len(parts) < 2:
-        print("Usage: <cwd> <exe> [args...]", file=sys.stderr)
-        raise SystemExit(1)
-
+        sys.exit("Usage: <cwd> <exe> [args...]")
     cwd_str, *argv = parts
 
     cwd = pathlib.Path(cwd_str).resolve()
     if not cwd.is_relative_to(WORKTREES.resolve()):
-        print(f"Not a locki worktree: {cwd_str!r}", file=sys.stderr)
-        raise SystemExit(1)
+        sys.exit(f"Not a locki worktree: {cwd_str!r}")
     wt_root = WORKTREES / cwd.relative_to(WORKTREES).parts[0]
     wt_id = wt_root.name
     meta_git = WORKTREES_META / wt_id / ".git"
     dot_git = wt_root / ".git"
     if not wt_root.is_dir() or not meta_git.exists() or not dot_git.is_file():
-        print(f"Invalid worktree: {cwd_str!r}", file=sys.stderr)
-        raise SystemExit(1)
+        sys.exit(f"Invalid worktree: {cwd_str!r}")
     if dot_git.read_text().strip() != meta_git.read_text().strip():
-        print("Worktree .git mismatch — possible tampering.", file=sys.stderr)
-        raise SystemExit(1)
-
+        sys.exit("Worktree .git mismatch — possible tampering.")
     if not argv:
-        print("Empty command.", file=sys.stderr)
-        raise SystemExit(1)
+        sys.exit("Empty command.")
+
     exe = pathlib.Path(argv[0]).name
     try:
         positionals, flags = RULESET.split_argv(argv[1:])
     except ValueError as e:
-        print(str(e), file=sys.stderr)
-        raise SystemExit(1) from None
+        sys.exit(str(e))
 
     # chdir first so `gh repo view` and `git stash list` run inside the worktree.
     os.chdir(str(cwd))
 
     if not RULESET.is_allowed([exe, *positionals], flags, wt_id):
-        try:
+        with contextlib.suppress(OSError):
             DENIED_LOG.parent.mkdir(parents=True, exist_ok=True)
             with DENIED_LOG.open("a") as fh:
-                ts = datetime.datetime.now().isoformat(timespec="seconds")
-                fh.write(f"{ts}\t{wt_id}\t{shlex.join(argv)}\n")
-        except OSError:
-            pass
-        print(f"Command not allowed: {' '.join(argv)!r}", file=sys.stderr)
-        raise SystemExit(1)
+                fh.write(f"{datetime.datetime.now().isoformat(timespec='seconds')}\t{wt_id}\t{shlex.join(argv)}\n")
+        sys.exit(f"Command not allowed: {' '.join(argv)!r}")
 
     if exe == "locki":
         os.execvp(sys.executable, [sys.executable, "-m", "locki", *argv[1:]])
