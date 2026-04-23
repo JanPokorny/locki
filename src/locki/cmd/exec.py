@@ -1,4 +1,5 @@
 import base64
+import contextlib
 import getpass
 import importlib.resources
 import json
@@ -393,41 +394,34 @@ def exec_cmd(ctx, match, select, create, id_file):
     RUNTIME.mkdir(parents=True, exist_ok=True)
     client_ssh_dir = DATA / "home" / ".ssh"
     client_ssh_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-    pid_file = RUNTIME / "daemon.pid"
-    port_file = RUNTIME / "daemon.port"
+    pid_file, port_file = RUNTIME / "daemon.pid", RUNTIME / "daemon.port"
     ssh_port = 0
     with file_lock("daemon", "Waiting for daemon start"):
         alive = False
         if pid_file.exists():
-            try:
+            with contextlib.suppress(ProcessLookupError, ValueError, PermissionError, FileNotFoundError):
                 os.kill(int(pid_file.read_text().strip()), 0)
                 alive = True
-            except (ProcessLookupError, ValueError, PermissionError, FileNotFoundError):
-                pid_file.unlink(missing_ok=True)
-                port_file.unlink(missing_ok=True)
         if not alive:
+            pid_file.unlink(missing_ok=True)
             port_file.unlink(missing_ok=True)
             subprocess.Popen(
-                [sys.executable, "-m", "locki", "_daemon"],
+                [sys.executable, "-m", "locki", "internal", "daemon"],
                 start_new_session=True,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
         for _ in range(100):  # up to 10s for the daemon to write its port
-            if port_file.exists():
-                try:
-                    ssh_port = int(port_file.read_text().strip())
-                    if ssh_port:
-                        break
-                except ValueError:
-                    pass
+            with contextlib.suppress(OSError, ValueError):
+                if ssh_port := int(port_file.read_text().strip()):
+                    break
             time.sleep(0.1)
     if not ssh_port:
         logger.warning("Locki daemon did not report a port in time. Self-service proxy is disabled in this sandbox.")
-    ssh_config_template = (importlib.resources.files("locki") / "data" / "locki-ssh-config").read_text()
     (client_ssh_dir / "locki-ssh-config").write_text(
-        ssh_config_template + f"    Port {ssh_port}\n    User {getpass.getuser()}\n"
+        (importlib.resources.files("locki") / "data" / "locki-ssh-config").read_text()
+        + f"    Port {ssh_port}\n    User {getpass.getuser()}\n"
     )
 
     forwarded_env = {"TERM", "COLORTERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION", "LANG", "SSH_TTY"}
