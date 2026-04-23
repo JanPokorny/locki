@@ -433,22 +433,6 @@ class Ruleset:
 RULESET = Ruleset.from_markdown((importlib.resources.files("locki") / "data" / "AGENTS.md").read_text())
 
 
-# ── Daemon helpers ────────────────────────────────────────────────────────────
-
-
-async def _pump(reader, write, close) -> None:
-    try:
-        while data := await reader.read(65536):
-            write(data)
-    except asyncssh.BreakReceived, asyncssh.SignalReceived, asyncssh.TerminalSizeChanged:
-        pass
-    except Exception:
-        logger.exception("pump failed")
-    finally:
-        with contextlib.suppress(Exception):
-            close()
-
-
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 
@@ -560,12 +544,7 @@ def internal_daemon() -> None:
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )
-                assert sub.stdin is not None and sub.stdout is not None and sub.stderr is not None
-                await asyncio.gather(
-                    _pump(process.stdin, sub.stdin.write, sub.stdin.close),
-                    _pump(sub.stdout, process.stdout.write, process.stdout.close),
-                    _pump(sub.stderr, process.stderr.write, process.stderr.close),
-                )
+                await process.redirect(stdin=sub.stdin, stdout=sub.stdout, stderr=sub.stderr)
                 process.exit(await sub.wait() or 0)
             except Exception:
                 logger.exception("SSH session failed")
