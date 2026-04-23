@@ -66,9 +66,6 @@ def _list_containers() -> list[tuple[str, str]]:
 
 # ── Self-service grammar engine ───────────────────────────────────────────────
 
-State = tuple[int, frozenset[str]]  # (positional cursor, used flag keys)
-
-
 @dataclass
 class Literal:
     """Literal text segment inside a compound token."""
@@ -141,189 +138,143 @@ class MatchContext:
     ctx: Context
 
 
-# AST — each node yields all successful continuations of a match as (pos, used) pairs;
-# backtracking falls out of `yield from`.
+# ── Tokenizer ────────────────────────────────────────────────────────────────
+#
+# A grammar line is tokenized into a flat list of strings.  Structural tokens
+# are `(`, `)`, `[`, `]`, `|`, `...`; everything else is a flag declaration
+# (`--flag`, `--flag=<val>`, `-x/--flag`, `-x/--flag=<val>`) or a compound
+# positional (literal text with embedded `<placeholder>`s).  The matcher walks
+# the flat list directly, using a precomputed bracket-pair map — no AST.
+
+_COMPOUND_BODY = r"(?:<[^>]+>|[^<>\s()\[\]|])+"
+_TOKEN_RE = re.compile(rf"\.\.\.|(?:-[a-zA-Z]/)?--[a-z][\w-]*(?:={_COMPOUND_BODY})?|[()|\[\]]|{_COMPOUND_BODY}")
+_COMPOUND_PART_RE = re.compile(r"<([^>]+)>|([^<>]+)")
 
 
-@dataclass
-class Compound:
-    """Positional: literal text interleaved with `<placeholder>`s."""
-
-    parts: list[CompoundPart]
-
-    def match(self, pos: int, used: frozenset[str], mc: MatchContext) -> Iterator[State]:
-        if pos < len(mc.positionals) and mc.ctx.compound(self.parts).fullmatch(mc.positionals[pos]):
-            yield pos + 1, used
+def _compound_parts(text: str) -> list[CompoundPart]:
+    return [
+        Placeholder(m.group(1)) if m.group(1) is not None else Literal(m.group(2))
+        for m in _COMPOUND_PART_RE.finditer(text)
+    ]
 
 
-@dataclass
-class BoolFlag:
-    name: str
-    short: str | None = None
-
-    @property
-    def key(self) -> str:
-        return self.name.replace("-", "_")
-
-    def match(self, pos: int, used: frozenset[str], mc: MatchContext) -> Iterator[State]:
-        if self.key not in used and mc.flags.get(self.key) == "":
-            yield pos, used | {self.key}
-
-
-@dataclass
-class ValueFlag:
-    name: str
-    parts: list[CompoundPart]
-    short: str | None = None
-
-    @property
-    def key(self) -> str:
-        return self.name.replace("-", "_")
-
-    def match(self, pos: int, used: frozenset[str], mc: MatchContext) -> Iterator[State]:
-        val = mc.flags.get(self.key)
-        if self.key not in used and val is not None and mc.ctx.compound(self.parts).fullmatch(val):
-            yield pos, used | {self.key}
+def _pair_map(tokens: list[str]) -> dict[int, int]:
+    """Map each `(` / `[` index to its matching `)` / `]` index."""
+    pairs: dict[int, int] = {}
+    stack: list[int] = []
+    for i, tok in enumerate(tokens):
+        if tok in "([":
+            stack.append(i)
+        elif tok in ")]":
+            if not stack:
+                raise ValueError(f"Unmatched {tok!r}: {tokens!r}")
+            pairs[stack.pop()] = i
+    if stack:
+        raise ValueError(f"Unclosed {tokens[stack[0]]!r}: {tokens!r}")
+    return pairs
 
 
-@dataclass
-class Optional:
-    inner: Node
+# ── Matcher ──────────────────────────────────────────────────────────────────
+#
+# Every helper yields all successful continuations of a match; backtracking
+# falls out of `yield from`.  `_match_alts` handles top-level `|`, `_match_seq`
+# concatenation, `_match_item` one item (with optional `...` postfix),
+# `_match_atom` flag/compound leaves.
 
-    def match(self, pos: int, used: frozenset[str], mc: MatchContext) -> Iterator[State]:
+
+def _match_alts(
+    tokens: list[str], pairs: dict[int, int], i: int, end: int, pos: int, used: frozenset[str], mc: MatchContext
+) -> Iterator[tuple[int, frozenset[str]]]:
+    starts = [i]
+    depth = 0
+    for j in range(i, end):
+        t = tokens[j]
+        if t in "([":
+            depth += 1
+        elif t in ")]":
+            depth -= 1
+        elif t == "|" and depth == 0:
+            starts.append(j + 1)
+    alt_ends = [starts[k + 1] - 1 for k in range(len(starts) - 1)] + [end]
+    for s, e in zip(starts, alt_ends, strict=True):
+        yield from _match_seq(tokens, pairs, s, e, pos, used, mc)
+
+
+def _match_seq(
+    tokens: list[str], pairs: dict[int, int], i: int, end: int, pos: int, used: frozenset[str], mc: MatchContext
+) -> Iterator[tuple[int, frozenset[str]]]:
+    if i >= end:
         yield pos, used
-        yield from self.inner.match(pos, used, mc)
+        return
+    for ni, p2, u2 in _match_item(tokens, pairs, i, pos, used, mc):
+        yield from _match_seq(tokens, pairs, ni, end, p2, u2, mc)
 
 
-@dataclass
-class Alternatives:
-    alts: list[Node]
+def _match_item(
+    tokens: list[str], pairs: dict[int, int], i: int, pos: int, used: frozenset[str], mc: MatchContext
+) -> Iterator[tuple[int, int, frozenset[str]]]:
+    """Yield (next_i, pos, used) for every way to match ONE item at tokens[i]."""
+    tok = tokens[i]
+    if tok == "[":
+        close = pairs[i]
+        after_base = close + 1
 
-    def match(self, pos: int, used: frozenset[str], mc: MatchContext) -> Iterator[State]:
-        for alt in self.alts:
-            yield from alt.match(pos, used, mc)
+        def once(p: int, u: frozenset[str]) -> Iterator[tuple[int, frozenset[str]]]:
+            yield p, u  # optional: skip
+            yield from _match_alts(tokens, pairs, i + 1, close, p, u, mc)
+    elif tok == "(":
+        close = pairs[i]
+        after_base = close + 1
 
+        def once(p: int, u: frozenset[str]) -> Iterator[tuple[int, frozenset[str]]]:
+            yield from _match_alts(tokens, pairs, i + 1, close, p, u, mc)
+    else:
+        after_base = i + 1
 
-@dataclass
-class Sequence:
-    items: list[Node]
+        def once(p: int, u: frozenset[str]) -> Iterator[tuple[int, frozenset[str]]]:
+            yield from _match_atom(tok, p, u, mc)
 
-    def match(self, pos: int, used: frozenset[str], mc: MatchContext) -> Iterator[State]:
-        def go(i: int, p: int, u: frozenset[str]) -> Iterator[State]:
-            if i == len(self.items):
-                yield p, u
-                return
-            for p2, u2 in self.items[i].match(p, u, mc):
-                yield from go(i + 1, p2, u2)
+    if after_base < len(tokens) and tokens[after_base] == "...":
+        # `...` is "one or more": yield only after each successful match of `once`.
+        after = after_base + 1
 
-        yield from go(0, pos, used)
-
-
-@dataclass
-class Repetition:
-    inner: Node
-
-    def match(self, pos: int, used: frozenset[str], mc: MatchContext) -> Iterator[State]:
-        def go(p: int, u: frozenset[str]) -> Iterator[State]:
-            for p2, u2 in self.inner.match(p, u, mc):
-                yield p2, u2
+        def go(p: int, u: frozenset[str]) -> Iterator[tuple[int, int, frozenset[str]]]:
+            for p2, u2 in once(p, u):
+                yield after, p2, u2
                 yield from go(p2, u2)
 
         yield from go(pos, used)
+    else:
+        for p2, u2 in once(pos, used):
+            yield after_base, p2, u2
 
 
-Node = Compound | BoolFlag | ValueFlag | Optional | Alternatives | Sequence | Repetition
+def _match_atom(
+    tok: str, pos: int, used: frozenset[str], mc: MatchContext
+) -> Iterator[tuple[int, frozenset[str]]]:
+    """Match a flag or compound-positional leaf token."""
+    # Strip `-x/` short-alias prefix — split_argv already normalized short→long.
+    if tok.startswith("-") and not tok.startswith("--"):
+        tok = tok[3:]
+    if tok.startswith("--") and "=" in tok:
+        name, _, val_text = tok[2:].partition("=")
+        key = name.replace("-", "_")
+        val = mc.flags.get(key)
+        if key not in used and val is not None and mc.ctx.compound(_compound_parts(val_text)).fullmatch(val):
+            yield pos, used | {key}
+    elif tok.startswith("--"):
+        key = tok[2:].replace("-", "_")
+        if key not in used and mc.flags.get(key) == "":
+            yield pos, used | {key}
+    elif pos < len(mc.positionals) and mc.ctx.compound(_compound_parts(tok)).fullmatch(mc.positionals[pos]):
+        yield pos + 1, used
 
 
-class Parser:
-    """Parse one grammar line into an AST node.
-
-    Tokens:
-      `...`                                   ellipsis (postfix "one or more"; whitespace-separated)
-      `-x/--flag`, `-x/--flag=<compound>`     long flag with a short alias
-      `--flag`, `--flag=<compound>`           long flag (optionally with compound value)
-      `(`, `)`, `[`, `]`, `|`                  grouping metacharacters
-      compound                                 literal text interleaved with `<placeholder>`s
-    """
-
-    _COMPOUND_BODY = r"(?:<[^>]+>|[^<>\s()\[\]|])+"
-    _TOKEN_RE = re.compile(rf"\.\.\.|(?:-[a-zA-Z]/)?--[a-z][\w-]*(?:={_COMPOUND_BODY})?|[()|\[\]]|{_COMPOUND_BODY}")
-    _COMPOUND_PART_RE = re.compile(r"<([^>]+)>|([^<>]+)")
-
-    def __init__(self, text: str) -> None:
-        self.text = text
-        self.tokens = self._TOKEN_RE.findall(text)
-        self.idx = 0
-
-    @classmethod
-    def parse_line(cls, text: str) -> Node:
-        parser = cls(text)
-        tree = parser._alt()
-        if parser.idx != len(parser.tokens):
-            raise ValueError(f"Unparsed trailing tokens in: {text!r}")
-        return tree
-
-    def _peek(self) -> str | None:
-        return self.tokens[self.idx] if self.idx < len(self.tokens) else None
-
-    def _eat(self) -> str:
-        tok = self.tokens[self.idx]
-        self.idx += 1
-        return tok
-
-    def _expect(self, tok: str) -> None:
-        if self._eat() != tok:
-            raise ValueError(f"Expected {tok!r} in grammar line: {self.text!r}")
-
-    def _alt(self) -> Node:
-        seqs: list[Node] = [self._seq()]
-        while self._peek() == "|":
-            self._eat()
-            seqs.append(self._seq())
-        return Alternatives(seqs) if len(seqs) > 1 else seqs[0]
-
-    def _seq(self) -> Node:
-        items: list[Node] = []
-        while self._peek() not in (None, ")", "]", "|"):
-            items.append(self._item())
-        return Sequence(items)
-
-    def _item(self) -> Node:
-        tok = self._eat()
-        node: Node
-        short: str | None = None
-        if tok.startswith("-") and not tok.startswith("--"):
-            # -x/--long form: strip the short alias and fall through to long-flag handling.
-            short = tok[1]
-            tok = tok[3:]
-        if tok == "[":
-            node = Optional(self._alt())
-            self._expect("]")
-        elif tok == "(":
-            node = self._alt()
-            self._expect(")")
-        elif tok.startswith("--") and "=" in tok:
-            name, _, val_text = tok[2:].partition("=")
-            node = ValueFlag(name, self._compound_parts(val_text), short)
-        elif tok.startswith("--"):
-            node = BoolFlag(tok[2:], short)
-        else:
-            node = Compound(self._compound_parts(tok))
-        if self._peek() == "...":
-            self._eat()
-            node = Repetition(node)
-        return node
-
-    @classmethod
-    def _compound_parts(cls, text: str) -> list[CompoundPart]:
-        return [
-            Placeholder(m.group(1)) if m.group(1) is not None else Literal(m.group(2))
-            for m in cls._COMPOUND_PART_RE.finditer(text)
-        ]
+# ── Ruleset ──────────────────────────────────────────────────────────────────
 
 
 class Ruleset:
-    def __init__(self, rules: list[Node]) -> None:
+    def __init__(self, rules: list[tuple[list[str], dict[int, int]]]) -> None:
         self.rules = rules
 
     @classmethod
@@ -339,30 +290,34 @@ class Ruleset:
                 in_block = False
             elif in_block and line:
                 lines.append(line)
-        return cls([Parser.parse_line(line) for line in lines])
+        rules: list[tuple[list[str], dict[int, int]]] = []
+        for line in lines:
+            tokens = _TOKEN_RE.findall(line)
+            rules.append((tokens, _pair_map(tokens)))
+        return cls(rules)
 
     @cached_property
     def _flag_index(self) -> tuple[frozenset[str], dict[str, str]]:
         """Discover every flag declared in the grammar: (value-flag long keys, short→long)."""
         value_keys: set[str] = set()
         short_aliases: dict[str, str] = {}
-        stack: list[Node] = list(self.rules)
-        while stack:
-            node = stack.pop()
-            if isinstance(node, BoolFlag | ValueFlag):
-                if isinstance(node, ValueFlag):
-                    value_keys.add(node.key)
-                if node.short is not None:
-                    prior = short_aliases.get(node.short)
-                    if prior is not None and prior != node.key:
-                        raise ValueError(f"Short flag -{node.short} maps to both --{prior} and --{node.name}")
-                    short_aliases[node.short] = node.key
-            elif isinstance(node, Optional | Repetition):
-                stack.append(node.inner)
-            elif isinstance(node, Alternatives):
-                stack.extend(node.alts)
-            elif isinstance(node, Sequence):
-                stack.extend(node.items)
+        for tokens, _ in self.rules:
+            for tok in tokens:
+                short: str | None = None
+                if tok.startswith("-") and not tok.startswith("--"):
+                    short = tok[1]
+                    tok = tok[3:]
+                if not tok.startswith("--"):
+                    continue
+                name, sep, _ = tok[2:].partition("=")
+                key = name.replace("-", "_")
+                if sep == "=":
+                    value_keys.add(key)
+                if short is not None:
+                    prior = short_aliases.get(short)
+                    if prior is not None and prior != key:
+                        raise ValueError(f"Short flag -{short} maps to both --{prior} and --{name}")
+                    short_aliases[short] = key
         return frozenset(value_keys), short_aliases
 
     @property
@@ -424,7 +379,9 @@ class Ruleset:
         expected = set(effective)
         target = len(positionals)
         return any(
-            p == target and used == expected for rule in self.rules for p, used in rule.match(0, frozenset(), mc)
+            p == target and used == expected
+            for tokens, pairs in self.rules
+            for p, used in _match_alts(tokens, pairs, 0, len(tokens), 0, frozenset(), mc)
         )
 
 
