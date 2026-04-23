@@ -36,8 +36,6 @@ logger = logging.getLogger(__name__)
 IDLE_TIMEOUT = 600
 VM_IDLE_TIMEOUT = 600
 CLEANUP_INTERVAL = 60
-EXIT_VM_POWERED_OFF = 2
-EXIT_VM_NOT_RUNNING = 3
 
 LAST_ACTIVE_FILE = STATE / "cleanup" / "last-active.json"
 VM_IDLE_SINCE_FILE = STATE / "cleanup" / "vm-idle-since"
@@ -451,7 +449,7 @@ def internal_cleanup() -> None:
             if vm.get("name") == "locki" and vm.get("status") == "Running":
                 break
     else:
-        sys.exit(EXIT_VM_NOT_RUNNING)
+        sys.exit(1)
 
     try:
         last_active = json.loads(LAST_ACTIVE_FILE.read_text())
@@ -505,7 +503,7 @@ def internal_cleanup() -> None:
         logger.info("No running containers for %.0fs — stopping VM.", now - idle_since)
         subprocess.run([limactl(), "stop", "locki"], capture_output=True)
         VM_IDLE_SINCE_FILE.unlink(missing_ok=True)
-        sys.exit(EXIT_VM_POWERED_OFF)
+        sys.exit(1)
 
 
 @internal_app.command("daemon")
@@ -575,20 +573,11 @@ def internal_daemon() -> None:
 
         async def cleanup_loop() -> None:
             while not stop.is_set():
+                proc = await asyncio.create_subprocess_exec(sys.executable, "-m", "locki", "internal", "cleanup")
+                if await proc.wait() != 0:
+                    break
                 with contextlib.suppress(TimeoutError):
                     await asyncio.wait_for(stop.wait(), timeout=CLEANUP_INTERVAL)
-                if stop.is_set():
-                    return
-                try:
-                    proc = await asyncio.create_subprocess_exec(sys.executable, "-m", "locki", "internal", "cleanup")
-                    rc = await proc.wait()
-                except Exception:
-                    logger.exception("Cleanup tick failed")
-                    continue
-                if rc in (EXIT_VM_POWERED_OFF, EXIT_VM_NOT_RUNNING):
-                    logger.info("VM no longer running (rc=%d); exiting daemon.", rc)
-                    stop.set()
-                    return
 
         cleanup_task = asyncio.create_task(cleanup_loop())
         await stop.wait()
