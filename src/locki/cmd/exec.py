@@ -19,13 +19,10 @@ import click
 from locki.config import load_config
 from locki.paths import DATA, HOME, LIMA, RUNTIME, WORKTREES, WORKTREES_META
 from locki.utils import (
-    current_worktree,
+    cwd_git_repo,
     file_lock,
-    find_worktree_for_branch,
-    git_root,
     limactl,
-    list_locki_worktree_branches,
-    match_sandbox_branch,
+    resolve_sandbox,
     run_command,
     run_in_vm,
 )
@@ -113,66 +110,62 @@ def _gen_wt_id() -> str:
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True, "allow_interspersed_args": False},
 )
 @click.option("-m", "--match", "match", default=None, help="Substring match on existing sandbox branch.")
-@click.option("-s", "--select", is_flag=True, default=False, help="Show interactive sandbox selector.")
+@click.option("-i", "--interactive", "interactive", is_flag=True, default=False, help="Force interactive picker.")
+@click.option("-a", "--all", "all_repos", is_flag=True, default=False, help="Show sandboxes from all repos.")
 @click.option("-c", "--create", is_flag=True, default=False, help="Create a new sandbox.")
 @click.option("-f", "--id-file", default=None, type=click.Path(), help="Write the generated sandbox ID to this file.")
 @click.pass_context
-def exec_cmd(ctx, match, select, create, id_file):
+def exec_cmd(ctx, match, interactive, all_repos, create, id_file):
     """Run a command in the per-branch sandbox container.
 
     \b
     Examples:
-      locki x bash                    # interactive shell (sandbox picker)
+      locki x bash                    # current sandbox, or picker / create
       locki x claude                  # run Claude Code
       locki x -m feat bash            # match sandbox by substring
-      locki x -s bash                 # force sandbox selector
+      locki x -i bash                 # force sandbox picker even inside a worktree
+      locki x -a bash                 # picker across all repos
       locki x -c bash                 # create new sandbox
       locki x bash -c "echo hello"    # run a one-liner
     """
-    if create and match:
+    if create and (match or interactive or all_repos):
         click.echo(
-            f"{click.style('ᛞ', fg='red', bold=True)} --create and --match cannot be used together.",
+            f"{click.style('ᛞ', fg='red', bold=True)} --create conflicts with --match/--interactive/--all.",
             err=True,
         )
         sys.exit(1)
 
     click.echo(f"{click.style('ᚠ', fg='magenta', bold=True)} Entering a Locki sandbox.", err=True)
-    wt_id: str | None = None
-    branch: str | None = None
+
     if create:
+        sandbox = None
+    else:
+        sandbox = resolve_sandbox(
+            match=match,
+            interactive=interactive,
+            all_repos=all_repos,
+            allow_create=True,
+        )
+
+    if sandbox is None:
+        # Creating a new sandbox — cwd must be inside a git repo.
+        repo_path = cwd_git_repo()
+        if repo_path is None:
+            click.echo(
+                f"{click.style('ᛞ', fg='red', bold=True)} Cannot create a sandbox outside a git repo.",
+                err=True,
+            )
+            sys.exit(1)
         wt_id = _gen_wt_id()
         branch = f"untitled#locki-{wt_id}"
         if id_file:
             pathlib.Path(id_file).write_text(wt_id)
-    elif match:
-        branch = match_sandbox_branch(match)
-    elif select or not current_worktree():
-        if not sys.stdin.isatty():
-            click.echo(
-                f"{click.style('ᛞ', fg='red', bold=True)} No branch specified. Use -m <query> in non-interactive mode.",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-
-        from InquirerPy import inquirer
-        from InquirerPy.base.control import Choice
-
-        wt_branches = list_locki_worktree_branches()
-
-        choices = [Choice(value=None, name="(create new)")] + [Choice(value=b, name=b) for b in sorted(wt_branches)]
-
-        selected = inquirer.fuzzy(
-            message="Select a sandbox:",
-            choices=choices,
-        ).execute()
-
-        if selected is None:
-            wt_id = _gen_wt_id()
-            branch = f"untitled#locki-{wt_id}"
-        else:
-            branch = selected
-
-    git_root()  # fail fast if not in a git repo
+        wt_path = WORKTREES / wt_id
+    else:
+        wt_id = sandbox.wt_id
+        branch = sandbox.branch
+        wt_path = sandbox.wt_path
+        repo_path = sandbox.repo
 
     LIMA.mkdir(exist_ok=True, parents=True)
     WORKTREES.mkdir(parents=True, exist_ok=True)
@@ -245,31 +238,20 @@ def exec_cmd(ctx, match, select, create, id_file):
         logger.error("Lima VM failed to start. LIMA_HOME=%s", LIMA)
         sys.exit(1)
 
-    wt_path = find_worktree_for_branch(branch) if branch else current_worktree()
-    if not wt_path:  # branch was provided but does not exit
-        if not branch:
-            click.echo(
-                f"{click.style('ᛞ', fg='red', bold=True)} No branch specified and not inside a Locki worktree.",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-
+    if not wt_path.exists():
         run_command(
-            ["git", "-C", str(git_root()), "worktree", "prune"],
+            ["git", "-C", str(repo_path), "worktree", "prune"],
             "Pruning stale git worktrees",
         )
 
-        if not wt_id:
-            wt_id = _gen_wt_id()
-        wt_path = WORKTREES / wt_id
         wt_path.mkdir(parents=True, exist_ok=True)
 
         run_command(
-            ["git", "-C", str(git_root()), "branch", branch],
+            ["git", "-C", str(repo_path), "branch", branch],
             f"Creating branch {click.style(branch, fg='green')}",
         )
         run_command(
-            ["git", "-C", str(git_root()), "worktree", "add", str(wt_path), branch],
+            ["git", "-C", str(repo_path), "worktree", "add", str(wt_path), branch],
             f"Creating worktree for {click.style(branch, fg='green')}",
         )
 
@@ -281,10 +263,10 @@ def exec_cmd(ctx, match, select, create, id_file):
         meta_dir.mkdir(parents=True, exist_ok=True)
         (meta_dir / ".git").write_text((wt_path / ".git").read_text())
         (meta_dir / "branch").write_text(branch)
-        (meta_dir / "repo").write_text(str(git_root()))
+        (meta_dir / "repo").write_text(str(repo_path))
 
         run_command(
-            ["git", "-C", str(git_root()), "config", "extensions.worktreeConfig", "true"],
+            ["git", "-C", str(repo_path), "config", "extensions.worktreeConfig", "true"],
             "Enabling per-worktree git config",
         )
 
@@ -306,9 +288,7 @@ def exec_cmd(ctx, match, select, create, id_file):
             "Configuring auto push for new branches",
         )
 
-    wt_id = wt_path.relative_to(WORKTREES).parts[0]
-
-    config = load_config(git_root())
+    config = load_config(repo_path)
 
     result = run_in_vm(
         ["incus", "list", "--format=csv", "--columns=n", wt_id],
@@ -324,7 +304,7 @@ def exec_cmd(ctx, match, select, create, id_file):
     else:
         incus_image = config.get_incus_image()
 
-        local_path = git_root() / incus_image
+        local_path = repo_path / incus_image
         with file_lock("image", "Waiting for another image import"):
             if local_path.is_file():
                 local_file = local_path.resolve()
@@ -459,14 +439,14 @@ def exec_cmd(ctx, match, select, create, id_file):
 
     click.echo()
     click.echo(f"{click.style('ᛟ', fg='magenta', bold=True)} Exited Locki sandbox.", err=True)
-    click.echo(f"{click.style('ᛃ', fg='cyan', bold=True)} Return to this worktree:", err=True)
+    click.echo(f"{click.style('ᛃ', fg='cyan', bold=True)} Return to this sandbox:", err=True)
     click.echo(
-        f"{click.style('ᛃ', fg='cyan', bold=True)}      via AI: {click.style(f'locki ai{f" -m {wt_id}" if branch else ""}', fg='green')}"
-        + (f" (or just {click.style('locki ai', fg='green')} and find it in the list)" if branch else ""),
+        f"{click.style('ᛃ', fg='cyan', bold=True)}      via AI: {click.style(f'locki ai -m {wt_id}', fg='green')}"
+        f" (or just {click.style('locki ai', fg='green')} and find it in the list)",
         err=True,
     )
     click.echo(
-        f"{click.style('ᛃ', fg='cyan', bold=True)}   via shell: {click.style(f'locki x {f" -m {wt_id}" if branch else ""}', fg='green')}",
+        f"{click.style('ᛃ', fg='cyan', bold=True)}   via shell: {click.style(f'locki x -m {wt_id}', fg='green')}",
         err=True,
     )
     try:

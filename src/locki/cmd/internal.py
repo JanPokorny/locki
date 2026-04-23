@@ -66,6 +66,7 @@ def _list_containers() -> list[tuple[str, str]]:
 
 # ── Self-service grammar engine ───────────────────────────────────────────────
 
+
 @dataclass
 class Literal:
     """Literal text segment inside a compound token."""
@@ -249,9 +250,7 @@ def _match_item(
             yield after_base, p2, u2
 
 
-def _match_atom(
-    tok: str, pos: int, used: frozenset[str], mc: MatchContext
-) -> Iterator[tuple[int, frozenset[str]]]:
+def _match_atom(tok: str, pos: int, used: frozenset[str], mc: MatchContext) -> Iterator[tuple[int, frozenset[str]]]:
     """Match a flag or compound-positional leaf token."""
     # Strip `-x/` short-alias prefix — split_argv already normalized short→long.
     if tok.startswith("-") and not tok.startswith("--"):
@@ -551,6 +550,49 @@ def internal_daemon() -> None:
         PORT_FILE.unlink(missing_ok=True)
 
 
+def _locate_worktree(cwd: pathlib.Path) -> tuple[str, pathlib.Path, pathlib.Path]:
+    """Walk up from *cwd* to find the nearest `.git` file and identify its sandbox.
+
+    Returns `(wt_id, dot_git_path, meta_git_path)`.  `wt_id` is the *parent* sandbox id
+    even when cwd is inside an include — that keeps branch/stash ownership rules
+    consistent across the whole sandbox.  Exits on any invariant violation.
+    """
+    wt_root = WORKTREES.resolve()
+    if not cwd.is_relative_to(wt_root):
+        sys.exit(f"Not inside a locki worktree: {str(cwd)!r}")
+    parts = cwd.relative_to(wt_root).parts
+    if not parts:
+        sys.exit(f"Not inside a locki worktree: {str(cwd)!r}")
+
+    wt_id = parts[0]
+    sandbox_root = WORKTREES / wt_id
+
+    # Walk up from cwd towards the sandbox root, stopping at the first `.git` file.
+    p: pathlib.Path = cwd
+    while True:
+        candidate = p / ".git"
+        if candidate.is_file():
+            break
+        if p == sandbox_root:
+            sys.exit(f"No worktree .git found at or above {str(cwd)!r}")
+        p = p.parent
+
+    # Map the found .git back to its expected meta location.
+    rel = p.relative_to(wt_root).parts
+    if len(rel) == 1:
+        meta_git = WORKTREES_META / wt_id / ".git"
+    elif len(rel) == 4 and rel[1] == ".locki" and rel[2] == "includes":
+        meta_git = WORKTREES_META / wt_id / "includes" / rel[3] / ".git"
+    else:
+        sys.exit(f"Unexpected worktree layout: {'/'.join(rel)!r}")
+
+    if not meta_git.exists():
+        sys.exit(f"Missing worktree metadata: {meta_git}")
+    if p.joinpath(".git").read_text().strip() != meta_git.read_text().strip():
+        sys.exit("Worktree .git mismatch — possible tampering.")
+    return wt_id, p / ".git", meta_git
+
+
 @internal_app.command("self-service")
 def internal_self_service() -> None:
     """SSH forced command: validate and execute an allowed self-service command."""
@@ -566,16 +608,7 @@ def internal_self_service() -> None:
     cwd_str, *argv = parts
 
     cwd = pathlib.Path(cwd_str).resolve()
-    if not cwd.is_relative_to(WORKTREES.resolve()):
-        sys.exit(f"Not a locki worktree: {cwd_str!r}")
-    wt_root = WORKTREES / cwd.relative_to(WORKTREES).parts[0]
-    wt_id = wt_root.name
-    meta_git = WORKTREES_META / wt_id / ".git"
-    dot_git = wt_root / ".git"
-    if not wt_root.is_dir() or not meta_git.exists() or not dot_git.is_file():
-        sys.exit(f"Invalid worktree: {cwd_str!r}")
-    if dot_git.read_text().strip() != meta_git.read_text().strip():
-        sys.exit("Worktree .git mismatch — possible tampering.")
+    wt_id, _dot_git, _meta_git = _locate_worktree(cwd)
     if not argv:
         sys.exit("Empty command.")
 

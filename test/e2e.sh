@@ -286,6 +286,61 @@ echo "Testing sandbox creation with --create..."
 assert_output "--create creates sandbox" "create-ok" locki x --create echo create-ok
 assert_fail "unknown substring rejects" locki x -m nonexistent-branch echo nope
 
+# ── locki list outside git repo / --all ─────────────────────────────────────
+
+echo
+echo "Testing locki list --all and outside-git-repo behavior..."
+
+pushd /tmp >/dev/null
+assert_ok    "locki list works outside git repo" locki list
+assert_output "locki list sees sandboxes outside git repo" "$AUTH" locki list
+assert_ok    "locki list --all works inside git repo" bash -c "cd $REPO && locki list --all"
+assert_ok    "locki x outside git repo with -m" locki x -m "$AUTH" echo 5
+popd >/dev/null
+
+# ── locki include ──────────────────────────────────────────────────────────
+
+echo
+echo "Testing locki include..."
+
+REMOTE2="$TMPDIR_ROOT/my_other_repo.git"
+REPO2="$TMPDIR_ROOT/r2"
+git init --bare "$REMOTE2" >/dev/null
+git clone "$REMOTE2" "$REPO2" >/dev/null 2>&1
+git -C "$REPO2" config user.name "Locki Test"
+git -C "$REPO2" config user.email "locki@example.com"
+echo hello > "$REPO2/hello.txt"
+git -C "$REPO2" add hello.txt
+git -C "$REPO2" commit -m "initial repo2" >/dev/null
+git -C "$REPO2" push >/dev/null 2>&1
+
+INCLUDE_NAME="$(basename "$REPO2")"
+INCLUDE_PATH="$WORKTREE_A/.locki/includes/$INCLUDE_NAME"
+
+assert_ok    "locki include --repo adds worktree" locki include -m "$AUTH" --repo "$REPO2"
+assert_ok    "include folder exists"              test -d "$INCLUDE_PATH"
+assert_ok    "include .git pointer exists"        test -f "$INCLUDE_PATH/.git"
+assert_output "include branch named #locki-<id>"  "untitled#locki-$AUTH" git -C "$INCLUDE_PATH" branch --show-current
+
+# Second include call for same repo should fail (collision).
+assert_fail  "duplicate include rejected"         locki include -m "$AUTH" --repo "$REPO2"
+
+# Git commands inside the include go through the self-service proxy.
+assert_output "git status works inside include"   "nothing to commit" \
+    locki x -m "$AUTH" bash -c "cd $INCLUDE_PATH && git status"
+
+# Commit inside the include.
+echo from-include | locki x -m "$AUTH" bash -c "cat > $INCLUDE_PATH/include-file.txt"
+locki x -m "$AUTH" bash -c "cd $INCLUDE_PATH && git add --all && git commit --message='inside include'"
+assert_output "include commit landed"             "inside include" git -C "$INCLUDE_PATH" log -1 --format=%s
+
+# Tampering with the include's .git pointer should be detected by self-service.
+ORIGINAL_DOTGIT=$(cat "$INCLUDE_PATH/.git")
+echo "gitdir: /tmp/evil" > "$INCLUDE_PATH/.git"
+assert_fail "tampered .git is rejected" locki x -m "$AUTH" bash -c "cd $INCLUDE_PATH && git status"
+echo "$ORIGINAL_DOTGIT" > "$INCLUDE_PATH/.git"
+assert_ok   "restored .git works again" locki x -m "$AUTH" bash -c "cd $INCLUDE_PATH && git status"
+
 # ── worktree cleanup ─────────────────────────────────────────────────────────
 
 echo
@@ -293,6 +348,9 @@ echo "Testing worktree removal..."
 
 assert_ok "locki remove works" locki remove -m "$AUTH" --force
 assert_fail "removed worktree dir is gone" test -d "$WORKTREE"
+assert_fail "included worktree dir is gone" test -d "$INCLUDE_PATH"
+# repo2 should no longer list the worktree
+assert_fail "include worktree removed from source repo" bash -c "git -C '$REPO2' worktree list | grep -q '$INCLUDE_PATH'"
 
 # ── summary ──────────────────────────────────────────────────────────────────
 

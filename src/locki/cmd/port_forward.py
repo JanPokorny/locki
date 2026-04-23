@@ -26,9 +26,7 @@ def _parse_port_spec(spec: str) -> tuple[int, int]:
     if len(parts) == 2:
         host = _free_port() if parts[0] == "" else int(parts[0])
         return host, int(parts[1])
-    raise click.BadParameter(
-        f"Invalid port spec '{spec}'. Use 'port', 'host_port:sandbox_port', or ':sandbox_port'."
-    )
+    raise click.BadParameter(f"Invalid port spec '{spec}'. Use 'port', 'host_port:sandbox_port', or ':sandbox_port'.")
 
 
 def _list_forwards(wt_id: str):
@@ -83,7 +81,7 @@ def port_forward_cmd(ctx, match, clear, list_forwards):
         logger.error("Did not match an existing sandbox.")
         sys.exit(1)
     if "RUNNING" not in lines:
-        logger.error(f"Sandbox is not running. Run {click.style(f"locki x -m {wt_id} true", fg="green")} to start it.")
+        logger.error(f"Sandbox is not running. Run {click.style(f'locki x -m {wt_id} true', fg='green')} to start it.")
         sys.exit(1)
 
     if clear:
@@ -126,5 +124,7 @@ def port_forward_cmd(ctx, match, clear, list_forwards):
     if list_forwards:
         _list_forwards(wt_id)
     elif not ctx.args and not clear:
-        logger.error("No ports specified. Usage: locki port-forward [-m <sandbox-name-part>] [--list] [--clear] [port[:port]] ...")
+        logger.error(
+            "No ports specified. Usage: locki port-forward [-m <sandbox-name-part>] [--list] [--clear] [port[:port]] ..."
+        )
         sys.exit(1)

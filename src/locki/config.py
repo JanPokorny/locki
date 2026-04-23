@@ -55,8 +55,9 @@ class LockiConfig(pydantic.BaseModel):
         return self.incus_image[_arch()]
 
 
-def load_config(git_root: pathlib.Path) -> LockiConfig:
-    """Load config from user config and repo locki.toml, repo takes precedence."""
+def load_config(git_root: pathlib.Path | None) -> LockiConfig:
+    """Load config from user config and repo locki.toml. Repo config wins on conflict.
+    *git_root=None* skips repo-specific config (useful when running outside a git repo)."""
     user_data: dict = {}
     if USER_CONFIG.exists():
         try:
@@ -66,14 +67,15 @@ def load_config(git_root: pathlib.Path) -> LockiConfig:
             logger.warning("Invalid user config %s: %s", USER_CONFIG, e)
 
     repo_data: dict = {}
-    repo_config_path = git_root / "locki.toml"
-    if repo_config_path.exists():
-        try:
-            with open(repo_config_path, "rb") as f:
-                repo_data = tomllib.load(f)
-        except tomllib.TOMLDecodeError as e:
-            logger.error("Invalid repo config %s: %s", repo_config_path, e)
-            sys.exit(1)
+    if git_root is not None:
+        repo_config_path = git_root / "locki.toml"
+        if repo_config_path.exists():
+            try:
+                with open(repo_config_path, "rb") as f:
+                    repo_data = tomllib.load(f)
+            except tomllib.TOMLDecodeError as e:
+                logger.error("Invalid repo config %s: %s", repo_config_path, e)
+                sys.exit(1)
 
     merged = _deep_merge(user_data, repo_data)
     try:

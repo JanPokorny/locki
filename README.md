@@ -134,6 +134,8 @@ To my knowledge Locki is the only one packing a fully vertically integrated Incu
 
 - `locki list` shows worktree paths. `cd` to a worktree folder (`~/.local/share/locki/worktrees/...`) to operate on it directly. `locki` commands default to operating on the corresponding sandbox when in worktree folder.
 
+- Working on two repos at once? `cd` into your sandbox's primary repo and run `locki include --repo ../other-repo` to graft the other repo into the current sandbox at `.locki/includes/<repo-name>/`. Or from the other repo: `locki include --this -m <sandbox-id>`.
+
 - While `locki ai` opens a coding agent, `locki exec` (or short `locki x`) is the low-level version which can run any command. Pass a command to run in a sandbox, use `--match`/`-m` to select by branch substring or sandbox id: `locki exec -m big-refactor -- pytest`.
 
 - The first `locki ai` run prompts you to pick a default harness; change it later in `~/.config/locki/config.toml` under `[ai] harness = "..."`.
