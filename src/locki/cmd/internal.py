@@ -27,7 +27,7 @@ from functools import cached_property
 
 import asyncssh
 import click
-from lark import Lark, Transformer
+from lark import Lark, Token, Transformer
 
 from locki.paths import DATA, DENIED_LOG, RUNTIME, STATE, WORKTREES, WORKTREES_META
 from locki.utils import limactl
@@ -69,20 +69,47 @@ def _list_containers() -> list[tuple[str, str]]:
 
 
 @dataclass
-class Literal:
-    """Literal text segment inside a compound token."""
-
-    text: str
-
-
-@dataclass
-class Placeholder:
+class PlaceholderRule:
     """A `<name>` segment inside a compound token."""
 
     name: str
 
 
-CompoundPart = Literal | Placeholder
+@dataclass
+class ArgRule:
+    """A positional (or flag value): literal strings interleaved with placeholders."""
+
+    value: list[str | PlaceholderRule]
+
+
+@dataclass
+class FlagRule:
+    short_name: str | None
+    long_name: str  # Underscored form, matches `split_argv` flag keys.
+    value: ArgRule | None  # None for bool flags.
+
+
+@dataclass
+class AlternativeRule:
+    """`(a | b | c)` when `optional=False`, `[a | b | c]` when `optional=True`."""
+
+    alternatives: list[Rule]
+    optional: bool
+
+
+@dataclass
+class SequenceRule:
+    """Ordered items; `last_repeats=True` means the last one matches one-or-more times."""
+
+    sequence: list[Rule]
+    last_repeats: bool
+
+    def __post_init__(self) -> None:
+        if self.last_repeats and not self.sequence:
+            raise ValueError("SequenceRule with last_repeats=True must be non-empty")
+
+
+Rule = ArgRule | FlagRule | AlternativeRule | SequenceRule | PlaceholderRule
 
 
 class Context:
@@ -111,12 +138,12 @@ class Context:
         result = subprocess.run(["git", "stash", "list"], capture_output=True, text=True)
         return [line.split(":", 1)[0] for line in result.stdout.splitlines() if tag in line]
 
-    def compound(self, parts: list[CompoundPart]) -> re.Pattern[str]:
-        """Build a `re.fullmatch`-ready pattern from compound parts."""
+    def compound(self, parts: list[str | PlaceholderRule]) -> re.Pattern[str]:
+        """Build a `re.fullmatch`-ready pattern from literal strings and placeholders."""
         buf: list[str] = []
         for part in parts:
-            if isinstance(part, Literal):
-                buf.append(re.escape(part.text))
+            if isinstance(part, str):
+                buf.append(re.escape(part))
             elif part.name == "wt-id":
                 buf.append(re.escape(self.wt_id))
             elif part.name == "owner":
@@ -142,54 +169,23 @@ class MatchContext:
 
 # ── Grammar ──────────────────────────────────────────────────────────────────
 #
-# Each line is parsed with Lark into an AST of `Alt`/`Seq`/`Item` nodes whose
-# leaves are `Flag` or `Positional`.  An `Item` carries the `[...]` (optional)
-# and `...` (one-or-more) modifiers so the matcher can treat both uniformly.
-
-
-@dataclass
-class Alt:
-    options: list[Seq]
-
-
-@dataclass
-class Seq:
-    items: list[Item]
-
-
-@dataclass
-class Flag:
-    key: str
-    short: str | None
-    value: list[CompoundPart] | None  # None for bool flags.
-
-
-@dataclass
-class Positional:
-    parts: list[CompoundPart]
-
-
-@dataclass
-class Item:
-    body: Alt | Flag | Positional
-    optional: bool
-    repeat: bool
+# A grammar line is parsed with Lark straight into the `Rule` AST.  A `seq` rule
+# collects atoms (optionally followed by `...`) into a `SequenceRule`; an `alt`
+# rule wraps multiple seqs in an `AlternativeRule`; `[...]` sets `optional=True`.
 
 
 _COMPOUND_PART_RE = re.compile(r"<([^>]+)>|([^<>]+)")
 
 
-def _compound_parts(text: str) -> list[CompoundPart]:
+def _compound_parts(text: str) -> list[str | PlaceholderRule]:
     return [
-        Placeholder(m.group(1)) if m.group(1) is not None else Literal(m.group(2))
-        for m in _COMPOUND_PART_RE.finditer(text)
+        PlaceholderRule(m.group(1)) if m.group(1) is not None else m.group(2) for m in _COMPOUND_PART_RE.finditer(text)
     ]
 
 
 _GRAMMAR = r"""
 alt: seq ("|" seq)*
-seq: item*
-item: atom ELLIPSIS?
+seq: atom* ELLIPSIS?
 ?atom: group | opt | flag | compound
 group: "(" alt ")"
 opt:   "[" alt "]"
@@ -204,45 +200,36 @@ COMPOUND: /(?:<[^>]+>|[^<>\s()\[\]|])+/
 """
 
 
-@dataclass
-class _OptWrapper:
-    """Sentinel used only while building the AST — unwrapped by `_ASTBuilder.item`."""
-
-    body: Alt
-
-
 class _ASTBuilder(Transformer):
-    def alt(self, c: list[Seq]) -> Alt:
-        return Alt(list(c))
+    def alt(self, c: list[Rule]) -> Rule:
+        return c[0] if len(c) == 1 else AlternativeRule(alternatives=list(c), optional=False)
 
-    def seq(self, c: list[Item]) -> Seq:
-        return Seq(list(c))
+    def seq(self, c: list[Rule | Token]) -> SequenceRule:
+        last_repeats = bool(c) and isinstance(c[-1], Token) and c[-1].type == "ELLIPSIS"
+        items = [x for x in c if not isinstance(x, Token)]
+        return SequenceRule(sequence=items, last_repeats=last_repeats)  # pyrefly: ignore
 
-    def item(self, c: list[Alt | Flag | Positional | _OptWrapper]) -> Item:
-        atom = c[0]
-        repeat = len(c) > 1
-        if isinstance(atom, _OptWrapper):
-            return Item(atom.body, optional=True, repeat=repeat)
-        return Item(atom, optional=False, repeat=repeat)
-
-    def group(self, c: list[Alt]) -> Alt:
+    def group(self, c: list[Rule]) -> Rule:
         return c[0]
 
-    def opt(self, c: list[Alt]) -> _OptWrapper:
-        return _OptWrapper(c[0])
+    def opt(self, c: list[Rule]) -> AlternativeRule:
+        inner = c[0]
+        if isinstance(inner, AlternativeRule) and not inner.optional:
+            return AlternativeRule(alternatives=inner.alternatives, optional=True)
+        return AlternativeRule(alternatives=[inner], optional=True)
 
-    def flag(self, c: list[str]) -> Flag:
+    def flag(self, c: list[Token]) -> FlagRule:
         tok = str(c[0])
         short: str | None = None
         if tok.startswith("-") and not tok.startswith("--"):
             short = tok[1]
             tok = tok[3:]
         name, sep, value_text = tok[2:].partition("=")
-        value = _compound_parts(value_text) if sep == "=" else None
-        return Flag(key=name.replace("-", "_"), short=short, value=value)
+        value = ArgRule(value=_compound_parts(value_text)) if sep == "=" else None
+        return FlagRule(short_name=short, long_name=name.replace("-", "_"), value=value)
 
-    def compound(self, c: list[str]) -> Positional:
-        return Positional(parts=_compound_parts(str(c[0])))
+    def compound(self, c: list[Token]) -> ArgRule:
+        return ArgRule(value=_compound_parts(str(c[0])))
 
 
 _PARSER = Lark(_GRAMMAR, start="alt", parser="lalr", transformer=_ASTBuilder())
@@ -250,86 +237,76 @@ _PARSER = Lark(_GRAMMAR, start="alt", parser="lalr", transformer=_ASTBuilder())
 
 # ── Matcher ──────────────────────────────────────────────────────────────────
 #
-# Each helper yields `(pos, used)` for every way to match the node; backtracking
-# falls out of `yield from`.  `_match` dispatches on node type, `_match_seq`
-# concatenates, `_match_item` handles `[...]` and `...` modifiers.
+# Each helper yields `(pos, used)` for every way to match its rule; backtracking
+# falls out of `yield from`.  `_match` dispatches on rule type, `_match_seq`
+# handles ordering and (on the last item) repetition.
 
 
-def _match(
-    node: Alt | Seq | Item | Flag | Positional, pos: int, used: frozenset[str], mc: MatchContext
-) -> Iterator[tuple[int, frozenset[str]]]:
-    if isinstance(node, Alt):
-        for seq in node.options:
-            yield from _match(seq, pos, used, mc)
-    elif isinstance(node, Seq):
-        yield from _match_seq(node.items, 0, pos, used, mc)
-    elif isinstance(node, Item):
-        yield from _match_item(node, pos, used, mc)
-    elif isinstance(node, Flag):
-        if node.key in used:
+def _match(rule: Rule, pos: int, used: frozenset[str], mc: MatchContext) -> Iterator[tuple[int, frozenset[str]]]:
+    if isinstance(rule, SequenceRule):
+        yield from _match_seq(rule, 0, pos, used, mc)
+    elif isinstance(rule, AlternativeRule):
+        if rule.optional:
+            yield pos, used
+        for alt in rule.alternatives:
+            yield from _match(alt, pos, used, mc)
+    elif isinstance(rule, FlagRule):
+        if rule.long_name in used:
             return
-        val = mc.flags.get(node.key)
-        if node.value is None:
+        val = mc.flags.get(rule.long_name)
+        if rule.value is None:
             if val == "":
-                yield pos, used | {node.key}
-        elif val is not None and mc.ctx.compound(node.value).fullmatch(val):
-            yield pos, used | {node.key}
-    elif pos < len(mc.positionals) and mc.ctx.compound(node.parts).fullmatch(mc.positionals[pos]):
+                yield pos, used | {rule.long_name}
+        elif val is not None and mc.ctx.compound(rule.value.value).fullmatch(val):
+            yield pos, used | {rule.long_name}
+    elif (
+        isinstance(rule, ArgRule)
+        and pos < len(mc.positionals)
+        and mc.ctx.compound(rule.value).fullmatch(mc.positionals[pos])
+    ):
         yield pos + 1, used
 
 
 def _match_seq(
-    items: list[Item], i: int, pos: int, used: frozenset[str], mc: MatchContext
+    seq: SequenceRule, i: int, pos: int, used: frozenset[str], mc: MatchContext
 ) -> Iterator[tuple[int, frozenset[str]]]:
-    if i >= len(items):
+    if i >= len(seq.sequence):
         yield pos, used
         return
-    for p2, u2 in _match(items[i], pos, used, mc):
-        yield from _match_seq(items, i + 1, p2, u2, mc)
+    is_last = i == len(seq.sequence) - 1
+    for p2, u2 in _match(seq.sequence[i], pos, used, mc):
+        if is_last and seq.last_repeats:
+            # "One or more": this match is valid, and the same item may match again.
+            yield p2, u2
+            yield from _match_seq(seq, i, p2, u2, mc)
+        elif is_last:
+            yield p2, u2
+        else:
+            yield from _match_seq(seq, i + 1, p2, u2, mc)
 
 
-def _match_item(item: Item, pos: int, used: frozenset[str], mc: MatchContext) -> Iterator[tuple[int, frozenset[str]]]:
-    def once(p: int, u: frozenset[str]) -> Iterator[tuple[int, frozenset[str]]]:
-        if item.optional:
-            yield p, u
-        yield from _match(item.body, p, u, mc)
-
-    if item.repeat:
-        # `...` is "one or more": yield only after each successful match.
-        def go(p: int, u: frozenset[str]) -> Iterator[tuple[int, frozenset[str]]]:
-            for p2, u2 in once(p, u):
-                yield p2, u2
-                yield from go(p2, u2)
-
-        yield from go(pos, used)
-    else:
-        yield from once(pos, used)
-
-
-def _walk_flags(node: Alt | Seq | Item | Flag | Positional) -> Iterator[Flag]:
-    if isinstance(node, Flag):
-        yield node
-    elif isinstance(node, Alt):
-        for seq in node.options:
-            yield from _walk_flags(seq)
-    elif isinstance(node, Seq):
-        for item in node.items:
+def _walk_flags(rule: Rule) -> Iterator[FlagRule]:
+    if isinstance(rule, FlagRule):
+        yield rule
+    elif isinstance(rule, SequenceRule):
+        for item in rule.sequence:
             yield from _walk_flags(item)
-    elif isinstance(node, Item):
-        yield from _walk_flags(node.body)
+    elif isinstance(rule, AlternativeRule):
+        for alt in rule.alternatives:
+            yield from _walk_flags(alt)
 
 
 # ── Ruleset ──────────────────────────────────────────────────────────────────
 
 
 class Ruleset:
-    def __init__(self, rules: list[Alt]) -> None:
+    def __init__(self, rules: list[Rule]) -> None:
         self.rules = rules
 
     @classmethod
     def from_markdown(cls, md: str) -> Ruleset:
         """Parse every non-blank line inside ```locki-self-service-command-filter fences as a grammar rule."""
-        rules: list[Alt] = []
+        rules: list[Rule] = []
         in_block = False
         for raw in md.splitlines():
             line = raw.strip()
@@ -349,12 +326,12 @@ class Ruleset:
         for rule in self.rules:
             for flag in _walk_flags(rule):
                 if flag.value is not None:
-                    value_keys.add(flag.key)
-                if flag.short is not None:
-                    prior = short_aliases.get(flag.short)
-                    if prior is not None and prior != flag.key:
-                        raise ValueError(f"Short flag -{flag.short} maps to both --{prior} and --{flag.key}")
-                    short_aliases[flag.short] = flag.key
+                    value_keys.add(flag.long_name)
+                if flag.short_name is not None:
+                    prior = short_aliases.get(flag.short_name)
+                    if prior is not None and prior != flag.long_name:
+                        raise ValueError(f"Short flag -{flag.short_name} maps to both --{prior} and --{flag.long_name}")
+                    short_aliases[flag.short_name] = flag.long_name
         return frozenset(value_keys), short_aliases
 
     @property
