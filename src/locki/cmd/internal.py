@@ -70,7 +70,7 @@ def _list_containers() -> list[tuple[str, str]]:
 
 @dataclass
 class PlaceholderRule:
-    """A `<name>` segment inside a compound token."""
+    """A `<name>` segment inside a compound token; appears only inside `ArgRule.value`."""
 
     name: str
 
@@ -81,12 +81,33 @@ class ArgRule:
 
     value: list[str | PlaceholderRule]
 
+    def match(self, pos: int, used: frozenset[str], mc: MatchContext) -> Iterator[tuple[int, frozenset[str]]]:
+        if pos < len(mc.positionals) and mc.ctx.compound(self.value).fullmatch(mc.positionals[pos]):
+            yield pos + 1, used
+
+    def walk_flags(self) -> Iterator[FlagRule]:
+        return
+        yield  # make this a generator
+
 
 @dataclass
 class FlagRule:
     short_name: str | None
     long_name: str  # Underscored form, matches `split_argv` flag keys.
     value: ArgRule | None  # None for bool flags.
+
+    def match(self, pos: int, used: frozenset[str], mc: MatchContext) -> Iterator[tuple[int, frozenset[str]]]:
+        if self.long_name in used:
+            return
+        val = mc.flags.get(self.long_name)
+        if self.value is None:
+            if val == "":
+                yield pos, used | {self.long_name}
+        elif val is not None and mc.ctx.compound(self.value.value).fullmatch(val):
+            yield pos, used | {self.long_name}
+
+    def walk_flags(self) -> Iterator[FlagRule]:
+        yield self
 
 
 @dataclass
@@ -95,6 +116,16 @@ class AlternativeRule:
 
     alternatives: list[Rule]
     optional: bool
+
+    def match(self, pos: int, used: frozenset[str], mc: MatchContext) -> Iterator[tuple[int, frozenset[str]]]:
+        if self.optional:
+            yield pos, used
+        for alt in self.alternatives:
+            yield from alt.match(pos, used, mc)
+
+    def walk_flags(self) -> Iterator[FlagRule]:
+        for alt in self.alternatives:
+            yield from alt.walk_flags()
 
 
 @dataclass
@@ -108,8 +139,32 @@ class SequenceRule:
         if self.last_repeats and not self.sequence:
             raise ValueError("SequenceRule with last_repeats=True must be non-empty")
 
+    def match(self, pos: int, used: frozenset[str], mc: MatchContext) -> Iterator[tuple[int, frozenset[str]]]:
+        yield from self._match_from(0, pos, used, mc)
 
-Rule = ArgRule | FlagRule | AlternativeRule | SequenceRule | PlaceholderRule
+    def _match_from(
+        self, i: int, pos: int, used: frozenset[str], mc: MatchContext
+    ) -> Iterator[tuple[int, frozenset[str]]]:
+        if i >= len(self.sequence):
+            yield pos, used
+            return
+        is_last = i == len(self.sequence) - 1
+        for p2, u2 in self.sequence[i].match(pos, used, mc):
+            if is_last and self.last_repeats:
+                # "One or more": this match is valid, and the same item may match again.
+                yield p2, u2
+                yield from self._match_from(i, p2, u2, mc)
+            elif is_last:
+                yield p2, u2
+            else:
+                yield from self._match_from(i + 1, p2, u2, mc)
+
+    def walk_flags(self) -> Iterator[FlagRule]:
+        for item in self.sequence:
+            yield from item.walk_flags()
+
+
+Rule = ArgRule | FlagRule | AlternativeRule | SequenceRule
 
 
 class Context:
@@ -235,67 +290,6 @@ class _ASTBuilder(Transformer):
 _PARSER = Lark(_GRAMMAR, start="alt", parser="lalr", transformer=_ASTBuilder())
 
 
-# ── Matcher ──────────────────────────────────────────────────────────────────
-#
-# Each helper yields `(pos, used)` for every way to match its rule; backtracking
-# falls out of `yield from`.  `_match` dispatches on rule type, `_match_seq`
-# handles ordering and (on the last item) repetition.
-
-
-def _match(rule: Rule, pos: int, used: frozenset[str], mc: MatchContext) -> Iterator[tuple[int, frozenset[str]]]:
-    if isinstance(rule, SequenceRule):
-        yield from _match_seq(rule, 0, pos, used, mc)
-    elif isinstance(rule, AlternativeRule):
-        if rule.optional:
-            yield pos, used
-        for alt in rule.alternatives:
-            yield from _match(alt, pos, used, mc)
-    elif isinstance(rule, FlagRule):
-        if rule.long_name in used:
-            return
-        val = mc.flags.get(rule.long_name)
-        if rule.value is None:
-            if val == "":
-                yield pos, used | {rule.long_name}
-        elif val is not None and mc.ctx.compound(rule.value.value).fullmatch(val):
-            yield pos, used | {rule.long_name}
-    elif (
-        isinstance(rule, ArgRule)
-        and pos < len(mc.positionals)
-        and mc.ctx.compound(rule.value).fullmatch(mc.positionals[pos])
-    ):
-        yield pos + 1, used
-
-
-def _match_seq(
-    seq: SequenceRule, i: int, pos: int, used: frozenset[str], mc: MatchContext
-) -> Iterator[tuple[int, frozenset[str]]]:
-    if i >= len(seq.sequence):
-        yield pos, used
-        return
-    is_last = i == len(seq.sequence) - 1
-    for p2, u2 in _match(seq.sequence[i], pos, used, mc):
-        if is_last and seq.last_repeats:
-            # "One or more": this match is valid, and the same item may match again.
-            yield p2, u2
-            yield from _match_seq(seq, i, p2, u2, mc)
-        elif is_last:
-            yield p2, u2
-        else:
-            yield from _match_seq(seq, i + 1, p2, u2, mc)
-
-
-def _walk_flags(rule: Rule) -> Iterator[FlagRule]:
-    if isinstance(rule, FlagRule):
-        yield rule
-    elif isinstance(rule, SequenceRule):
-        for item in rule.sequence:
-            yield from _walk_flags(item)
-    elif isinstance(rule, AlternativeRule):
-        for alt in rule.alternatives:
-            yield from _walk_flags(alt)
-
-
 # ── Ruleset ──────────────────────────────────────────────────────────────────
 
 
@@ -324,7 +318,7 @@ class Ruleset:
         value_keys: set[str] = set()
         short_aliases: dict[str, str] = {}
         for rule in self.rules:
-            for flag in _walk_flags(rule):
+            for flag in rule.walk_flags():
                 if flag.value is not None:
                     value_keys.add(flag.long_name)
                 if flag.short_name is not None:
@@ -393,7 +387,7 @@ class Ruleset:
         expected = set(effective)
         target = len(positionals)
         return any(
-            p == target and used == expected for rule in self.rules for p, used in _match(rule, 0, frozenset(), mc)
+            p == target and used == expected for rule in self.rules for p, used in rule.match(0, frozenset(), mc)
         )
 
 
