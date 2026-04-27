@@ -48,6 +48,7 @@ CONTAINER_ENV = {
     "MAVEN_OPTS": "-Dmaven.repo.local=/var/cache/locki/maven",
     "MISE_CACHE_DIR": "/var/cache/locki/mise",
     "MISE_DATA": "/usr/share/mise",
+    "MISE_GLOBAL_CONFIG_FILE": "/opt/locki/mise.toml",
     "MISE_INSTALL_PATH": "/usr/local/bin/mise",
     "MISE_NODE_VERIFY": "false",
     "MISE_TRUSTED_CONFIG_PATHS": "/",
