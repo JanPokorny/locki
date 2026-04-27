@@ -46,6 +46,22 @@ pnpm config set global-bin-dir /usr/local/bin
 exec pnpm "$@"
 __LOCKI_EOF__
 
+cat > /opt/locki/bin/agent-browser << '__LOCKI_EOF__'
+#!/bin/sh
+if ! command -v chromium >/dev/null 2>&1 && ! command -v chromium-browser >/dev/null 2>&1; then
+  if command -v dnf >/dev/null 2>&1; then
+    dnf install -y chromium >/dev/null
+  elif command -v apt-get >/dev/null 2>&1; then
+    apt-get update -qq && apt-get install -y chromium-browser >/dev/null
+  fi
+fi
+chromium_path=$(command -v chromium 2>/dev/null || command -v chromium-browser 2>/dev/null)
+if [ -z "$chromium_path" ]; then
+  echo "agent-browser: chromium not installed and could not be installed automatically." >&2
+fi
+exec mise x github:vercel-labs/agent-browser -- agent-browser --executable-path "$chromium_path" "$@"
+__LOCKI_EOF__
+
 chmod +x /opt/locki/bin/*
 
 # MARK: Low-priority shims
@@ -71,15 +87,6 @@ else
 fi
 systemctl enable --now docker
 exec docker "$@"
-__LOCKI_EOF__
-
-## JIT shim for agent-browser -- first invocation installs, then mise's global binary overshadows the shim
-cat > /opt/locki/bin/jit/agent-browser << '__LOCKI_EOF__'
-#!/bin/sh
-rm -f "$(readlink -f "$0")"
-mise use -g github:vercel-labs/agent-browser
-agent-browser install --with-deps
-exec agent-browser "$@"
 __LOCKI_EOF__
 
 ## JIT shims for nodejs-based tools
