@@ -4,7 +4,7 @@ import pathlib
 import click
 
 from locki.paths import LIMA, WORKTREES, WORKTREES_META
-from locki.utils import AliasGroup, limactl, run_command, run_in_vm
+from locki.utils import AliasGroup, limactl, live_branch, run_command, run_in_vm
 
 
 @click.group(cls=AliasGroup, help="Manage the Locki VM.")
@@ -55,9 +55,8 @@ def vm_status_cmd():
         wt_id = parts[0].strip()
         status = parts[1].strip().lower()
         meta_dir = WORKTREES_META / wt_id
-        branch_file = meta_dir / "branch"
         repo_file = meta_dir / "repo"
-        branch = branch_file.read_text().strip() if branch_file.exists() else ""
+        branch = live_branch(meta_dir) if meta_dir.is_dir() else ""
         repo_path = pathlib.Path(repo_file.read_text().strip()) if repo_file.exists() else None
         repo = ""
         if repo_path:

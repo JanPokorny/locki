@@ -80,7 +80,6 @@ def _setup_include(sandbox: SandboxInfo, repo_b: pathlib.Path, name: str) -> Non
 
     include_meta.mkdir(parents=True, exist_ok=True)
     (include_meta / ".git").write_text((include_wt / ".git").read_text())
-    (include_meta / "branch").write_text(branch)
     (include_meta / "repo").write_text(str(repo_b))
 
     run_command(

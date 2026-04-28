@@ -263,7 +263,6 @@ def exec_cmd(ctx, match, interactive, all_repos, create, id_file):
         meta_dir = WORKTREES_META / wt_id
         meta_dir.mkdir(parents=True, exist_ok=True)
         (meta_dir / ".git").write_text((wt_path / ".git").read_text())
-        (meta_dir / "branch").write_text(branch)
         (meta_dir / "repo").write_text(str(repo_path))
 
         run_command(

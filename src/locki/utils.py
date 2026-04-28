@@ -338,34 +338,49 @@ class SandboxInfo:
         return self.meta_path / "includes" / name
 
 
+def live_branch(meta_dir: pathlib.Path) -> str:
+    """Read the worktree's current branch via its `.git` pointer + `HEAD`.
+
+    Returns `(detached)` for a detached HEAD, or `(broken)` if the gitdir is gone.
+    """
+    try:
+        gitdir_line = (meta_dir / ".git").read_text().strip()
+        if gitdir_line.startswith("gitdir:"):
+            gitdir = pathlib.Path(gitdir_line.split(":", 1)[1].strip())
+            head = (gitdir / "HEAD").read_text().strip()
+            if head.startswith("ref: refs/heads/"):
+                return head.removeprefix("ref: refs/heads/")
+            return "(detached)"
+    except OSError:
+        pass
+    return "(broken)"
+
+
 def list_sandboxes() -> list[SandboxInfo]:
     """Every Locki sandbox on disk, read from the meta directory."""
     if not WORKTREES_META.exists():
         return []
     sandboxes: list[SandboxInfo] = []
     for meta_dir in sorted(WORKTREES_META.iterdir()):
-        if not meta_dir.is_dir():
-            continue
-        branch_file, repo_file = meta_dir / "branch", meta_dir / "repo"
-        if not branch_file.exists() or not repo_file.exists():
+        if not meta_dir.is_dir() or not (meta_dir / "repo").exists():
             continue
         includes: list[IncludeInfo] = []
         includes_root = meta_dir / "includes"
         if includes_root.is_dir():
             for inc_dir in sorted(includes_root.iterdir()):
-                if inc_dir.is_dir() and (inc_dir / "branch").exists() and (inc_dir / "repo").exists():
+                if inc_dir.is_dir() and (inc_dir / "repo").exists():
                     includes.append(
                         IncludeInfo(
                             name=inc_dir.name,
                             repo=pathlib.Path((inc_dir / "repo").read_text().strip()),
-                            branch=(inc_dir / "branch").read_text().strip(),
+                            branch=live_branch(inc_dir),
                         )
                     )
         sandboxes.append(
             SandboxInfo(
                 wt_id=meta_dir.name,
-                branch=branch_file.read_text().strip(),
-                repo=pathlib.Path(repo_file.read_text().strip()),
+                branch=live_branch(meta_dir),
+                repo=pathlib.Path((meta_dir / "repo").read_text().strip()),
                 includes=includes,
             )
         )
@@ -500,11 +515,14 @@ def _pick_interactive(
     from InquirerPy import inquirer
     from InquirerPy.base.control import Choice
 
-    choices = []
+    # Use string keys (wt_id or sentinels) — InquirerPy's fuzzy prompt converts
+    # complex `Choice.value` objects to dicts internally, breaking dataclass usage.
+    by_id = {s.wt_id: s for s in all_sandboxes}
+    choices: list = []
     if allow_create:
         choices.append(Choice(value="__create__", name="(create new)"))
     for s in sorted(candidates, key=lambda x: x.branch):
-        choices.append(Choice(value=s, name=f"{s.branch}  ({s.repo.name})"))
+        choices.append(Choice(value=s.wt_id, name=f"{s.branch}  ({s.repo.name})"))
     if not scope_is_all and not filter_out_current_repo:
         choices.append(Choice(value="__all__", name="(show sandboxes from all repos)"))
 
@@ -524,4 +542,4 @@ def _pick_interactive(
         return None
     if selected == "__all__":
         return _pick_interactive(all_sandboxes, all_sandboxes, allow_create, True, filter_out_current_repo)
-    return selected
+    return by_id[selected]
