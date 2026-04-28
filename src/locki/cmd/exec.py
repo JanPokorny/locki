@@ -17,11 +17,13 @@ import time
 import click
 
 from locki.config import load_config
-from locki.paths import DATA, HOME, LIMA, RUNTIME, WORKTREES, WORKTREES_META
+from locki.paths import DATA, LIMA, RUNTIME, WORKTREES, WORKTREES_META
+from locki.runes import ERROR, EXIT, INFO, SPINNER
 from locki.utils import (
     cwd_git_repo,
     file_lock,
     limactl,
+    pretty_path,
     resolve_sandbox,
     run_command,
     run_in_vm,
@@ -131,12 +133,12 @@ def exec_cmd(ctx, match, interactive, all_repos, create, id_file):
     """
     if create and (match or interactive or all_repos):
         click.echo(
-            f"{click.style('ᛞ', fg='red', bold=True)} --create conflicts with --match/--interactive/--all.",
+            f"{ERROR} --create conflicts with --match/--interactive/--all.",
             err=True,
         )
         sys.exit(1)
 
-    click.echo(f"{click.style('ᚠ', fg='magenta', bold=True)} Entering a Locki sandbox.", err=True)
+    click.echo(f"{SPINNER} Entering a Locki sandbox.", err=True)
 
     if create:
         sandbox = None
@@ -153,7 +155,7 @@ def exec_cmd(ctx, match, interactive, all_repos, create, id_file):
         repo_path = cwd_git_repo()
         if repo_path is None:
             click.echo(
-                f"{click.style('ᛞ', fg='red', bold=True)} Cannot create a sandbox outside a git repo.",
+                f"{ERROR} Cannot create a sandbox outside a git repo.",
                 err=True,
             )
             sys.exit(1)
@@ -438,20 +440,16 @@ def exec_cmd(ctx, match, interactive, all_repos, create, id_file):
     )
 
     click.echo()
-    click.echo(f"{click.style('ᛟ', fg='magenta', bold=True)} Exited Locki sandbox.", err=True)
-    click.echo(f"{click.style('ᛃ', fg='cyan', bold=True)} Return to this sandbox:", err=True)
+    click.echo(f"{EXIT} Exited Locki sandbox.", err=True)
+    click.echo(f"{INFO} Return to this sandbox:", err=True)
     click.echo(
-        f"{click.style('ᛃ', fg='cyan', bold=True)}      via AI: {click.style(f'locki ai -m {wt_id}', fg='green')}"
+        f"{INFO}      via AI: {click.style(f'locki ai -m {wt_id}', fg='green')}"
         f" (or just {click.style('locki ai', fg='green')} and find it in the list)",
         err=True,
     )
     click.echo(
-        f"{click.style('ᛃ', fg='cyan', bold=True)}   via shell: {click.style(f'locki x -m {wt_id}', fg='green')}",
+        f"{INFO}   via shell: {click.style(f'locki x -m {wt_id}', fg='green')}",
         err=True,
     )
-    try:
-        wt_display = str(pathlib.Path("~") / (WORKTREES / wt_id).relative_to(HOME))
-    except ValueError:
-        wt_display = str(WORKTREES / wt_id)
-    click.echo(f"{click.style('ᛃ', fg='cyan', bold=True)}     on disk: {click.style(wt_display, fg='green')}", err=True)
+    click.echo(f"{INFO}     on disk: {click.style(pretty_path(WORKTREES / wt_id), fg='green')}", err=True)
     raise SystemExit(result.returncode)

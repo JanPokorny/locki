@@ -16,7 +16,8 @@ from contextlib import contextmanager, nullcontext
 import click
 
 from locki.logging import print_log_tail
-from locki.paths import RUNTIME, WORKTREES, WORKTREES_META
+from locki.paths import HOME, RUNTIME, WORKTREES, WORKTREES_META
+from locki.runes import ERROR, FUTHARK, SUCCESS
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +59,7 @@ def spinner(text: str):
 
     def _spin():
         while not stop.wait(0.2):
-            sys.stderr.write(f"\r{random.choice('ᚠᚢᚦᚨᚱᚲᚷᚹᚺᚾᛁᛃᛇᛈᛉᛊᛋᛏᛒᛖᛗᛚᛜᛝᛟᛞᚴ')} {text}")
+            sys.stderr.write(f"\r{random.choice(FUTHARK)} {text}")
             sys.stderr.flush()
 
     def _duration() -> str:
@@ -81,14 +82,14 @@ def spinner(text: str):
             stop.set()
             thread.join()
         click.echo(
-            f"\r{click.style('ᛝ', fg='green', bold=True)} {text.replace('ing ', 'ed ', count=1)}{_duration()} ",
+            f"\r{SUCCESS} {text.replace('ing ', 'ed ', count=1)}{_duration()} ",
             err=True,
         )
     except BaseException:
         if thread:
             stop.set()
             thread.join()
-        click.echo(f"\r{click.style('ᛞ', fg='red', bold=True)} {text} failed{_duration()}", err=True)
+        click.echo(f"\r{ERROR} {text} failed{_duration()}", err=True)
         raise
     finally:
         sys.stderr.flush()
@@ -216,57 +217,50 @@ def current_worktree() -> pathlib.Path | None:
     return WORKTREES / cwd.relative_to(WORKTREES).parts[0]
 
 
+def pretty_path(p: pathlib.Path) -> str:
+    try:
+        return "~/" + str(p.relative_to(HOME))
+    except ValueError:
+        return str(p)
+
+
+def format_table(headers: tuple[str, ...], rows: list[tuple[str, ...]]) -> str:
+    widths = [len(h) for h in headers]
+    for row in rows:
+        for i, val in enumerate(row):
+            widths[i] = max(widths[i], len(val))
+    fmt = "  ".join(f"{{:<{w}}}" for w in widths)
+    lines = [fmt.format(*headers)]
+    lines.extend(fmt.format(*row) for row in rows)
+    return "\n".join(lines)
+
+
 def resolve_branch(branch: str | None) -> tuple[str, pathlib.Path]:
     """Resolve a branch query to (branch, worktree_path). Errors if unresolvable."""
     if branch:
         branch = match_sandbox_branch(branch)
-        wt_path = find_worktree_for_branch(branch)
-        if wt_path is None:
-            logger.error("No worktree found for branch '%s'.", branch)
-            sys.exit(1)
-        return branch, wt_path
+        result = run_command(
+            ["git", "-C", str(git_root()), "worktree", "list", "--porcelain"],
+            "Listing worktrees",
+        )
+        current_path: pathlib.Path | None = None
+        for line in result.stdout.decode().splitlines():
+            if line.startswith("worktree "):
+                current_path = pathlib.Path(line.split(" ", 1)[1]).expanduser().resolve()
+            elif (
+                line.startswith("branch refs/heads/")
+                and line.removeprefix("branch refs/heads/") == branch
+                and current_path
+                and current_path.is_relative_to(WORKTREES)
+            ):
+                return branch, current_path
+        logger.error("No worktree found for branch '%s'.", branch)
+        sys.exit(1)
     wt_path = current_worktree()
     if wt_path is None:
         logger.error("No branch specified and not inside a locki worktree.")
         sys.exit(1)
     return wt_path.relative_to(WORKTREES).parts[0], wt_path
-
-
-def find_worktree_for_branch(branch: str) -> pathlib.Path | None:
-    """Return the worktree path for a branch managed by Locki, or None."""
-    result = run_command(
-        ["git", "-C", str(git_root()), "worktree", "list", "--porcelain"],
-        "Listing worktrees",
-    )
-    current_path: pathlib.Path | None = None
-    for line in result.stdout.decode().splitlines():
-        if line.startswith("worktree "):
-            current_path = pathlib.Path(line.split(" ", 1)[1]).expanduser().resolve()
-        elif (
-            line.startswith("branch refs/heads/")
-            and line.removeprefix("branch refs/heads/") == branch
-            and current_path
-            and current_path.is_relative_to(WORKTREES)
-        ):
-            return current_path
-    return None
-
-
-def list_locki_worktree_branches() -> list[str]:
-    """Return branch names that have Locki-managed worktrees in the current repo."""
-    result = subprocess.run(
-        ["git", "-C", str(git_root()), "worktree", "list", "--porcelain"],
-        capture_output=True,
-        text=True,
-    )
-    branches: list[str] = []
-    current_path: pathlib.Path | None = None
-    for line in result.stdout.splitlines():
-        if line.startswith("worktree "):
-            current_path = pathlib.Path(line.split(" ", 1)[1]).expanduser().resolve()
-        elif line.startswith("branch refs/heads/") and current_path and current_path.is_relative_to(WORKTREES):
-            branches.append(line.removeprefix("branch refs/heads/"))
-    return branches
 
 
 def match_sandbox_branch(query: str) -> str:
@@ -279,7 +273,18 @@ def match_sandbox_branch(query: str) -> str:
 
     Exits with an error on zero or ambiguous matches.
     """
-    wt_branches = list_locki_worktree_branches()
+    result = subprocess.run(
+        ["git", "-C", str(git_root()), "worktree", "list", "--porcelain"],
+        capture_output=True,
+        text=True,
+    )
+    wt_branches: list[str] = []
+    current_path: pathlib.Path | None = None
+    for line in result.stdout.splitlines():
+        if line.startswith("worktree "):
+            current_path = pathlib.Path(line.split(" ", 1)[1]).expanduser().resolve()
+        elif line.startswith("branch refs/heads/") and current_path and current_path.is_relative_to(WORKTREES):
+            wt_branches.append(line.removeprefix("branch refs/heads/"))
     by_wt_id = [b for b in wt_branches if b.rsplit("#locki-", 1)[-1] == query]
     if len(by_wt_id) == 1:
         return by_wt_id[0]
@@ -290,12 +295,12 @@ def match_sandbox_branch(query: str) -> str:
         return substring_matches[0]
     if not substring_matches:
         click.echo(
-            f"{click.style('ᛞ', fg='red', bold=True)} No sandbox matching {click.style(query, fg='yellow')!r}.",
+            f"{ERROR} No sandbox matching {click.style(query, fg='yellow')!r}.",
             err=True,
         )
     else:
         click.echo(
-            f"{click.style('ᛞ', fg='red', bold=True)} Ambiguous match for {click.style(query, fg='yellow')!r}: {', '.join(substring_matches)}",
+            f"{ERROR} Ambiguous match for {click.style(query, fg='yellow')!r}: {', '.join(substring_matches)}",
             err=True,
         )
     sys.exit(1)
@@ -416,18 +421,6 @@ def cwd_git_repo() -> pathlib.Path | None:
     return pathlib.Path(result.stdout.strip()).resolve()
 
 
-def current_sandbox_info() -> SandboxInfo | None:
-    """If cwd is inside (or below) a Locki-managed worktree, return its info."""
-    wt_path = current_worktree()
-    if wt_path is None:
-        return None
-    wt_id = wt_path.name
-    for s in list_sandboxes():
-        if s.wt_id == wt_id:
-            return s
-    return None
-
-
 def _match_in(query: str, sandboxes: list[SandboxInfo]) -> list[SandboxInfo]:
     """Return sandboxes matching *query* (by wt_id, exact branch, or unique substring)."""
     by_id = [s for s in sandboxes if s.wt_id == query]
@@ -459,12 +452,13 @@ def resolve_sandbox(
         repo): return the current sandbox directly.
     """
     cwd_repo = cwd_git_repo()
-    cwd_sandbox = current_sandbox_info()
     all_sandboxes = list_sandboxes()
+    wt_path = current_worktree()
+    cwd_sandbox = next((s for s in all_sandboxes if wt_path and s.wt_id == wt_path.name), None)
 
     if filter_out_current_repo and cwd_repo is None:
         click.echo(
-            f"{click.style('ᛞ', fg='red', bold=True)} --this requires being inside a git repo.",
+            f"{ERROR} --this requires being inside a git repo.",
             err=True,
         )
         sys.exit(1)
@@ -482,13 +476,13 @@ def resolve_sandbox(
             return matches[0]
         if not matches:
             click.echo(
-                f"{click.style('ᛞ', fg='red', bold=True)} No sandbox matching {click.style(match, fg='yellow')!r}.",
+                f"{ERROR} No sandbox matching {click.style(match, fg='yellow')!r}.",
                 err=True,
             )
         else:
             branches = ", ".join(s.branch for s in matches)
             click.echo(
-                f"{click.style('ᛞ', fg='red', bold=True)} Ambiguous match for {click.style(match, fg='yellow')!r}: {branches}",
+                f"{ERROR} Ambiguous match for {click.style(match, fg='yellow')!r}: {branches}",
                 err=True,
             )
         sys.exit(1)
@@ -498,7 +492,7 @@ def resolve_sandbox(
 
     if not sys.stdin.isatty():
         click.echo(
-            f"{click.style('ᛞ', fg='red', bold=True)} No sandbox specified. Use -m <query> in non-interactive mode.",
+            f"{ERROR} No sandbox specified. Use -m <query> in non-interactive mode.",
             err=True,
         )
         sys.exit(1)
@@ -535,7 +529,7 @@ def _pick_interactive(
 
     if not choices:
         click.echo(
-            f"{click.style('ᛞ', fg='red', bold=True)} No matching sandboxes.",
+            f"{ERROR} No matching sandboxes.",
             err=True,
         )
         sys.exit(1)

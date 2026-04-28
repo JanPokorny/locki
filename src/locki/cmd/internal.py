@@ -197,21 +197,22 @@ class Context:
         """Build a `re.fullmatch`-ready pattern from literal strings and placeholders."""
         buf: list[str] = []
         for part in parts:
-            if isinstance(part, str):
-                buf.append(re.escape(part))
-            elif part.name == "wt-id":
-                buf.append(re.escape(self.wt_id))
-            elif part.name == "owner":
-                buf.append(re.escape(self.gh_repo[0]))
-            elif part.name == "repo":
-                buf.append(re.escape(self.gh_repo[1]))
-            elif part.name == "owned-stash-ref":
-                refs = self.owned_stash_refs
-                buf.append("(?:" + "|".join(re.escape(r) for r in refs) + ")" if refs else r"(?!)")
-            elif part.name == "number":
-                buf.append(r"\d+")
-            else:
-                buf.append(r".+?")
+            match part:
+                case str():
+                    buf.append(re.escape(part))
+                case PlaceholderRule("wt-id"):
+                    buf.append(re.escape(self.wt_id))
+                case PlaceholderRule("owner"):
+                    buf.append(re.escape(self.gh_repo[0]))
+                case PlaceholderRule("repo"):
+                    buf.append(re.escape(self.gh_repo[1]))
+                case PlaceholderRule("owned-stash-ref"):
+                    refs = self.owned_stash_refs
+                    buf.append("(?:" + "|".join(re.escape(r) for r in refs) + ")" if refs else r"(?!)")
+                case PlaceholderRule("number"):
+                    buf.append(r"\d+")
+                case _:
+                    buf.append(r".+?")
         return re.compile("".join(buf), re.DOTALL)
 
 

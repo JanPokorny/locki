@@ -17,6 +17,7 @@ import click
 
 from locki.cmd.exec import GIT_HOOKS
 from locki.paths import WORKTREES
+from locki.runes import ERROR, INFO, SPINNER, SUCCESS
 from locki.utils import (
     SandboxInfo,
     cwd_git_repo,
@@ -36,7 +37,7 @@ def _validate_repo(path: pathlib.Path) -> pathlib.Path:
     )
     if result.returncode != 0:
         click.echo(
-            f"{click.style('ᛞ', fg='red', bold=True)} Not a git repository: {path}",
+            f"{ERROR} Not a git repository: {path}",
             err=True,
         )
         sys.exit(1)
@@ -50,7 +51,7 @@ def _setup_include(sandbox: SandboxInfo, repo_b: pathlib.Path, name: str) -> Non
 
     if include_wt.exists() or include_meta.exists():
         click.echo(
-            f"{click.style('ᛞ', fg='red', bold=True)} Include {name!r} already exists in sandbox {sandbox.wt_id}.",
+            f"{ERROR} Include {name!r} already exists in sandbox {sandbox.wt_id}.",
             err=True,
         )
         sys.exit(1)
@@ -129,7 +130,7 @@ def include_cmd(match, interactive, all_repos, repo_path, this_flag):
     """
     if this_flag and repo_path:
         click.echo(
-            f"{click.style('ᛞ', fg='red', bold=True)} --this and --repo are mutually exclusive.",
+            f"{ERROR} --this and --repo are mutually exclusive.",
             err=True,
         )
         sys.exit(1)
@@ -139,7 +140,7 @@ def include_cmd(match, interactive, all_repos, repo_path, this_flag):
         cwd_repo = cwd_git_repo()
         if cwd_repo is None:
             click.echo(
-                f"{click.style('ᛞ', fg='red', bold=True)} --this requires being inside a git repo.",
+                f"{ERROR} --this requires being inside a git repo.",
                 err=True,
             )
             sys.exit(1)
@@ -150,7 +151,7 @@ def include_cmd(match, interactive, all_repos, repo_path, this_flag):
         # Default: add cwd's repo — only sensible when cwd is in a repo different from the
         # implicit-target sandbox's repo.  Reject to force the user to be explicit.
         click.echo(
-            f"{click.style('ᛞ', fg='red', bold=True)} Specify --repo <path> or use --this.",
+            f"{ERROR} Specify --repo <path> or use --this.",
             err=True,
         )
         sys.exit(1)
@@ -164,14 +165,14 @@ def include_cmd(match, interactive, all_repos, repo_path, this_flag):
     )
     if sandbox is None:
         click.echo(
-            f"{click.style('ᛞ', fg='red', bold=True)} locki include needs an existing sandbox.",
+            f"{ERROR} locki include needs an existing sandbox.",
             err=True,
         )
         sys.exit(1)
 
     if sandbox.repo.resolve() == repo_b.resolve():
         click.echo(
-            f"{click.style('ᛞ', fg='red', bold=True)} Cannot include a sandbox's own primary repo.",
+            f"{ERROR} Cannot include a sandbox's own primary repo.",
             err=True,
         )
         sys.exit(1)
@@ -180,25 +181,25 @@ def include_cmd(match, interactive, all_repos, repo_path, this_flag):
     existing = {inc.name for inc in sandbox.include}
     if name in existing:
         click.echo(
-            f"{click.style('ᛞ', fg='red', bold=True)} Include {name!r} already exists in sandbox {sandbox.wt_id}. "
+            f"{ERROR} Include {name!r} already exists in sandbox {sandbox.wt_id}. "
             f"Remove it first.",
             err=True,
         )
         sys.exit(1)
 
     click.echo(
-        f"{click.style('ᚠ', fg='magenta', bold=True)} Including "
+        f"{SPINNER} Including "
         f"{click.style(repo_b.name, fg='green')} in sandbox {click.style(sandbox.wt_id, fg='green')}.",
         err=True,
     )
     _setup_include(sandbox, repo_b, name)
     click.echo(
-        f"{click.style('ᛝ', fg='green', bold=True)} Included at "
+        f"{SUCCESS} Included at "
         f"{click.style(str(sandbox.include_wt_path(name).relative_to(WORKTREES)), fg='cyan')}.",
         err=True,
     )
     click.echo(
-        f"{click.style('ᛃ', fg='cyan', bold=True)} Enter the sandbox with "
+        f"{INFO} Enter the sandbox with "
         f"{click.style(f'locki x -m {sandbox.wt_id}', fg='green')}.",
         err=True,
     )

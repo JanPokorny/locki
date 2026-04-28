@@ -1,7 +1,7 @@
 import click
 
-from locki.paths import HOME, WORKTREES
-from locki.utils import cwd_git_repo, list_sandboxes
+from locki.paths import WORKTREES
+from locki.utils import cwd_git_repo, format_table, list_sandboxes, pretty_path
 
 
 @click.command()
@@ -21,38 +21,22 @@ def list_cmd(all_repos):
             click.echo("No Locki sandboxes in this repo. (use --all to see all repos)")
         return
 
-    def short_path(p):
-        s = str(p)
-        if p.is_relative_to(HOME):
-            s = "~/" + str(p.relative_to(HOME))
-        return s
-
+    has_includes = any(s.include for s in sandboxes)
     show_repo = all_repos or cwd_repo is None
-    include_count = any(s.include for s in sandboxes)
 
     rows: list[tuple[str, ...]] = []
-    headers: tuple[str, ...]
     for s in sandboxes:
-        row = [s.wt_id, s.branch, short_path(WORKTREES / s.wt_id)]
+        row = [s.wt_id, s.branch, pretty_path(WORKTREES / s.wt_id)]
         if show_repo:
-            row.append(short_path(s.repo))
-        if include_count:
-            row.append(",".join(short_path(i.repo) for i in s.include) if s.include else "")
+            row.append(pretty_path(s.repo))
+        if has_includes:
+            row.append(",".join(pretty_path(i.repo) for i in s.include) if s.include else "")
         rows.append(tuple(row))
 
     headers_list = ["WORKTREE ID", "WORKTREE BRANCH", "WORKTREE DIRECTORY"]
     if show_repo:
         headers_list.append("PARENT REPO")
-    if include_count:
+    if has_includes:
         headers_list.append("INCLUDED REPOS")
-    headers = tuple(headers_list)
 
-    widths = [len(h) for h in headers]
-    for row in rows:
-        for i, val in enumerate(row):
-            widths[i] = max(widths[i], len(val))
-
-    fmt = "  ".join(f"{{:<{w}}}" for w in widths)
-    click.echo(fmt.format(*headers))
-    for row in rows:
-        click.echo(fmt.format(*row))
+    click.echo(format_table(tuple(headers_list), rows))

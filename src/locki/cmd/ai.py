@@ -5,6 +5,7 @@ import click
 from locki.cmd.exec import exec_cmd
 from locki.config import load_config, save_user_config
 from locki.paths import DATA, USER_CONFIG
+from locki.runes import ERROR, SUCCESS
 from locki.utils import cwd_git_repo, resolve_sandbox
 
 HARNESSES = ["claude", "gemini", "codex", "opencode", "pi"]
@@ -14,7 +15,7 @@ RESUME_ARGS = {"claude": ["-c"], "gemini": ["-r"], "codex": ["resume"], "pi": ["
 def _ask_harness() -> str:
     if not sys.stdin.isatty():
         click.echo(
-            f"{click.style('ᛞ', fg='red', bold=True)} No default AI harness configured. "
+            f"{ERROR} No default AI harness configured. "
             f"Run {click.style('locki ai', fg='green')} interactively first to pick one, "
             f"or configure e.g. {click.style('ai.harness = "claude"', fg='yellow')} in {click.style(str(USER_CONFIG), fg='cyan')}.",
             err=True,
@@ -31,7 +32,7 @@ def _ask_harness() -> str:
 
     save_user_config("ai", "harness", selected)
     click.echo(
-        f"{click.style('ᛝ', fg='green', bold=True)} Saved default harness "
+        f"{SUCCESS} Saved default harness "
         f"{click.style(selected, fg='green')} to {USER_CONFIG}",
         err=True,
     )
@@ -58,7 +59,7 @@ def ai_cmd(ctx, match, interactive, all_repos, create, id_file):
     """
     if create and (match or interactive or all_repos):
         click.echo(
-            f"{click.style('ᛞ', fg='red', bold=True)} --create conflicts with --match/--interactive/--all.",
+            f"{ERROR} --create conflicts with --match/--interactive/--all.",
             err=True,
         )
         sys.exit(1)

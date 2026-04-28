@@ -4,7 +4,7 @@ import pathlib
 import click
 
 from locki.paths import LIMA, WORKTREES, WORKTREES_META
-from locki.utils import AliasGroup, limactl, live_branch, run_command, run_in_vm
+from locki.utils import AliasGroup, format_table, limactl, live_branch, pretty_path, run_command, run_in_vm
 
 
 @click.group(cls=AliasGroup, help="Manage the Locki VM.")
@@ -46,7 +46,6 @@ def vm_status_cmd():
     except Exception:
         return
 
-    home = pathlib.Path.home()
     rows: list[tuple[str, str, str, str, str]] = []
     for line in result.stdout.decode().splitlines():
         parts = line.split(",", 1)
@@ -58,29 +57,20 @@ def vm_status_cmd():
         repo_file = meta_dir / "repo"
         branch = live_branch(meta_dir) if meta_dir.is_dir() else ""
         repo_path = pathlib.Path(repo_file.read_text().strip()) if repo_file.exists() else None
-        repo = ""
-        if repo_path:
-            repo = "~/" + str(repo_path.relative_to(home)) if repo_path.is_relative_to(home) else str(repo_path)
-        wt_path = WORKTREES / wt_id
-        path_str = str(wt_path)
-        if wt_path.is_relative_to(home):
-            path_str = "~/" + str(wt_path.relative_to(home))
-        rows.append((wt_id, status, repo, branch, path_str))
+        rows.append((
+            wt_id,
+            status,
+            pretty_path(repo_path) if repo_path else "",
+            branch,
+            pretty_path(WORKTREES / wt_id),
+        ))
 
     if not rows:
         click.echo("No sandboxes.")
         return
 
     headers = ("SANDBOX ID", "STATUS", "REPO", "BRANCH", "WORKTREE")
-    widths = [len(h) for h in headers]
-    for row in rows:
-        for i, val in enumerate(row):
-            widths[i] = max(widths[i], len(val))
-
-    fmt = "  ".join(f"{{:<{w}}}" for w in widths)
-    click.echo(fmt.format(*headers))
-    for row in sorted(rows, key=lambda r: (r[1], r[2], r[3])):
-        click.echo(fmt.format(*row))
+    click.echo(format_table(headers, sorted(rows, key=lambda r: (r[1], r[2], r[3]))))
 
 
 @vm_app.command("stop", help="Stop the Locki VM.")
