@@ -1,7 +1,6 @@
 import base64
 import contextlib
 import getpass
-import importlib.resources
 import json
 import logging
 import os
@@ -15,7 +14,7 @@ import time
 import click
 
 from locki.config import load_config
-from locki.paths import DATA, LIMA, PID_FILE, PORT_FILE, RUNTIME, WORKTREES
+from locki.paths import DATA, LIMA, PACKAGE_DATA, PID_FILE, PORT_FILE, RUNTIME, WORKTREES
 from locki.runes import EXIT, INFO, SPINNER
 from locki.utils import (
     fail,
@@ -134,7 +133,7 @@ def exec_cmd(ctx, match, interactive, create, id_file):
             path.write_text(content)
 
     with file_lock("vm", "Waiting for VM to start"):
-        vm_setup = (importlib.resources.files("locki") / "data" / "vm-setup.sh").read_text()
+        vm_setup = (PACKAGE_DATA / "vm-setup.sh").read_text()
         lima_config = json.dumps(
             {
                 "minimumLimaVersion": "2.0.0",
@@ -265,9 +264,12 @@ def exec_cmd(ctx, match, interactive, create, id_file):
             "Starting container",
         )
 
-        setup_script = (importlib.resources.files("locki") / "data" / "container-setup.sh").read_bytes()
-        agents_md = (importlib.resources.files("locki") / "data" / "AGENTS.md").read_bytes()
-        setup_script = setup_script.replace(b"__AGENTS_MD_B64__", base64.b64encode(agents_md))
+        agents_md = (PACKAGE_DATA / "AGENTS.md").read_bytes()
+        setup_script = (
+            (PACKAGE_DATA / "container-setup.sh")
+            .read_bytes()
+            .replace(b"__AGENTS_MD_B64__", base64.b64encode(agents_md))
+        )
         env_flags = [flag for k, v in CONTAINER_ENV.items() for flag in ("--env", f"{k}={v}")]
         run_in_vm(
             ["incus", "exec", sandbox.wt_id, *env_flags, "--env", f"LOCKI_WORKTREES_HOME={WORKTREES}", "--", "/bin/sh"],
@@ -304,8 +306,7 @@ def exec_cmd(ctx, match, interactive, create, id_file):
     if not ssh_port:
         logger.warning("Locki daemon did not report a port in time. Self-service proxy is disabled in this sandbox.")
     (client_ssh_dir / "locki-ssh-config").write_text(
-        (importlib.resources.files("locki") / "data" / "locki-ssh-config").read_text()
-        + f"    Port {ssh_port}\n    User {getpass.getuser()}\n"
+        (PACKAGE_DATA / "locki-ssh-config").read_text() + f"    Port {ssh_port}\n    User {getpass.getuser()}\n"
     )
 
     forwarded_env = {"TERM", "COLORTERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION", "LANG", "SSH_TTY"}

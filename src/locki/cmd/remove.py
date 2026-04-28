@@ -3,7 +3,6 @@ import shutil
 
 import click
 
-from locki.paths import WORKTREES_META
 from locki.utils import fail, resolve_sandbox, run_command, run_in_vm
 
 logger = logging.getLogger(__name__)
@@ -66,7 +65,7 @@ def remove_cmd(match, interactive, force, delete_branch):
     )
 
     shutil.rmtree(wt_path, ignore_errors=True)
-    shutil.rmtree(WORKTREES_META / sandbox.wt_id, ignore_errors=True)
+    shutil.rmtree(sandbox.meta_path, ignore_errors=True)
     run_command(
         ["git", "-C", str(sandbox.repo), "worktree", "prune"],
         "Pruning primary worktree",

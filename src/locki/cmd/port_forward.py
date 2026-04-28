@@ -33,20 +33,26 @@ def _list_forwards(wt_id: str):
         name = line.strip().split(",")[0].strip()
         if not name.startswith("port-fwd-"):
             continue
-        dev_result = run_in_vm(
-            ["incus", "config", "device", "get", wt_id, name, "listen"],
-            f"Reading {name}",
-            check=False,
-            quiet=True,
+        listen = (
+            run_in_vm(
+                ["incus", "config", "device", "get", wt_id, name, "listen"],
+                f"Reading {name}",
+                check=False,
+                quiet=True,
+            )
+            .stdout.decode()
+            .strip()
         )
-        listen = dev_result.stdout.decode().strip()
-        dev_result = run_in_vm(
-            ["incus", "config", "device", "get", wt_id, name, "connect"],
-            f"Reading {name}",
-            check=False,
-            quiet=True,
+        connect = (
+            run_in_vm(
+                ["incus", "config", "device", "get", wt_id, name, "connect"],
+                f"Reading {name}",
+                check=False,
+                quiet=True,
+            )
+            .stdout.decode()
+            .strip()
         )
-        connect = dev_result.stdout.decode().strip()
         # listen=tcp:0.0.0.0:8080  connect=tcp:127.0.0.1:3000
         host_port = listen.rsplit(":", 1)[-1] if listen else "?"
         sandbox_port = connect.rsplit(":", 1)[-1] if connect else "?"
@@ -64,12 +70,15 @@ def port_forward_cmd(ctx, match, interactive, clear, list_forwards):
     sandbox = resolve_sandbox(match=match, interactive=interactive, create="deny")
 
     # Ensure sandbox is running
-    result = run_in_vm(
-        ["incus", "list", "--format=csv", "--columns=ns", sandbox.wt_id],
-        "Checking sandbox",
-        check=False,
+    lines = (
+        run_in_vm(
+            ["incus", "list", "--format=csv", "--columns=ns", sandbox.wt_id],
+            "Checking sandbox",
+            check=False,
+        )
+        .stdout.decode()
+        .strip()
     )
-    lines = result.stdout.decode().strip()
     if sandbox.wt_id not in lines:
         fail("Did not match an existing sandbox.")
     if "RUNNING" not in lines:
@@ -95,7 +104,6 @@ def port_forward_cmd(ctx, match, interactive, clear, list_forwards):
         host_port, sandbox_port = _parse_port_spec(spec)
         if host_port < 1024:
             fail(f"Host port {host_port} is not allowed (must be >= 1024).")
-        device_name = f"port-fwd-{host_port}"
         run_in_vm(
             [
                 "incus",
@@ -103,7 +111,7 @@ def port_forward_cmd(ctx, match, interactive, clear, list_forwards):
                 "device",
                 "add",
                 sandbox.wt_id,
-                device_name,
+                f"port-fwd-{host_port}",
                 "proxy",
                 f"listen=tcp:0.0.0.0:{host_port}",
                 f"connect=tcp:127.0.0.1:{sandbox_port}",

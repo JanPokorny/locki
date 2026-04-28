@@ -1,7 +1,6 @@
 import dataclasses
 import fcntl
 import functools
-import importlib.resources
 import json
 import logging
 import os
@@ -20,7 +19,7 @@ from InquirerPy import inquirer
 from InquirerPy.base.control import Choice
 
 from locki.logging import print_log_tail
-from locki.paths import HOME, RUNTIME, WORKTREES, WORKTREES_META
+from locki.paths import HOME, PACKAGE_DATA, RUNTIME, WORKTREES, WORKTREES_META
 from locki.runes import ERROR, FUTHARK, SUCCESS
 
 logger = logging.getLogger(__name__)
@@ -140,7 +139,7 @@ def run_command(
 
 @functools.cache
 def limactl() -> str:
-    bundled = importlib.resources.files("locki") / "data" / "bin" / "limactl"
+    bundled = PACKAGE_DATA / "bin" / "limactl"
     if bundled.is_file():
         return str(bundled)
     system = shutil.which("limactl")
@@ -256,7 +255,7 @@ def setup_worktree_hooks(repo: pathlib.Path, meta_dir: pathlib.Path, wt_path: pa
     )
     hooks_dir = meta_dir / "hooks"
     hooks_dir.mkdir(parents=True, exist_ok=True)
-    hook_script = (importlib.resources.files("locki") / "data" / "locki-hook.sh").read_bytes()
+    hook_script = (PACKAGE_DATA / "locki-hook.sh").read_bytes()
     for name in GIT_HOOKS:
         hook_path = hooks_dir / name
         hook_path.write_bytes(hook_script)

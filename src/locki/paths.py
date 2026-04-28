@@ -1,3 +1,4 @@
+import importlib.resources
 import os
 import pathlib
 
@@ -24,3 +25,4 @@ DENIED_LOG = STATE / "denied-commands.log"
 USER_CONFIG = CONFIG / "config.toml"
 PID_FILE = RUNTIME / "daemon.pid"
 PORT_FILE = RUNTIME / "daemon.port"
+PACKAGE_DATA = importlib.resources.files("locki") / "data"

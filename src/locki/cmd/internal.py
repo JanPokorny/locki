@@ -10,7 +10,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import datetime
-import importlib.resources
 import json
 import logging
 import os
@@ -29,7 +28,7 @@ import asyncssh
 import click
 from lark import Lark, Token, Transformer
 
-from locki.paths import DATA, DENIED_LOG, PID_FILE, PORT_FILE, RUNTIME, STATE, WORKTREES, WORKTREES_META
+from locki.paths import DATA, DENIED_LOG, PACKAGE_DATA, PID_FILE, PORT_FILE, RUNTIME, STATE, WORKTREES, WORKTREES_META
 from locki.utils import limactl, vm_status
 
 logger = logging.getLogger(__name__)
@@ -394,7 +393,7 @@ class Ruleset:
 
 @cache
 def _ruleset() -> Ruleset:
-    return Ruleset.from_markdown((importlib.resources.files("locki") / "data" / "AGENTS.md").read_text())
+    return Ruleset.from_markdown((PACKAGE_DATA / "AGENTS.md").read_text())
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
