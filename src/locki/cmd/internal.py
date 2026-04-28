@@ -360,6 +360,11 @@ class Ruleset:
                     i += 1
                 flags[key] = value
             elif len(arg) >= 2 and arg[0] == "-":
+                # git treats -<digits> as --max-count=<digits>
+                if arg[1:].isdigit():
+                    flags["max_count"] = arg[1:]
+                    i += 1
+                    continue
                 short = arg[1]
                 if short not in self.short_aliases:
                     raise ValueError(f"Unknown short flag: {arg!r}")

@@ -15,8 +15,8 @@ Some commands execute on the host using a self-service proxy. This lets you exec
 ```locki-self-service-command-filter
 git status
 git diff [--staged] [--name-only] [--stat] [--name-status] [<ref> [<ref>]]
-git log [--oneline] [--all] [--graph] [--reverse] [--format=<fmt>] [-n/--max-count=<n>] [<ref>]
-git show [<ref>] [--stat] [--name-only] [--name-status] [--format=<fmt>] [<file> ...]
+git log [--oneline] [--all] [--graph] [--reverse] [--format=<fmt>] [--pretty=<fmt>] [-n/--max-count=<n>] [<ref>]
+git show [<ref>] [--stat] [--name-only] [--name-status] [--format=<fmt>] [--pretty=<fmt>] [<file> ...]
 git blame <file>
 git reflog
 git add (--all | <file> ...)
