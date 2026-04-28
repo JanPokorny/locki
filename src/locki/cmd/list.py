@@ -5,24 +5,23 @@ from locki.utils import cwd_git_repo, format_table, list_sandboxes, pretty_path
 
 
 @click.command()
-@click.option("-a", "--all", "all_repos", is_flag=True, default=False, help="Show sandboxes from all repos.")
-def list_cmd(all_repos):
-    """List Locki sandboxes (current repo by default; all repos outside a git repo or with --all)."""
+def list_cmd():
+    """List Locki sandboxes (current repo by default; all repos outside a git repo)."""
     cwd_repo = cwd_git_repo()
     sandboxes = list_sandboxes()
 
-    if not all_repos and cwd_repo is not None:
+    if cwd_repo is not None:
         sandboxes = [s for s in sandboxes if s.repo.resolve() == cwd_repo.resolve()]
 
     if not sandboxes:
-        if all_repos or cwd_repo is None:
+        if cwd_repo is None:
             click.echo("No Locki sandboxes found.")
         else:
-            click.echo("No Locki sandboxes in this repo. (use --all to see all repos)")
+            click.echo("No Locki sandboxes in this repo.")
         return
 
     has_includes = any(s.include for s in sandboxes)
-    show_repo = all_repos or cwd_repo is None
+    show_repo = cwd_repo is None
 
     rows: list[tuple[str, ...]] = []
     for s in sandboxes:

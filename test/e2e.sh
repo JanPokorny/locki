@@ -286,15 +286,14 @@ echo "Testing sandbox creation with --create..."
 assert_output "--create creates sandbox" "create-ok" locki x --create echo create-ok
 assert_fail "unknown substring rejects" locki x -m nonexistent-branch echo nope
 
-# ── locki list outside git repo / --all ─────────────────────────────────────
+# ── locki list outside git repo ─────────────────────────────────────────────
 
 echo
-echo "Testing locki list --all and outside-git-repo behavior..."
+echo "Testing locki list and outside-git-repo behavior..."
 
 pushd /tmp >/dev/null
 assert_ok    "locki list works outside git repo" locki list
 assert_output "locki list sees sandboxes outside git repo" "$AUTH" locki list
-assert_ok    "locki list --all works inside git repo" bash -c "cd $REPO && locki list --all"
 assert_ok    "locki x outside git repo with -m" locki x -m "$AUTH" echo 5
 popd >/dev/null
 

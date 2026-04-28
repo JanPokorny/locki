@@ -1,3 +1,4 @@
+import functools
 import logging
 import pathlib
 import platform
@@ -12,6 +13,7 @@ from locki.paths import CONFIG, USER_CONFIG
 logger = logging.getLogger(__name__)
 
 
+@functools.cache
 def _arch() -> str:
     match platform.machine().lower():
         case "aarch64" | "arm64":

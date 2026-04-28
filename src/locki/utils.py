@@ -6,7 +6,9 @@ import logging
 import os
 import pathlib
 import random
+import secrets
 import shutil
+import string
 import subprocess
 import sys
 import threading
@@ -14,6 +16,8 @@ import time
 from contextlib import contextmanager, nullcontext
 
 import click
+from InquirerPy import inquirer
+from InquirerPy.base.control import Choice
 
 from locki.logging import print_log_tail
 from locki.paths import HOME, RUNTIME, WORKTREES, WORKTREES_META
@@ -235,75 +239,57 @@ def format_table(headers: tuple[str, ...], rows: list[tuple[str, ...]]) -> str:
     return "\n".join(lines)
 
 
-def resolve_branch(branch: str | None) -> tuple[str, pathlib.Path]:
-    """Resolve a branch query to (branch, worktree_path). Errors if unresolvable."""
-    if branch:
-        branch = match_sandbox_branch(branch)
-        result = run_command(
-            ["git", "-C", str(git_root()), "worktree", "list", "--porcelain"],
-            "Listing worktrees",
-        )
-        current_path: pathlib.Path | None = None
-        for line in result.stdout.decode().splitlines():
-            if line.startswith("worktree "):
-                current_path = pathlib.Path(line.split(" ", 1)[1]).expanduser().resolve()
-            elif (
-                line.startswith("branch refs/heads/")
-                and line.removeprefix("branch refs/heads/") == branch
-                and current_path
-                and current_path.is_relative_to(WORKTREES)
-            ):
-                return branch, current_path
-        logger.error("No worktree found for branch '%s'.", branch)
-        sys.exit(1)
-    wt_path = current_worktree()
-    if wt_path is None:
-        logger.error("No branch specified and not inside a locki worktree.")
-        sys.exit(1)
-    return wt_path.relative_to(WORKTREES).parts[0], wt_path
+GIT_HOOKS = [
+    "applypatch-msg",
+    "pre-applypatch",
+    "post-applypatch",
+    "pre-commit",
+    "pre-merge-commit",
+    "prepare-commit-msg",
+    "commit-msg",
+    "post-commit",
+    "pre-rebase",
+    "post-checkout",
+    "post-merge",
+    "pre-push",
+    "pre-receive",
+    "update",
+    "proc-receive",
+    "post-receive",
+    "post-update",
+    "reference-transaction",
+    "push-to-checkout",
+    "pre-auto-gc",
+    "post-rewrite",
+    "sendemail-validate",
+    "fsmonitor-watchman",
+]
 
 
-def match_sandbox_branch(query: str) -> str:
-    """Resolve *query* to a Locki-managed branch name.
-
-    Tried in order:
-      1. Exact worktree id — the `<wt-id>` suffix trailing `#locki-` in the branch name.
-      2. Exact branch name.
-      3. Unique substring of a branch name.
-
-    Exits with an error on zero or ambiguous matches.
-    """
-    result = subprocess.run(
-        ["git", "-C", str(git_root()), "worktree", "list", "--porcelain"],
-        capture_output=True,
-        text=True,
+def setup_worktree_hooks(repo: pathlib.Path, meta_dir: pathlib.Path, wt_path: pathlib.Path) -> None:
+    run_command(
+        ["git", "-C", str(repo), "config", "extensions.worktreeConfig", "true"],
+        "Enabling per-worktree git config",
     )
-    wt_branches: list[str] = []
-    current_path: pathlib.Path | None = None
-    for line in result.stdout.splitlines():
-        if line.startswith("worktree "):
-            current_path = pathlib.Path(line.split(" ", 1)[1]).expanduser().resolve()
-        elif line.startswith("branch refs/heads/") and current_path and current_path.is_relative_to(WORKTREES):
-            wt_branches.append(line.removeprefix("branch refs/heads/"))
-    by_wt_id = [b for b in wt_branches if b.rsplit("#locki-", 1)[-1] == query]
-    if len(by_wt_id) == 1:
-        return by_wt_id[0]
-    if query in wt_branches:
-        return query
-    substring_matches = [b for b in wt_branches if query in b]
-    if len(substring_matches) == 1:
-        return substring_matches[0]
-    if not substring_matches:
-        click.echo(
-            f"{ERROR} No sandbox matching {click.style(query, fg='yellow')!r}.",
-            err=True,
-        )
-    else:
-        click.echo(
-            f"{ERROR} Ambiguous match for {click.style(query, fg='yellow')!r}: {', '.join(substring_matches)}",
-            err=True,
-        )
-    sys.exit(1)
+    hooks_dir = meta_dir / "hooks"
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    hook_script = (importlib.resources.files("locki") / "data" / "locki-hook.sh").read_bytes()
+    for name in GIT_HOOKS:
+        hook_path = hooks_dir / name
+        hook_path.write_bytes(hook_script)
+        hook_path.chmod(0o755)
+    run_command(
+        ["git", "-C", str(wt_path), "config", "--worktree", "core.hooksPath", str(hooks_dir)],
+        "Configuring per-worktree hooks",
+    )
+    run_command(
+        ["git", "-C", str(wt_path), "config", "--worktree", "push.autoSetupRemote", "true"],
+        "Configuring auto push for new branches",
+    )
+
+
+def gen_id() -> str:
+    return "".join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(8))
 
 
 # ── Sandbox discovery (repo-agnostic) ────────────────────────────────────────
@@ -314,11 +300,6 @@ class IncludeInfo:
     name: str  # basename used as directory name in .locki/include/
     repo: pathlib.Path
     branch: str
-
-    @property
-    def wt_path(self) -> pathlib.Path:
-        # Parent sandbox's wt_path is passed in; this helper is used after the parent is known.
-        raise NotImplementedError
 
 
 @dataclasses.dataclass
@@ -421,126 +402,112 @@ def cwd_git_repo() -> pathlib.Path | None:
     return pathlib.Path(result.stdout.strip()).resolve()
 
 
-def _match_in(query: str, sandboxes: list[SandboxInfo]) -> list[SandboxInfo]:
-    """Return sandboxes matching *query* (by wt_id, exact branch, or unique substring)."""
-    by_id = [s for s in sandboxes if s.wt_id == query]
-    if by_id:
-        return by_id
-    by_exact = [s for s in sandboxes if s.branch == query]
-    if by_exact:
-        return by_exact
-    return [s for s in sandboxes if query in s.branch or query in s.wt_id]
+
+def _new_sandbox(repo: pathlib.Path) -> SandboxInfo:
+    wt_id = gen_id()
+    return SandboxInfo(wt_id=wt_id, branch=f"untitled#locki-{wt_id}", repo=repo)
 
 
 def resolve_sandbox(
     match: str | None,
     interactive: bool,
-    all_repos: bool,
-    allow_create: bool = True,
+    create: str = "allow",
     filter_out_current_repo: bool = False,
-) -> SandboxInfo | None:
-    """Pick a sandbox. Return the chosen `SandboxInfo`, or `None` to signal "create new".
+) -> SandboxInfo:
+    """Pick or create a sandbox.
 
-    Scoping:
-      - `filter_out_current_repo=True` (used by `locki include --this`): only sandboxes whose
-        primary repo differs from cwd's. Requires being in a git repo.
-      - `all_repos=True` or outside a git repo: every sandbox.
-      - Otherwise: sandboxes of the current repo.
+    *create* controls sandbox creation:
+      - ``"force"``: always create a new sandbox (cwd must be in a git repo).
+      - ``"allow"``: show "create new" in the interactive picker.
+      - ``"deny"``: only existing sandboxes.
+
+    *match* resolution order (first non-empty wins):
+      1. wt_id prefix across all sandboxes.
+      2. Branch substring on current-repo sandboxes.
+      3. Branch substring on all sandboxes.
 
     Implicit behavior:
       - Inside a Locki-managed worktree (no `match`, no `interactive`, not filtering out this
         repo): return the current sandbox directly.
     """
     cwd_repo = cwd_git_repo()
+
+    if create == "force":
+        if cwd_repo is None:
+            click.echo(f"{ERROR} Cannot create a sandbox outside a git repo.", err=True)
+            sys.exit(1)
+        return _new_sandbox(cwd_repo)
+
     all_sandboxes = list_sandboxes()
-    wt_path = current_worktree()
-    cwd_sandbox = next((s for s in all_sandboxes if wt_path and s.wt_id == wt_path.name), None)
+    cwd_sandbox = next((s for s in all_sandboxes if s.wt_id == wt_path.name), None) if (wt_path := current_worktree()) else None
 
     if filter_out_current_repo and cwd_repo is None:
         click.echo(
-            f"{ERROR} --this requires being inside a git repo.",
+            f"{ERROR} Not inside a git repo.",
             err=True,
         )
         sys.exit(1)
 
     if filter_out_current_repo:
-        candidates = [s for s in all_sandboxes if s.repo.resolve() != cwd_repo.resolve()]  # type: ignore[union-attr]
-    elif all_repos or cwd_repo is None:
-        candidates = all_sandboxes
+        candidate_sandboxes = [s for s in all_sandboxes if s.repo.resolve() != cwd_repo.resolve()]  # type: ignore[union-attr]
+    elif cwd_repo is not None:
+        candidate_sandboxes = [s for s in all_sandboxes if s.repo.resolve() == cwd_repo.resolve()]
     else:
-        candidates = [s for s in all_sandboxes if s.repo.resolve() == cwd_repo.resolve()]
+        candidate_sandboxes = all_sandboxes
 
     if match is not None:
-        matches = _match_in(match, candidates)
-        if len(matches) == 1:
-            return matches[0]
-        if not matches:
-            click.echo(
-                f"{ERROR} No sandbox matching {click.style(match, fg='yellow')!r}.",
-                err=True,
-            )
-        else:
-            branches = ", ".join(s.branch for s in matches)
-            click.echo(
-                f"{ERROR} Ambiguous match for {click.style(match, fg='yellow')!r}: {branches}",
-                err=True,
-            )
-        sys.exit(1)
+        matches = [s for s in all_sandboxes if s.wt_id.startswith(match)] or [s for s in candidate_sandboxes if match in s.branch] or [s for s in all_sandboxes if match in s.branch]
+        match matches:
+            case [single_match]:
+                return single_match
+            case []:
+                click.echo(
+                    f"{ERROR} No sandbox matching {click.style(match, fg='yellow')!r}.",
+                    err=True,
+                )
+                sys.exit(1)
+            case _:
+                click.echo(
+                    f"{ERROR} Ambiguous match for {click.style(match, fg='yellow')!r}: {", ".join(s.branch for s in matches)}",
+                    err=True,
+                )
+                sys.exit(1)
 
     if cwd_sandbox is not None and not interactive and not filter_out_current_repo:
         return cwd_sandbox
 
+    allow_create = create == "allow" and cwd_repo is not None and not filter_out_current_repo
     if not sys.stdin.isatty():
+        hint = " or --create" if allow_create else ""
         click.echo(
-            f"{ERROR} No sandbox specified. Use -m <query> in non-interactive mode.",
+            f"{ERROR} No sandbox specified. Use -m <query>{hint} in non-interactive mode.",
             err=True,
         )
         sys.exit(1)
 
-    return _pick_interactive(
-        candidates=candidates,
-        all_sandboxes=all_sandboxes,
-        allow_create=allow_create and cwd_repo is not None and not filter_out_current_repo,
-        scope_is_all=(all_repos or cwd_repo is None),
-        filter_out_current_repo=filter_out_current_repo,
-    )
-
-
-def _pick_interactive(
-    candidates: list[SandboxInfo],
-    all_sandboxes: list[SandboxInfo],
-    allow_create: bool,
-    scope_is_all: bool,
-    filter_out_current_repo: bool,
-) -> SandboxInfo | None:
-    from InquirerPy import inquirer
-    from InquirerPy.base.control import Choice
-
-    # Use string keys (wt_id or sentinels) — InquirerPy's fuzzy prompt converts
-    # complex `Choice.value` objects to dicts internally, breaking dataclass usage.
     by_id = {s.wt_id: s for s in all_sandboxes}
-    choices: list = []
-    if allow_create:
-        choices.append(Choice(value="__create__", name="(create new)"))
-    for s in sorted(candidates, key=lambda x: x.branch):
-        choices.append(Choice(value=s.wt_id, name=f"{s.branch}  ({s.repo.name})"))
-    if not scope_is_all and not filter_out_current_repo:
-        choices.append(Choice(value="__all__", name="(show sandboxes from all repos)"))
+    scope_all = cwd_repo is None
+    while True:
+        choices: list = []
+        if allow_create:
+            choices.append(Choice(value="__create__", name="(create new)"))
+        for s in sorted(candidate_sandboxes, key=lambda x: x.branch):
+            label = s.branch + (f" ({pretty_path(s.repo)})" if scope_all else "")
+            choices.append(Choice(value=s.wt_id, name=label))
+        if not scope_all and not filter_out_current_repo:
+            choices.append(Choice(value="__all__", name="(show sandboxes from all repos)"))
 
-    if not choices:
-        click.echo(
-            f"{ERROR} No matching sandboxes.",
-            err=True,
-        )
-        sys.exit(1)
+        if not choices:
+            click.echo(f"{ERROR} No matching sandboxes.", err=True)
+            sys.exit(1)
 
-    selected = inquirer.fuzzy(
-        message="Select a sandbox:",
-        choices=choices,
-    ).execute()
+        selected = inquirer.fuzzy(message="Select a sandbox:", choices=choices).execute()
 
-    if selected == "__create__":
-        return None
-    if selected == "__all__":
-        return _pick_interactive(all_sandboxes, all_sandboxes, allow_create, True, filter_out_current_repo)
-    return by_id[selected]
+        if selected == "__create__":
+            assert cwd_repo is not None
+            return _new_sandbox(cwd_repo)
+        if selected == "__all__":
+            candidate_sandboxes = all_sandboxes
+            scope_all = True
+            continue
+        return by_id[selected]

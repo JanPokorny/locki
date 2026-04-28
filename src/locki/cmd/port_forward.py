@@ -4,8 +4,7 @@ import sys
 
 import click
 
-from locki.paths import WORKTREES
-from locki.utils import resolve_branch, run_in_vm
+from locki.utils import resolve_sandbox, run_in_vm
 
 logger = logging.getLogger(__name__)
 
@@ -62,39 +61,39 @@ def _list_forwards(wt_id: str):
 
 @click.command(context_settings={"allow_extra_args": True})
 @click.option("-m", "--match", "match", default=None, help="Sandbox branch (substring match).")
+@click.option("-i", "--interactive", "interactive", is_flag=True, default=False, help="Force interactive picker.")
 @click.option("--clear", is_flag=True, help="Remove all existing port forwards before adding new ones.")
 @click.option("--list", "list_forwards", is_flag=True, help="List active port forwards.")
 @click.pass_context
-def port_forward_cmd(ctx, match, clear, list_forwards):
+def port_forward_cmd(ctx, match, interactive, clear, list_forwards):
     """Forward ports from the host to a sandbox."""
-    _, wt_path = resolve_branch(match)
-    wt_id = wt_path.relative_to(WORKTREES).parts[0]
+    sandbox = resolve_sandbox(match=match, interactive=interactive, create="deny")
 
     # Ensure sandbox is running
     result = run_in_vm(
-        ["incus", "list", "--format=csv", "--columns=ns", wt_id],
+        ["incus", "list", "--format=csv", "--columns=ns", sandbox.wt_id],
         "Checking sandbox",
         check=False,
     )
     lines = result.stdout.decode().strip()
-    if wt_id not in lines:
+    if sandbox.wt_id not in lines:
         logger.error("Did not match an existing sandbox.")
         sys.exit(1)
     if "RUNNING" not in lines:
-        logger.error(f"Sandbox is not running. Run {click.style(f'locki x -m {wt_id} true', fg='green')} to start it.")
+        logger.error(f"Sandbox is not running. Run {click.style(f'locki x -m {sandbox.wt_id} true', fg='green')} to start it.")
         sys.exit(1)
 
     if clear:
         # Remove all existing port-forward devices
         result = run_in_vm(
-            ["incus", "config", "device", "list", wt_id],
+            ["incus", "config", "device", "list", sandbox.wt_id],
             "Listing devices",
         )
         for line in result.stdout.decode().splitlines():
             name = line.strip()
             if name.startswith("port-fwd-"):
                 run_in_vm(
-                    ["incus", "config", "device", "remove", wt_id, name],
+                    ["incus", "config", "device", "remove", sandbox.wt_id, name],
                     f"Removing {name}",
                 )
         if not ctx.args and not list_forwards:
@@ -112,7 +111,7 @@ def port_forward_cmd(ctx, match, clear, list_forwards):
                 "config",
                 "device",
                 "add",
-                wt_id,
+                sandbox.wt_id,
                 device_name,
                 "proxy",
                 f"listen=tcp:0.0.0.0:{host_port}",
@@ -122,7 +121,7 @@ def port_forward_cmd(ctx, match, clear, list_forwards):
         )
 
     if list_forwards:
-        _list_forwards(wt_id)
+        _list_forwards(sandbox.wt_id)
     elif not ctx.args and not clear:
         logger.error(
             "No ports specified. Usage: locki port-forward [-m <sandbox-name-part>] [--list] [--clear] [port[:port]] ..."

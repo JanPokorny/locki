@@ -6,9 +6,7 @@ import json
 import logging
 import os
 import pathlib
-import secrets
 import shlex
-import string
 import subprocess
 import sys
 import tempfile
@@ -20,13 +18,14 @@ from locki.config import load_config
 from locki.paths import DATA, LIMA, RUNTIME, WORKTREES, WORKTREES_META
 from locki.runes import ERROR, EXIT, INFO, SPINNER
 from locki.utils import (
-    cwd_git_repo,
+    gen_id,
     file_lock,
     limactl,
     pretty_path,
     resolve_sandbox,
     run_command,
     run_in_vm,
+    setup_worktree_hooks,
 )
 
 CONTAINER_ENV = {
@@ -75,37 +74,7 @@ CONTAINER_ENV = {
     "ZIG_GLOBAL_CACHE_DIR": "/var/cache/locki/zig",
 }
 
-GIT_HOOKS = [
-    "applypatch-msg",
-    "pre-applypatch",
-    "post-applypatch",
-    "pre-commit",
-    "pre-merge-commit",
-    "prepare-commit-msg",
-    "commit-msg",
-    "post-commit",
-    "pre-rebase",
-    "post-checkout",
-    "post-merge",
-    "pre-push",
-    "pre-receive",
-    "update",
-    "proc-receive",
-    "post-receive",
-    "post-update",
-    "reference-transaction",
-    "push-to-checkout",
-    "pre-auto-gc",
-    "post-rewrite",
-    "sendemail-validate",
-    "fsmonitor-watchman",
-]
-
 logger = logging.getLogger(__name__)
-
-
-def _gen_wt_id() -> str:
-    return "".join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(8))
 
 
 @click.command(
@@ -114,11 +83,10 @@ def _gen_wt_id() -> str:
 )
 @click.option("-m", "--match", "match", default=None, help="Substring match on existing sandbox branch.")
 @click.option("-i", "--interactive", "interactive", is_flag=True, default=False, help="Force interactive picker.")
-@click.option("-a", "--all", "all_repos", is_flag=True, default=False, help="Show sandboxes from all repos.")
 @click.option("-c", "--create", is_flag=True, default=False, help="Create a new sandbox.")
 @click.option("-f", "--id-file", default=None, type=click.Path(), help="Write the generated sandbox ID to this file.")
 @click.pass_context
-def exec_cmd(ctx, match, interactive, all_repos, create, id_file):
+def exec_cmd(ctx, match, interactive, create, id_file):
     """Run a command in the per-branch sandbox container.
 
     \b
@@ -127,48 +95,25 @@ def exec_cmd(ctx, match, interactive, all_repos, create, id_file):
       locki x claude                  # run Claude Code
       locki x -m feat bash            # match sandbox by substring
       locki x -i bash                 # force sandbox picker even inside a worktree
-      locki x -a bash                 # picker across all repos
       locki x -c bash                 # create new sandbox
       locki x bash -c "echo hello"    # run a one-liner
     """
-    if create and (match or interactive or all_repos):
+    if create and (match or interactive):
         click.echo(
-            f"{ERROR} --create conflicts with --match/--interactive/--all.",
+            f"{ERROR} --create conflicts with --match/--interactive.",
             err=True,
         )
         sys.exit(1)
 
     click.echo(f"{SPINNER} Entering a Locki sandbox.", err=True)
 
-    if create:
-        sandbox = None
-    else:
-        sandbox = resolve_sandbox(
-            match=match,
-            interactive=interactive,
-            all_repos=all_repos,
-            allow_create=True,
-        )
-
-    if sandbox is None:
-        # Creating a new sandbox — cwd must be inside a git repo.
-        repo_path = cwd_git_repo()
-        if repo_path is None:
-            click.echo(
-                f"{ERROR} Cannot create a sandbox outside a git repo.",
-                err=True,
-            )
-            sys.exit(1)
-        wt_id = _gen_wt_id()
-        branch = f"untitled#locki-{wt_id}"
-        if id_file:
-            pathlib.Path(id_file).write_text(wt_id)
-        wt_path = WORKTREES / wt_id
-    else:
-        wt_id = sandbox.wt_id
-        branch = sandbox.branch
-        wt_path = sandbox.wt_path
-        repo_path = sandbox.repo
+    sandbox = resolve_sandbox(
+        match=match,
+        interactive=interactive,
+        create="force" if create else "allow",
+    )
+    if id_file and not sandbox.wt_path.exists():
+        pathlib.Path(id_file).write_text(sandbox.wt_id)
 
     LIMA.mkdir(exist_ok=True, parents=True)
     WORKTREES.mkdir(parents=True, exist_ok=True)
@@ -241,78 +186,54 @@ def exec_cmd(ctx, match, interactive, all_repos, create, id_file):
         logger.error("Lima VM failed to start. LIMA_HOME=%s", LIMA)
         sys.exit(1)
 
-    if not wt_path.exists():
+    if not sandbox.wt_path.exists():
         run_command(
-            ["git", "-C", str(repo_path), "worktree", "prune"],
+            ["git", "-C", str(sandbox.repo), "worktree", "prune"],
             "Pruning stale git worktrees",
         )
 
-        wt_path.mkdir(parents=True, exist_ok=True)
+        sandbox.wt_path.mkdir(parents=True, exist_ok=True)
 
         run_command(
-            ["git", "-C", str(repo_path), "branch", branch],
-            f"Creating branch {click.style(branch, fg='green')}",
+            ["git", "-C", str(sandbox.repo), "branch", sandbox.branch],
+            f"Creating branch {click.style(sandbox.branch, fg='green')}",
         )
         run_command(
-            ["git", "-C", str(repo_path), "worktree", "add", str(wt_path), branch],
-            f"Creating worktree for {click.style(branch, fg='green')}",
+            ["git", "-C", str(sandbox.repo), "worktree", "add", str(sandbox.wt_path), sandbox.branch],
+            f"Creating worktree for {click.style(sandbox.branch, fg='green')}",
         )
 
-        locki_dir = wt_path / ".locki"
+        locki_dir = sandbox.wt_path / ".locki"
         locki_dir.mkdir(parents=True, exist_ok=True)
         (locki_dir / ".gitignore").write_text("*\n")
 
-        meta_dir = WORKTREES_META / wt_id
-        meta_dir.mkdir(parents=True, exist_ok=True)
-        (meta_dir / ".git").write_text((wt_path / ".git").read_text())
-        (meta_dir / "repo").write_text(str(repo_path))
+        sandbox.meta_path.mkdir(parents=True, exist_ok=True)
+        (sandbox.meta_path / ".git").write_text((sandbox.wt_path / ".git").read_text())
+        (sandbox.meta_path / "repo").write_text(str(sandbox.repo))
 
-        run_command(
-            ["git", "-C", str(repo_path), "config", "extensions.worktreeConfig", "true"],
-            "Enabling per-worktree git config",
-        )
+        setup_worktree_hooks(sandbox.repo, sandbox.meta_path, sandbox.wt_path)
 
-        hooks_dir = WORKTREES_META / wt_id / "hooks"
-        hooks_dir.mkdir(parents=True, exist_ok=True)
-        hook_script = (importlib.resources.files("locki") / "data" / "locki-hook.sh").read_bytes()
-        for name in GIT_HOOKS:
-            hook_path = hooks_dir / name
-            hook_path.write_bytes(hook_script)
-            hook_path.chmod(0o755)
-
-        run_command(
-            ["git", "-C", str(wt_path), "config", "--worktree", "core.hooksPath", str(hooks_dir)],
-            "Configuring per-worktree hooks",
-        )
-
-        run_command(
-            ["git", "-C", str(wt_path), "config", "--worktree", "push.autoSetupRemote", "true"],
-            "Configuring auto push for new branches",
-        )
-
-    config = load_config(repo_path)
+    config = load_config(sandbox.repo)
 
     result = run_in_vm(
-        ["incus", "list", "--format=csv", "--columns=n", wt_id],
+        ["incus", "list", "--format=csv", "--columns=n", sandbox.wt_id],
         "Checking container",
         check=False,
     )
-    if wt_id in result.stdout.decode():
+    if sandbox.wt_id in result.stdout.decode():
         run_in_vm(
-            ["incus", "start", wt_id],
+            ["incus", "start", sandbox.wt_id],
             "Starting container",
             check=False,
         )
     else:
         incus_image = config.get_incus_image()
 
-        local_path = repo_path / incus_image
+        local_path = sandbox.repo / incus_image
         with file_lock("image", "Waiting for another image import"):
             if local_path.is_file():
                 local_file = local_path.resolve()
-                tmp_name = (
-                    f"locki-img-{''.join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(8))}"
-                )
+                tmp_name = f"locki-img-{gen_id()}"
                 run_command(
                     [limactl(), "copy", str(local_file), f"locki:/tmp/{tmp_name}"],
                     "Copying image into VM",
@@ -331,7 +252,7 @@ def exec_cmd(ctx, match, interactive, all_repos, create, id_file):
                 image_ref = incus_image
 
             run_in_vm(
-                ["incus", "init", image_ref, wt_id],
+                ["incus", "init", image_ref, sandbox.wt_id],
                 "Creating container",
             )
 
@@ -348,17 +269,17 @@ def exec_cmd(ctx, match, interactive, all_repos, create, id_file):
                 "config",
                 "device",
                 "add",
-                wt_id,
+                sandbox.wt_id,
                 "worktree",
                 "disk",
-                f"source={wt_path}",
-                f"path={wt_path}",
+                f"source={sandbox.wt_path}",
+                f"path={sandbox.wt_path}",
             ],
             "Mounting worktree into container",
         )
 
         run_in_vm(
-            ["incus", "start", wt_id],
+            ["incus", "start", sandbox.wt_id],
             "Starting container",
         )
 
@@ -367,7 +288,7 @@ def exec_cmd(ctx, match, interactive, all_repos, create, id_file):
         setup_script = setup_script.replace(b"__AGENTS_MD_B64__", base64.b64encode(agents_md))
         env_flags = [flag for k, v in CONTAINER_ENV.items() for flag in ("--env", f"{k}={v}")]
         run_in_vm(
-            ["incus", "exec", wt_id, *env_flags, "--env", f"LOCKI_WORKTREES_HOME={WORKTREES}", "--", "/bin/sh"],
+            ["incus", "exec", sandbox.wt_id, *env_flags, "--env", f"LOCKI_WORKTREES_HOME={WORKTREES}", "--", "/bin/sh"],
             "Configuring container",
             input=setup_script,
         )
@@ -427,9 +348,9 @@ def exec_cmd(ctx, match, interactive, all_repos, create, id_file):
                     "sudo",
                     "incus",
                     "exec",
-                    shlex.quote(wt_id),
+                    shlex.quote(sandbox.wt_id),
                     "--cwd",
-                    shlex.quote(str(wt_path)),
+                    shlex.quote(str(sandbox.wt_path)),
                     *(f"--env={k}={v}" for k, v in CONTAINER_ENV.items()),
                     *(f"--env={env}=${env}" for env in forwarded_env),
                     "--",
@@ -443,13 +364,13 @@ def exec_cmd(ctx, match, interactive, all_repos, create, id_file):
     click.echo(f"{EXIT} Exited Locki sandbox.", err=True)
     click.echo(f"{INFO} Return to this sandbox:", err=True)
     click.echo(
-        f"{INFO}      via AI: {click.style(f'locki ai -m {wt_id}', fg='green')}"
+        f"{INFO}      via AI: {click.style(f'locki ai -m {sandbox.wt_id}', fg='green')}"
         f" (or just {click.style('locki ai', fg='green')} and find it in the list)",
         err=True,
     )
     click.echo(
-        f"{INFO}   via shell: {click.style(f'locki x -m {wt_id}', fg='green')}",
+        f"{INFO}   via shell: {click.style(f'locki x -m {sandbox.wt_id}', fg='green')}",
         err=True,
     )
-    click.echo(f"{INFO}     on disk: {click.style(pretty_path(WORKTREES / wt_id), fg='green')}", err=True)
+    click.echo(f"{INFO}     on disk: {click.style(pretty_path(sandbox.wt_path), fg='green')}", err=True)
     raise SystemExit(result.returncode)

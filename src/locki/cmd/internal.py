@@ -150,12 +150,10 @@ class SequenceRule:
             return
         is_last = i == len(self.sequence) - 1
         for p2, u2 in self.sequence[i].match(pos, used, mc):
-            if is_last and self.last_repeats:
-                # "One or more": this match is valid, and the same item may match again.
+            if is_last:
                 yield p2, u2
-                yield from self._match_from(i, p2, u2, mc)
-            elif is_last:
-                yield p2, u2
+                if self.last_repeats:
+                    yield from self._match_from(i, p2, u2, mc)
             else:
                 yield from self._match_from(i + 1, p2, u2, mc)
 

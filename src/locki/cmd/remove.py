@@ -13,20 +13,15 @@ logger = logging.getLogger(__name__)
 @click.command()
 @click.option("-m", "--match", default=None, help="Sandbox branch (substring match).")
 @click.option("-i", "--interactive", is_flag=True, default=False, help="Force interactive picker.")
-@click.option("-a", "--all", "all_repos", is_flag=True, default=False, help="Consider sandboxes from all repos.")
 @click.option("--force", "-f", is_flag=True, default=False, help="Skip safety checks.")
 @click.option("--delete-branch", is_flag=True, default=False, help="Also delete the git branch.")
-def remove_cmd(match, interactive, all_repos, force, delete_branch):
+def remove_cmd(match, interactive, force, delete_branch):
     """Remove a sandbox."""
     sandbox = resolve_sandbox(
         match=match,
         interactive=interactive,
-        all_repos=all_repos,
-        allow_create=False,
+        create="deny",
     )
-    if sandbox is None:
-        click.echo("No sandbox selected.")
-        return
 
     wt_path = sandbox.wt_path
     if not wt_path.exists():
