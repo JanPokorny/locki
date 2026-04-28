@@ -33,20 +33,18 @@ def list_cmd(all_repos):
     rows: list[tuple[str, ...]] = []
     headers: tuple[str, ...]
     for s in sandboxes:
-        row = [s.branch]
+        row = [s.wt_id, s.branch, short_path(WORKTREES / s.wt_id)]
         if show_repo:
-            row.append(s.repo.name)
+            row.append(short_path(s.repo))
         if include_count:
-            row.append("+" + ",".join(i.name for i in s.include) if s.include else "")
-        row.append(short_path(WORKTREES / s.wt_id))
+            row.append(",".join(short_path(i.repo) for i in s.include) if s.include else "")
         rows.append(tuple(row))
 
-    headers_list = ["BRANCH"]
+    headers_list = ["WORKTREE ID", "WORKTREE BRANCH", "WORKTREE DIRECTORY"]
     if show_repo:
-        headers_list.append("REPO")
+        headers_list.append("PARENT REPO")
     if include_count:
-        headers_list.append("INCLUDE")
-    headers_list.append("PATH")
+        headers_list.append("INCLUDED REPOS")
     headers = tuple(headers_list)
 
     widths = [len(h) for h in headers]

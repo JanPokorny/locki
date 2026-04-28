@@ -341,8 +341,15 @@ class SandboxInfo:
 def live_branch(meta_dir: pathlib.Path) -> str:
     """Read the worktree's current branch via its `.git` pointer + `HEAD`.
 
-    Returns `(detached)` for a detached HEAD, or `(broken)` if the gitdir is gone.
+    Returns `(detached #locki-<wt-id>)` for a detached HEAD, or
+    `(broken #locki-<wt-id>)` if the gitdir is gone.  `<wt-id>` is the parent
+    sandbox id (the dir directly under `WORKTREES_META`), so include entries
+    show the same id as their parent.
     """
+    try:
+        wt_id = meta_dir.resolve().relative_to(WORKTREES_META.resolve()).parts[0]
+    except (ValueError, IndexError):
+        wt_id = meta_dir.name
     try:
         gitdir_line = (meta_dir / ".git").read_text().strip()
         if gitdir_line.startswith("gitdir:"):
@@ -350,10 +357,10 @@ def live_branch(meta_dir: pathlib.Path) -> str:
             head = (gitdir / "HEAD").read_text().strip()
             if head.startswith("ref: refs/heads/"):
                 return head.removeprefix("ref: refs/heads/")
-            return "(detached)"
+            return f"(detached #locki-{wt_id})"
     except OSError:
         pass
-    return "(broken)"
+    return f"(broken #locki-{wt_id})"
 
 
 def list_sandboxes() -> list[SandboxInfo]:
