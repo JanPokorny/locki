@@ -306,7 +306,7 @@ def match_sandbox_branch(query: str) -> str:
 
 @dataclasses.dataclass
 class IncludeInfo:
-    name: str  # basename used as directory name in .locki/includes/
+    name: str  # basename used as directory name in .locki/include/
     repo: pathlib.Path
     branch: str
 
@@ -321,7 +321,7 @@ class SandboxInfo:
     wt_id: str
     branch: str
     repo: pathlib.Path
-    includes: list[IncludeInfo] = dataclasses.field(default_factory=list)
+    include: list[IncludeInfo] = dataclasses.field(default_factory=list)
 
     @property
     def wt_path(self) -> pathlib.Path:
@@ -332,10 +332,10 @@ class SandboxInfo:
         return WORKTREES_META / self.wt_id
 
     def include_wt_path(self, name: str) -> pathlib.Path:
-        return self.wt_path / ".locki" / "includes" / name
+        return self.wt_path / ".locki" / "include" / name
 
     def include_meta_path(self, name: str) -> pathlib.Path:
-        return self.meta_path / "includes" / name
+        return self.meta_path / "include" / name
 
 
 def live_branch(meta_dir: pathlib.Path) -> str:
@@ -364,12 +364,12 @@ def list_sandboxes() -> list[SandboxInfo]:
     for meta_dir in sorted(WORKTREES_META.iterdir()):
         if not meta_dir.is_dir() or not (meta_dir / "repo").exists():
             continue
-        includes: list[IncludeInfo] = []
-        includes_root = meta_dir / "includes"
-        if includes_root.is_dir():
-            for inc_dir in sorted(includes_root.iterdir()):
+        include: list[IncludeInfo] = []
+        include_root = meta_dir / "include"
+        if include_root.is_dir():
+            for inc_dir in sorted(include_root.iterdir()):
                 if inc_dir.is_dir() and (inc_dir / "repo").exists():
-                    includes.append(
+                    include.append(
                         IncludeInfo(
                             name=inc_dir.name,
                             repo=pathlib.Path((inc_dir / "repo").read_text().strip()),
@@ -381,7 +381,7 @@ def list_sandboxes() -> list[SandboxInfo]:
                 wt_id=meta_dir.name,
                 branch=live_branch(meta_dir),
                 repo=pathlib.Path((meta_dir / "repo").read_text().strip()),
-                includes=includes,
+                include=include,
             )
         )
     return sandboxes

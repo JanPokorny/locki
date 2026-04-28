@@ -28,7 +28,7 @@ def list_cmd(all_repos):
         return s
 
     show_repo = all_repos or cwd_repo is None
-    include_count = any(s.includes for s in sandboxes)
+    include_count = any(s.include for s in sandboxes)
 
     rows: list[tuple[str, ...]] = []
     headers: tuple[str, ...]
@@ -37,7 +37,7 @@ def list_cmd(all_repos):
         if show_repo:
             row.append(s.repo.name)
         if include_count:
-            row.append("+" + ",".join(i.name for i in s.includes) if s.includes else "")
+            row.append("+" + ",".join(i.name for i in s.include) if s.include else "")
         row.append(short_path(WORKTREES / s.wt_id))
         rows.append(tuple(row))
 
@@ -45,7 +45,7 @@ def list_cmd(all_repos):
     if show_repo:
         headers_list.append("REPO")
     if include_count:
-        headers_list.append("INCLUDES")
+        headers_list.append("INCLUDE")
     headers_list.append("PATH")
     headers = tuple(headers_list)
 

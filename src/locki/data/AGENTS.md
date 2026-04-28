@@ -4,7 +4,7 @@ You are running inside a Locki sandbox -- an Incus LXC container running in a Li
 
 You are operating on a separated worktree folder of a git repo lying outside of the sandbox -- for this reason, `.git` is just a file pointer and you can't access the actual `.git` folder. Git operations are only possible using the self-service proxy, see below.
 
-The sandbox may also contain **included worktrees** from other repositories under `.locki/includes/<repo-name>/`. Each include is a full git worktree of a separate repo; the self-service proxy rules apply inside each include the same way as in the main worktree (branch/stash ownership is scoped by the sandbox id, so commands work identically). `cd` into the include folder to operate on that repo. If the user asks you to work on multiple repos at once and an include is not yet present, tell the user to run `locki include --repo <path>` (or, from the other repo, `locki include --this -m <this-sandbox>`).
+The sandbox may also contain **included worktrees** from other repositories under `.locki/include/<repo-name>/`. Each include is a full git worktree of a separate repo; the self-service proxy rules apply inside each include the same way as in the main worktree (branch/stash ownership is scoped by the sandbox id, so commands work identically). `cd` into the include folder to operate on that repo. If the user asks you to work on multiple repos at once and an include is not yet present, tell the user to run `locki include --repo <path>` (or, from the other repo, `locki include --this -m <this-sandbox>`).
 
 # Self-service proxy
 

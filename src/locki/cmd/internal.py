@@ -588,8 +588,8 @@ def _locate_worktree(cwd: pathlib.Path) -> tuple[str, pathlib.Path, pathlib.Path
     rel = p.relative_to(wt_root).parts
     if len(rel) == 1:
         meta_git = WORKTREES_META / wt_id / ".git"
-    elif len(rel) == 4 and rel[1] == ".locki" and rel[2] == "includes":
-        meta_git = WORKTREES_META / wt_id / "includes" / rel[3] / ".git"
+    elif len(rel) == 4 and rel[1] == ".locki" and rel[2] == "include":
+        meta_git = WORKTREES_META / wt_id / "include" / rel[3] / ".git"
     else:
         sys.exit(f"Unexpected worktree layout: {'/'.join(rel)!r}")
 

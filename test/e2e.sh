@@ -315,7 +315,7 @@ git -C "$REPO2" commit -m "initial repo2" >/dev/null
 git -C "$REPO2" push >/dev/null 2>&1
 
 INCLUDE_NAME="$(basename "$REPO2")"
-INCLUDE_PATH="$WORKTREE_A/.locki/includes/$INCLUDE_NAME"
+INCLUDE_PATH="$WORKTREE_A/.locki/include/$INCLUDE_NAME"
 
 assert_ok    "locki include --repo adds worktree" locki include -m "$AUTH" --repo "$REPO2"
 assert_ok    "include folder exists"              test -d "$INCLUDE_PATH"

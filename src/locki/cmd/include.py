@@ -1,6 +1,6 @@
 """`locki include` — add another repo's worktree into an existing sandbox.
 
-The included worktree lives at `<sandbox>/.locki/includes/<name>/` and is a
+The included worktree lives at `<sandbox>/.locki/include/<name>/` and is a
 full git worktree of the other repo, with its own branch `untitled#locki-<sandbox-id>`
 tracked in that repo.  Git / gh self-service proxy rules apply identically inside
 included worktrees; ownership is scoped by the parent sandbox's id.
@@ -177,7 +177,7 @@ def include_cmd(match, interactive, all_repos, repo_path, this_flag):
         sys.exit(1)
 
     name = repo_b.name
-    existing = {inc.name for inc in sandbox.includes}
+    existing = {inc.name for inc in sandbox.include}
     if name in existing:
         click.echo(
             f"{click.style('ᛞ', fg='red', bold=True)} Include {name!r} already exists in sandbox {sandbox.wt_id}. "

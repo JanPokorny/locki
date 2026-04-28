@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 @click.option("--force", "-f", is_flag=True, default=False, help="Skip safety checks.")
 @click.option("--delete-branch", is_flag=True, default=False, help="Also delete the git branch.")
 def remove_cmd(match, interactive, all_repos, force, delete_branch):
-    """Remove a sandbox's worktree, includes, and container."""
+    """Remove a sandbox."""
     sandbox = resolve_sandbox(
         match=match,
         interactive=interactive,
@@ -48,8 +48,8 @@ def remove_cmd(match, interactive, all_repos, force, delete_branch):
         )
         sys.exit(1)
 
-    # Remove includes first — each is a worktree in a different repo.
-    for inc in sandbox.includes:
+    # Remove include first — each is a worktree in a different repo.
+    for inc in sandbox.include:
         inc_wt = sandbox.include_wt_path(inc.name)
         run_command(
             ["git", "-C", str(inc.repo), "worktree", "remove", "--force", str(inc_wt)],
