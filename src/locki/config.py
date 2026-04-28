@@ -2,13 +2,13 @@ import functools
 import logging
 import pathlib
 import platform
-import sys
 import tomllib
 
 import pydantic
 import tomlkit
 
 from locki.paths import CONFIG, USER_CONFIG
+from locki.utils import fail
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +21,7 @@ def _arch() -> str:
         case "x86_64" | "x64" | "amd64":
             return "x86_64"
         case arch:
-            logger.error("Unsupported architecture: %s", arch)
-            sys.exit(1)
+            fail(f"Unsupported architecture: {arch}")
 
 
 def _deep_merge(base: dict, override: dict) -> dict:
@@ -46,12 +45,7 @@ class LockiConfig(pydantic.BaseModel):
 
     def get_incus_image(self) -> str:
         if _arch() not in self.incus_image:
-            logger.error(
-                "No incus_image configured for architecture '%s'. Available: %s",
-                _arch(),
-                ", ".join(self.incus_image),
-            )
-            sys.exit(1)
+            fail(f"No incus_image configured for architecture '{_arch()}'. Available: {', '.join(self.incus_image)}")
         return self.incus_image[_arch()]
 
 
@@ -74,15 +68,13 @@ def load_config(git_root: pathlib.Path | None) -> LockiConfig:
                 with open(repo_config_path, "rb") as f:
                     repo_data = tomllib.load(f)
             except tomllib.TOMLDecodeError as e:
-                logger.error("Invalid repo config %s: %s", repo_config_path, e)
-                sys.exit(1)
+                fail(f"Invalid repo config {repo_config_path}: {e}")
 
     merged = _deep_merge(user_data, repo_data)
     try:
         return LockiConfig.model_validate(merged)
     except pydantic.ValidationError as e:
-        logger.error("Invalid config: %s", e)
-        sys.exit(1)
+        fail(f"Invalid config: {e}")
 
 
 def save_user_config(section: str, key: str, value: object) -> None:

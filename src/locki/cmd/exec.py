@@ -15,17 +15,19 @@ import time
 import click
 
 from locki.config import load_config
-from locki.paths import DATA, LIMA, RUNTIME, WORKTREES, WORKTREES_META
-from locki.runes import ERROR, EXIT, INFO, SPINNER
+from locki.paths import DATA, LIMA, RUNTIME, WORKTREES
+from locki.runes import EXIT, INFO, SPINNER
 from locki.utils import (
-    gen_id,
+    fail,
     file_lock,
+    gen_id,
     limactl,
     pretty_path,
     resolve_sandbox,
     run_command,
     run_in_vm,
     setup_worktree_hooks,
+    vm_status,
 )
 
 CONTAINER_ENV = {
@@ -99,11 +101,7 @@ def exec_cmd(ctx, match, interactive, create, id_file):
       locki x bash -c "echo hello"    # run a one-liner
     """
     if create and (match or interactive):
-        click.echo(
-            f"{ERROR} --create conflicts with --match/--interactive.",
-            err=True,
-        )
-        sys.exit(1)
+        fail("--create conflicts with --match/--interactive.")
 
     click.echo(f"{SPINNER} Entering a Locki sandbox.", err=True)
 
@@ -120,18 +118,20 @@ def exec_cmd(ctx, match, interactive, create, id_file):
 
     sandbox_home = DATA / "home"
     sandbox_home.mkdir(parents=True, exist_ok=True)
-    if not (claude_json_file := sandbox_home / ".claude.json").exists():
-        claude_json_file.write_text('{ "projects": { "/": { "hasTrustDialogAccepted": true } } }')
-    if not (claude_settings_file := sandbox_home / ".claude" / "settings.json").exists():
-        claude_settings_file.parent.mkdir(parents=True, exist_ok=True)
-        claude_settings_file.write_text(
-            '{ "skipDangerousModePermissionPrompt": true, "permissions": { "defaultMode": "bypassPermissions" } }'
-        )
-    if not (opencode_config_file := sandbox_home / ".config" / "opencode" / "opencode.json").exists():
-        opencode_config_file.parent.mkdir(parents=True, exist_ok=True)
-        opencode_config_file.write_text(
-            '{ "$schema": "https://opencode.ai/config.json", "permission": "allow", "instructions": "/etc/opencode/AGENTS.md" }'
-        )
+    for path, content in [
+        (sandbox_home / ".claude.json", '{ "projects": { "/": { "hasTrustDialogAccepted": true } } }'),
+        (
+            sandbox_home / ".claude" / "settings.json",
+            '{ "skipDangerousModePermissionPrompt": true, "permissions": { "defaultMode": "bypassPermissions" } }',
+        ),
+        (
+            sandbox_home / ".config" / "opencode" / "opencode.json",
+            '{ "$schema": "https://opencode.ai/config.json", "permission": "allow", "instructions": "/etc/opencode/AGENTS.md" }',
+        ),
+    ]:
+        if not path.exists():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content)
 
     with file_lock("vm", "Waiting for VM to start"):
         vm_setup = (importlib.resources.files("locki") / "data" / "vm-setup.sh").read_text()
@@ -166,25 +166,8 @@ def exec_cmd(ctx, match, interactive, create, id_file):
             check=False,
         )
 
-    # Verify the VM is actually running before proceeding
-    verify = run_command(
-        [limactl(), "list", "--json"],
-        "Verifying VM",
-        cwd="/",
-        check=False,
-        quiet=True,
-    )
-    vm_running = False
-    for line in verify.stdout.decode().splitlines():
-        try:
-            vm = json.loads(line)
-            if vm.get("name") == "locki" and vm.get("status") == "Running":
-                vm_running = True
-        except json.JSONDecodeError:
-            pass
-    if not vm_running:
-        logger.error("Lima VM failed to start. LIMA_HOME=%s", LIMA)
-        sys.exit(1)
+    if vm_status() != "Running":
+        fail(f"Lima VM failed to start. LIMA_HOME={LIMA}")
 
     if not sandbox.wt_path.exists():
         run_command(

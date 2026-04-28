@@ -5,8 +5,8 @@ import click
 from locki.cmd.exec import exec_cmd
 from locki.config import load_config, save_user_config
 from locki.paths import DATA, USER_CONFIG
-from locki.runes import ERROR, SUCCESS
-from locki.utils import cwd_git_repo, resolve_sandbox
+from locki.runes import SUCCESS
+from locki.utils import cwd_git_repo, fail, resolve_sandbox
 
 HARNESSES = ["claude", "gemini", "codex", "opencode", "pi"]
 RESUME_ARGS = {"claude": ["-c"], "gemini": ["-r"], "codex": ["resume"], "pi": ["-c"]}
@@ -14,13 +14,11 @@ RESUME_ARGS = {"claude": ["-c"], "gemini": ["-r"], "codex": ["resume"], "pi": ["
 
 def _ask_harness() -> str:
     if not sys.stdin.isatty():
-        click.echo(
-            f"{ERROR} No default AI harness configured. "
+        fail(
+            f"No default AI harness configured. "
             f"Run {click.style('locki ai', fg='green')} interactively first to pick one, "
-            f"or configure e.g. {click.style('ai.harness = "claude"', fg='yellow')} in {click.style(str(USER_CONFIG), fg='cyan')}.",
-            err=True,
+            f"or configure e.g. {click.style('ai.harness = "claude"', fg='yellow')} in {click.style(str(USER_CONFIG), fg='cyan')}."
         )
-        sys.exit(1)
 
     from InquirerPy import inquirer
     from InquirerPy.base.control import Choice
@@ -32,8 +30,7 @@ def _ask_harness() -> str:
 
     save_user_config("ai", "harness", selected)
     click.echo(
-        f"{SUCCESS} Saved default harness "
-        f"{click.style(selected, fg='green')} to {USER_CONFIG}",
+        f"{SUCCESS} Saved default harness {click.style(selected, fg='green')} to {USER_CONFIG}",
         err=True,
     )
     return selected
@@ -56,11 +53,7 @@ def ai_cmd(ctx, match, interactive, create, id_file):
       locki ai -c                     # new sandbox, fresh conversation
     """
     if create and (match or interactive):
-        click.echo(
-            f"{ERROR} --create conflicts with --match/--interactive.",
-            err=True,
-        )
-        sys.exit(1)
+        fail("--create conflicts with --match/--interactive.")
 
     config = load_config(cwd_git_repo())
     harness = config.ai.harness if config.ai.harness in HARNESSES else None
@@ -79,7 +72,9 @@ def ai_cmd(ctx, match, interactive, create, id_file):
     if not is_new:
         if harness == "claude":
             projects_dir = DATA / "home" / ".claude" / "projects"
-            if projects_dir.is_dir() and any(d.name.endswith(sandbox.wt_id) for d in projects_dir.iterdir() if d.is_dir()):
+            if projects_dir.is_dir() and any(
+                d.name.endswith(sandbox.wt_id) for d in projects_dir.iterdir() if d.is_dir()
+            ):
                 ctx.args.extend(RESUME_ARGS["claude"])
         else:
             ctx.args.extend(RESUME_ARGS.get(harness, []))

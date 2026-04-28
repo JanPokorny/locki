@@ -1,19 +1,8 @@
-import logging
 import socket
-import sys
 
 import click
 
-from locki.utils import resolve_sandbox, run_in_vm
-
-logger = logging.getLogger(__name__)
-
-
-def _free_port() -> int:
-    """Find a random free port on the host."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("", 0))
-        return s.getsockname()[1]
+from locki.utils import fail, resolve_sandbox, run_in_vm
 
 
 def _parse_port_spec(spec: str) -> tuple[int, int]:
@@ -23,7 +12,12 @@ def _parse_port_spec(spec: str) -> tuple[int, int]:
         port = int(parts[0])
         return port, port
     if len(parts) == 2:
-        host = _free_port() if parts[0] == "" else int(parts[0])
+        if parts[0] == "":
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind(("", 0))
+                host = s.getsockname()[1]
+        else:
+            host = int(parts[0])
         return host, int(parts[1])
     raise click.BadParameter(f"Invalid port spec '{spec}'. Use 'port', 'host_port:sandbox_port', or ':sandbox_port'.")
 
@@ -77,11 +71,9 @@ def port_forward_cmd(ctx, match, interactive, clear, list_forwards):
     )
     lines = result.stdout.decode().strip()
     if sandbox.wt_id not in lines:
-        logger.error("Did not match an existing sandbox.")
-        sys.exit(1)
+        fail("Did not match an existing sandbox.")
     if "RUNNING" not in lines:
-        logger.error(f"Sandbox is not running. Run {click.style(f'locki x -m {sandbox.wt_id} true', fg='green')} to start it.")
-        sys.exit(1)
+        fail(f"Sandbox is not running. Run {click.style(f'locki x -m {sandbox.wt_id} true', fg='green')} to start it.")
 
     if clear:
         # Remove all existing port-forward devices
@@ -102,8 +94,7 @@ def port_forward_cmd(ctx, match, interactive, clear, list_forwards):
     for spec in ctx.args:
         host_port, sandbox_port = _parse_port_spec(spec)
         if host_port < 1024:
-            logger.error("Host port %d is not allowed (must be >= 1024).", host_port)
-            sys.exit(1)
+            fail(f"Host port {host_port} is not allowed (must be >= 1024).")
         device_name = f"port-fwd-{host_port}"
         run_in_vm(
             [
@@ -123,7 +114,6 @@ def port_forward_cmd(ctx, match, interactive, clear, list_forwards):
     if list_forwards:
         _list_forwards(sandbox.wt_id)
     elif not ctx.args and not clear:
-        logger.error(
+        fail(
             "No ports specified. Usage: locki port-forward [-m <sandbox-name-part>] [--list] [--clear] [port[:port]] ..."
         )
-        sys.exit(1)

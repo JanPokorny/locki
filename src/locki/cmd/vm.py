@@ -1,10 +1,9 @@
-import json
 import pathlib
 
 import click
 
-from locki.paths import LIMA, WORKTREES, WORKTREES_META
-from locki.utils import AliasGroup, format_table, limactl, live_branch, pretty_path, run_command, run_in_vm
+from locki.paths import WORKTREES, WORKTREES_META
+from locki.utils import AliasGroup, format_table, limactl, live_branch, pretty_path, run_command, run_in_vm, vm_status
 
 
 @click.group(cls=AliasGroup, help="Manage the Locki VM.")
@@ -14,26 +13,10 @@ def vm_app():
 
 @vm_app.command("status | st", help="Show VM and sandbox status.")
 def vm_status_cmd():
-    vm_status = "none"
-    try:
-        result = run_command(
-            [limactl(), "list", "--json"],
-            "Checking VM",
-            env={"LIMA_HOME": str(LIMA)},
-            cwd="/",
-            check=False,
-            quiet=True,
-        )
-        for line in result.stdout.decode().splitlines():
-            vm = json.loads(line)
-            if vm.get("name") == "locki":
-                vm_status = vm.get("status", "unknown").lower()
-    except Exception:
-        pass
+    status = (vm_status() or "none").lower()
+    click.echo(f"VM: {status}")
 
-    click.echo(f"VM: {vm_status}")
-
-    if vm_status != "running":
+    if status != "running":
         return
 
     try:
@@ -57,13 +40,15 @@ def vm_status_cmd():
         repo_file = meta_dir / "repo"
         branch = live_branch(meta_dir) if meta_dir.is_dir() else ""
         repo_path = pathlib.Path(repo_file.read_text().strip()) if repo_file.exists() else None
-        rows.append((
-            wt_id,
-            status,
-            pretty_path(repo_path) if repo_path else "",
-            branch,
-            pretty_path(WORKTREES / wt_id),
-        ))
+        rows.append(
+            (
+                wt_id,
+                status,
+                pretty_path(repo_path) if repo_path else "",
+                branch,
+                pretty_path(WORKTREES / wt_id),
+            )
+        )
 
     if not rows:
         click.echo("No sandboxes.")
@@ -78,7 +63,6 @@ def vm_stop_cmd():
     run_command(
         [limactl(), "stop", "locki"],
         "Stopping VM",
-        env={"LIMA_HOME": str(LIMA)},
         cwd="/",
     )
 
@@ -88,6 +72,5 @@ def vm_delete_cmd():
     run_command(
         [limactl(), "delete", "-f", "locki"],
         "Deleting VM",
-        env={"LIMA_HOME": str(LIMA)},
         cwd="/",
     )

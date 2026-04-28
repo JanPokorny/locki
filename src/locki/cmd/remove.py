@@ -1,11 +1,10 @@
 import logging
 import shutil
-import sys
 
 import click
 
 from locki.paths import WORKTREES_META
-from locki.utils import resolve_sandbox, run_command, run_in_vm
+from locki.utils import fail, resolve_sandbox, run_command, run_in_vm
 
 logger = logging.getLogger(__name__)
 
@@ -36,12 +35,9 @@ def remove_cmd(match, interactive, force, delete_branch):
             check=False,
         ).stdout.strip()
     ):
-        logger.error(
-            "Worktree for %s in %s has uncommitted changes. Commit or stash them, or use --force.",
-            sandbox.branch,
-            wt_path,
+        fail(
+            f"Worktree for {sandbox.branch} in {wt_path} has uncommitted changes. Commit or stash them, or use --force."
         )
-        sys.exit(1)
 
     # Remove include first — each is a worktree in a different repo.
     for inc in sandbox.include:

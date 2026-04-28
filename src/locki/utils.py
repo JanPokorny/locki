@@ -2,6 +2,7 @@ import dataclasses
 import fcntl
 import functools
 import importlib.resources
+import json
 import logging
 import os
 import pathlib
@@ -24,6 +25,11 @@ from locki.paths import HOME, RUNTIME, WORKTREES, WORKTREES_META
 from locki.runes import ERROR, FUTHARK, SUCCESS
 
 logger = logging.getLogger(__name__)
+
+
+def fail(msg: str):
+    click.echo(f"{ERROR} {msg}", err=True)
+    sys.exit(1)
 
 
 class AliasGroup(click.Group):
@@ -127,8 +133,7 @@ def run_command(
 
             return result
         except FileNotFoundError:
-            logger.error("%s is not installed. Please install it first.", command[0])
-            sys.exit(1)
+            fail(f"{command[0]} is not installed. Please install it first.")
         except subprocess.CalledProcessError:
             print_log_tail()
             raise
@@ -142,8 +147,24 @@ def limactl() -> str:
     system = shutil.which("limactl")
     if system:
         return system
-    logger.error("limactl is not installed. Please install Lima or use a platform-specific locki wheel.")
-    sys.exit(1)
+    fail("limactl is not installed. Please install Lima or use a platform-specific locki wheel.")
+
+
+def vm_status() -> str | None:
+    """Return the Locki VM status ('Running', 'Stopped', etc.), or None."""
+    result = subprocess.run(
+        [limactl(), "list", "--json"],
+        capture_output=True,
+        text=True,
+    )
+    for line in result.stdout.splitlines():
+        try:
+            vm = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if vm.get("name") == "locki":
+            return vm.get("status")
+    return None
 
 
 def run_in_vm(
@@ -190,8 +211,7 @@ def git_root() -> pathlib.Path:
         wt_path = WORKTREES / cwd.relative_to(WORKTREES).parts[0]
         meta_git = WORKTREES_META / wt_path.name / ".git"
         if not meta_git.exists():
-            logger.error("No worktree metadata found for '%s'.", wt_path.name)
-            sys.exit(1)
+            fail(f"No worktree metadata found for '{wt_path.name}'.")
         (wt_path / ".git").write_text(meta_git.read_text())
         result = subprocess.run(
             ["git", "-C", str(wt_path), "rev-parse", "--path-format=absolute", "--git-common-dir"],
@@ -199,8 +219,7 @@ def git_root() -> pathlib.Path:
             text=True,
         )
         if result.returncode != 0:
-            logger.error("Could not determine main repo from worktree metadata.")
-            sys.exit(1)
+            fail("Could not determine main repo from worktree metadata.")
         return pathlib.Path(result.stdout.strip()).parent
     result = subprocess.run(
         ["git", "rev-parse", "--show-toplevel"],
@@ -208,8 +227,7 @@ def git_root() -> pathlib.Path:
         text=True,
     )
     if result.returncode != 0:
-        logger.error("Not inside a git repository.")
-        sys.exit(1)
+        fail("Not inside a git repository.")
     return pathlib.Path(result.stdout.strip())
 
 
@@ -252,13 +270,6 @@ GIT_HOOKS = [
     "post-checkout",
     "post-merge",
     "pre-push",
-    "pre-receive",
-    "update",
-    "proc-receive",
-    "post-receive",
-    "post-update",
-    "reference-transaction",
-    "push-to-checkout",
     "pre-auto-gc",
     "post-rewrite",
     "sendemail-validate",
@@ -334,7 +345,7 @@ def live_branch(meta_dir: pathlib.Path) -> str:
     """
     try:
         wt_id = meta_dir.resolve().relative_to(WORKTREES_META.resolve()).parts[0]
-    except (ValueError, IndexError):
+    except ValueError, IndexError:
         wt_id = meta_dir.name
     try:
         gitdir_line = (meta_dir / ".git").read_text().strip()
@@ -402,7 +413,6 @@ def cwd_git_repo() -> pathlib.Path | None:
     return pathlib.Path(result.stdout.strip()).resolve()
 
 
-
 def _new_sandbox(repo: pathlib.Path) -> SandboxInfo:
     wt_id = gen_id()
     return SandboxInfo(wt_id=wt_id, branch=f"untitled#locki-{wt_id}", repo=repo)
@@ -434,19 +444,16 @@ def resolve_sandbox(
 
     if create == "force":
         if cwd_repo is None:
-            click.echo(f"{ERROR} Cannot create a sandbox outside a git repo.", err=True)
-            sys.exit(1)
+            fail("Cannot create a sandbox outside a git repo.")
         return _new_sandbox(cwd_repo)
 
     all_sandboxes = list_sandboxes()
-    cwd_sandbox = next((s for s in all_sandboxes if s.wt_id == wt_path.name), None) if (wt_path := current_worktree()) else None
+    cwd_sandbox = (
+        next((s for s in all_sandboxes if s.wt_id == wt_path.name), None) if (wt_path := current_worktree()) else None
+    )
 
     if filter_out_current_repo and cwd_repo is None:
-        click.echo(
-            f"{ERROR} Not inside a git repo.",
-            err=True,
-        )
-        sys.exit(1)
+        fail("Not inside a git repo.")
 
     if filter_out_current_repo:
         candidate_sandboxes = [s for s in all_sandboxes if s.repo.resolve() != cwd_repo.resolve()]  # type: ignore[union-attr]
@@ -456,22 +463,18 @@ def resolve_sandbox(
         candidate_sandboxes = all_sandboxes
 
     if match is not None:
-        matches = [s for s in all_sandboxes if s.wt_id.startswith(match)] or [s for s in candidate_sandboxes if match in s.branch] or [s for s in all_sandboxes if match in s.branch]
+        matches = (
+            [s for s in all_sandboxes if s.wt_id.startswith(match)]
+            or [s for s in candidate_sandboxes if match in s.branch]
+            or [s for s in all_sandboxes if match in s.branch]
+        )
         match matches:
             case [single_match]:
                 return single_match
             case []:
-                click.echo(
-                    f"{ERROR} No sandbox matching {click.style(match, fg='yellow')!r}.",
-                    err=True,
-                )
-                sys.exit(1)
+                fail(f"No sandbox matching {click.style(match, fg='yellow')!r}.")
             case _:
-                click.echo(
-                    f"{ERROR} Ambiguous match for {click.style(match, fg='yellow')!r}: {", ".join(s.branch for s in matches)}",
-                    err=True,
-                )
-                sys.exit(1)
+                fail(f"Ambiguous match for {click.style(match, fg='yellow')!r}: {', '.join(s.branch for s in matches)}")
 
     if cwd_sandbox is not None and not interactive and not filter_out_current_repo:
         return cwd_sandbox
@@ -479,11 +482,7 @@ def resolve_sandbox(
     allow_create = create == "allow" and cwd_repo is not None and not filter_out_current_repo
     if not sys.stdin.isatty():
         hint = " or --create" if allow_create else ""
-        click.echo(
-            f"{ERROR} No sandbox specified. Use -m <query>{hint} in non-interactive mode.",
-            err=True,
-        )
-        sys.exit(1)
+        fail(f"No sandbox specified. Use -m <query>{hint} in non-interactive mode.")
 
     by_id = {s.wt_id: s for s in all_sandboxes}
     scope_all = cwd_repo is None
@@ -498,8 +497,7 @@ def resolve_sandbox(
             choices.append(Choice(value="__all__", name="(show sandboxes from all repos)"))
 
         if not choices:
-            click.echo(f"{ERROR} No matching sandboxes.", err=True)
-            sys.exit(1)
+            fail("No matching sandboxes.")
 
         selected = inquirer.fuzzy(message="Select a sandbox:", choices=choices).execute()
 

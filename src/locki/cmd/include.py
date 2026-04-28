@@ -10,15 +10,15 @@ from __future__ import annotations
 
 import logging
 import pathlib
-import sys
 
 import click
 
 from locki.paths import WORKTREES
-from locki.runes import ERROR, INFO, SPINNER, SUCCESS
+from locki.runes import INFO, SPINNER, SUCCESS
 from locki.utils import (
     SandboxInfo,
     cwd_git_repo,
+    fail,
     resolve_sandbox,
     run_command,
     setup_worktree_hooks,
@@ -35,11 +35,7 @@ def _validate_repo(path: pathlib.Path) -> pathlib.Path:
         quiet=True,
     )
     if result.returncode != 0:
-        click.echo(
-            f"{ERROR} Not a git repository: {path}",
-            err=True,
-        )
-        sys.exit(1)
+        fail(f"Not a git repository: {path}")
     return pathlib.Path(result.stdout.decode().strip()).resolve()
 
 
@@ -49,11 +45,7 @@ def _setup_include(sandbox: SandboxInfo, repo_b: pathlib.Path, name: str) -> Non
     include_meta = sandbox.include_meta_path(name)
 
     if include_wt.exists() or include_meta.exists():
-        click.echo(
-            f"{ERROR} Include {name!r} already exists in sandbox {sandbox.wt_id}.",
-            err=True,
-        )
-        sys.exit(1)
+        fail(f"Include {name!r} already exists in sandbox {sandbox.wt_id}.")
 
     branch = f"untitled#locki-{sandbox.wt_id}"
 
@@ -107,32 +99,20 @@ def include_cmd(match, interactive, repo_path, this_flag):
       locki include --this -m feat            # include cwd's repo into sandbox matching 'feat'
     """
     if this_flag and repo_path:
-        click.echo(
-            f"{ERROR} --this and --repo are mutually exclusive.",
-            err=True,
-        )
-        sys.exit(1)
+        fail("--this and --repo are mutually exclusive.")
 
     # Resolve repo B (the one being added).
     if this_flag:
         cwd_repo = cwd_git_repo()
         if cwd_repo is None:
-            click.echo(
-                f"{ERROR} --this requires being inside a git repo.",
-                err=True,
-            )
-            sys.exit(1)
+            fail("--this requires being inside a git repo.")
         repo_b = cwd_repo
     elif repo_path:
         repo_b = _validate_repo(pathlib.Path(repo_path))
     else:
         # Default: add cwd's repo — only sensible when cwd is in a repo different from the
         # implicit-target sandbox's repo.  Reject to force the user to be explicit.
-        click.echo(
-            f"{ERROR} Specify --repo <path> or use --this.",
-            err=True,
-        )
-        sys.exit(1)
+        fail("Specify --repo <path> or use --this.")
 
     sandbox = resolve_sandbox(
         match=match,
@@ -142,21 +122,12 @@ def include_cmd(match, interactive, repo_path, this_flag):
     )
 
     if sandbox.repo.resolve() == repo_b.resolve():
-        click.echo(
-            f"{ERROR} Cannot include a sandbox's own primary repo.",
-            err=True,
-        )
-        sys.exit(1)
+        fail("Cannot include a sandbox's own primary repo.")
 
     name = repo_b.name
     existing = {inc.name for inc in sandbox.include}
     if name in existing:
-        click.echo(
-            f"{ERROR} Include {name!r} already exists in sandbox {sandbox.wt_id}. "
-            f"Remove it first.",
-            err=True,
-        )
-        sys.exit(1)
+        fail(f"Include {name!r} already exists in sandbox {sandbox.wt_id}. Remove it first.")
 
     click.echo(
         f"{SPINNER} Including "
@@ -165,12 +136,10 @@ def include_cmd(match, interactive, repo_path, this_flag):
     )
     _setup_include(sandbox, repo_b, name)
     click.echo(
-        f"{SUCCESS} Included at "
-        f"{click.style(str(sandbox.include_wt_path(name).relative_to(WORKTREES)), fg='cyan')}.",
+        f"{SUCCESS} Included at {click.style(str(sandbox.include_wt_path(name).relative_to(WORKTREES)), fg='cyan')}.",
         err=True,
     )
     click.echo(
-        f"{INFO} Enter the sandbox with "
-        f"{click.style(f'locki x -m {sandbox.wt_id}', fg='green')}.",
+        f"{INFO} Enter the sandbox with {click.style(f'locki x -m {sandbox.wt_id}', fg='green')}.",
         err=True,
     )
