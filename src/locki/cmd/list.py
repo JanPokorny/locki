@@ -1,6 +1,5 @@
 import click
 
-from locki.paths import WORKTREES
 from locki.utils import cwd_git_repo, format_table, list_sandboxes, pretty_path
 
 
@@ -25,7 +24,7 @@ def list_cmd():
 
     rows: list[tuple[str, ...]] = []
     for s in sandboxes:
-        row = [s.wt_id, s.branch, pretty_path(WORKTREES / s.wt_id)]
+        row = [s.wt_id, s.branch, pretty_path(s.wt_path)]
         if show_repo:
             row.append(pretty_path(s.repo))
         if has_includes:

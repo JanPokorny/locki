@@ -9,7 +9,6 @@ import pathlib
 import random
 import secrets
 import shutil
-import string
 import subprocess
 import sys
 import threading
@@ -204,33 +203,6 @@ def file_lock(name: str, wait_message: str):
         os.close(fd)
 
 
-@functools.cache
-def git_root() -> pathlib.Path:
-    cwd = pathlib.Path.cwd().resolve()
-    if cwd.is_relative_to(WORKTREES.resolve()):
-        wt_path = WORKTREES / cwd.relative_to(WORKTREES).parts[0]
-        meta_git = WORKTREES_META / wt_path.name / ".git"
-        if not meta_git.exists():
-            fail(f"No worktree metadata found for '{wt_path.name}'.")
-        (wt_path / ".git").write_text(meta_git.read_text())
-        result = subprocess.run(
-            ["git", "-C", str(wt_path), "rev-parse", "--path-format=absolute", "--git-common-dir"],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            fail("Could not determine main repo from worktree metadata.")
-        return pathlib.Path(result.stdout.strip()).parent
-    result = subprocess.run(
-        ["git", "rev-parse", "--show-toplevel"],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        fail("Not inside a git repository.")
-    return pathlib.Path(result.stdout.strip())
-
-
 def current_worktree() -> pathlib.Path | None:
     """If cwd is inside a Locki-managed worktree, return its path."""
     cwd = pathlib.Path.cwd().resolve()
@@ -300,7 +272,7 @@ def setup_worktree_hooks(repo: pathlib.Path, meta_dir: pathlib.Path, wt_path: pa
 
 
 def gen_id() -> str:
-    return "".join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(8))
+    return "".join(secrets.choice("abcdefghijklmnopqrstuvwxyz0123456789") for _ in range(8))
 
 
 # ── Sandbox discovery (repo-agnostic) ────────────────────────────────────────

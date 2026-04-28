@@ -29,7 +29,7 @@ import asyncssh
 import click
 from lark import Lark, Token, Transformer
 
-from locki.paths import DATA, DENIED_LOG, RUNTIME, STATE, WORKTREES, WORKTREES_META
+from locki.paths import DATA, DENIED_LOG, PID_FILE, PORT_FILE, RUNTIME, STATE, WORKTREES, WORKTREES_META
 from locki.utils import limactl, vm_status
 
 logger = logging.getLogger(__name__)
@@ -43,8 +43,6 @@ VM_IDLE_SINCE_FILE = STATE / "cleanup" / "vm-idle-since"
 HOST_KEY = STATE / "ssh" / "host_key"
 CLIENT_KEY = DATA / "home" / ".ssh" / "id_locki"
 AUTHORIZED_KEYS_FILE = STATE / "ssh" / "authorized_keys"
-PID_FILE = RUNTIME / "daemon.pid"
-PORT_FILE = RUNTIME / "daemon.port"
 
 
 def _incus(args: list[str]) -> subprocess.CompletedProcess[str]:
@@ -621,15 +619,16 @@ def internal_self_service() -> None:
         sys.exit("Empty command.")
 
     exe = pathlib.Path(argv[0]).name
+    ruleset = _ruleset()
     try:
-        positionals, flags = _ruleset().split_argv(argv[1:])
+        positionals, flags = ruleset.split_argv(argv[1:])
     except ValueError as e:
         sys.exit(str(e))
 
     # chdir first so `gh repo view` and `git stash list` run inside the worktree.
     os.chdir(str(cwd))
 
-    if not _ruleset().is_allowed([exe, *positionals], flags, wt_id):
+    if not ruleset.is_allowed([exe, *positionals], flags, wt_id):
         with contextlib.suppress(OSError):
             DENIED_LOG.parent.mkdir(parents=True, exist_ok=True)
             with DENIED_LOG.open("a") as fh:

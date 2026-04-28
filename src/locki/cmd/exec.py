@@ -15,7 +15,7 @@ import time
 import click
 
 from locki.config import load_config
-from locki.paths import DATA, LIMA, RUNTIME, WORKTREES
+from locki.paths import DATA, LIMA, PID_FILE, PORT_FILE, RUNTIME, WORKTREES
 from locki.runes import EXIT, INFO, SPINNER
 from locki.utils import (
     fail,
@@ -215,10 +215,9 @@ def exec_cmd(ctx, match, interactive, create, id_file):
         local_path = sandbox.repo / incus_image
         with file_lock("image", "Waiting for another image import"):
             if local_path.is_file():
-                local_file = local_path.resolve()
                 tmp_name = f"locki-img-{gen_id()}"
                 run_command(
-                    [limactl(), "copy", str(local_file), f"locki:/tmp/{tmp_name}"],
+                    [limactl(), "copy", str(local_path.resolve()), f"locki:/tmp/{tmp_name}"],
                     "Copying image into VM",
                     cwd="/",
                 )
@@ -280,17 +279,16 @@ def exec_cmd(ctx, match, interactive, create, id_file):
     RUNTIME.mkdir(parents=True, exist_ok=True)
     client_ssh_dir = DATA / "home" / ".ssh"
     client_ssh_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-    pid_file, port_file = RUNTIME / "daemon.pid", RUNTIME / "daemon.port"
     ssh_port = 0
     with file_lock("daemon", "Waiting for daemon start"):
         alive = False
-        if pid_file.exists():
+        if PID_FILE.exists():
             with contextlib.suppress(ProcessLookupError, ValueError, PermissionError, FileNotFoundError):
-                os.kill(int(pid_file.read_text().strip()), 0)
+                os.kill(int(PID_FILE.read_text().strip()), 0)
                 alive = True
         if not alive:
-            pid_file.unlink(missing_ok=True)
-            port_file.unlink(missing_ok=True)
+            PID_FILE.unlink(missing_ok=True)
+            PORT_FILE.unlink(missing_ok=True)
             subprocess.Popen(
                 [sys.executable, "-m", "locki", "internal", "daemon"],
                 start_new_session=True,
@@ -300,7 +298,7 @@ def exec_cmd(ctx, match, interactive, create, id_file):
             )
         for _ in range(100):  # up to 10s for the daemon to write its port
             with contextlib.suppress(OSError, ValueError):
-                if ssh_port := int(port_file.read_text().strip()):
+                if ssh_port := int(PORT_FILE.read_text().strip()):
                     break
             time.sleep(0.1)
     if not ssh_port:

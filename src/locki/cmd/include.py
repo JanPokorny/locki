@@ -8,7 +8,6 @@ included worktrees; ownership is scoped by the parent sandbox's id.
 
 from __future__ import annotations
 
-import logging
 import pathlib
 
 import click
@@ -23,8 +22,6 @@ from locki.utils import (
     run_command,
     setup_worktree_hooks,
 )
-
-logger = logging.getLogger(__name__)
 
 
 def _validate_repo(path: pathlib.Path) -> pathlib.Path:
@@ -52,13 +49,13 @@ def _setup_include(sandbox: SandboxInfo, repo_b: pathlib.Path, name: str) -> Non
     # In repo B: create branch from current HEAD, add worktree.
     # If the branch already exists (e.g. another include of the same sandbox in the
     # past, cleaned up but branch survived) we reuse it.
-    check = run_command(
+    result = run_command(
         ["git", "-C", str(repo_b), "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"],
         "Checking for existing include branch",
         check=False,
         quiet=True,
     )
-    if check.returncode != 0:
+    if result.returncode != 0:
         run_command(
             ["git", "-C", str(repo_b), "branch", branch],
             f"Creating branch {click.style(branch, fg='green')} in {repo_b.name}",
