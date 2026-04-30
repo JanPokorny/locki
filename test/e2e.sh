@@ -125,9 +125,15 @@ echo
 echo "Testing proxied git commands..."
 
 assert_ok    "git status works"              locki x -m "$AUTH" git status
+assert_ok    "git status --porcelain works"  locki x -m "$AUTH" git status --porcelain
+assert_ok    "git status --short works"      locki x -m "$AUTH" git status --short
+assert_ok    "git branch --show-current works" locki x -m "$AUTH" git branch --show-current
 assert_ok    "git log works"                 locki x -m "$AUTH" git log --oneline
 assert_ok    "git diff works"                locki x -m "$AUTH" git diff
 assert_ok    "git show works"                locki x -m "$AUTH" git show
+assert_ok    "git rev-parse HEAD works"      locki x -m "$AUTH" git rev-parse HEAD
+assert_ok    "git rev-parse --git-dir works" locki x -m "$AUTH" git rev-parse --git-dir
+assert_ok    "git hash-object works"         bash -c 'expected=$(git -C "$1" hash-object -- pyproject.toml); actual=$(locki x -m "$2" git hash-object -- pyproject.toml); test "$actual" = "$expected"' _ "$WORKTREE" "$AUTH"
 assert_fail  "git checkout is blocked"       locki x -m "$AUTH" git checkout main
 assert_fail  "git reset --hard (no ref) is blocked" locki x -m "$AUTH" git reset --hard
 assert_ok    "git reset <ref> --hard works"  locki x -m "$AUTH" git reset HEAD --hard
@@ -148,6 +154,7 @@ assert_fail  "--message does not pair with --amend" locki x -m "$AUTH" git commi
 # `-c alias=...`, `--git-dir=...`, etc.
 assert_fail  "git -c config override blocked"   locki x -m "$AUTH" git -c alias.st=status status
 assert_fail  "git --git-dir blocked"            locki x -m "$AUTH" git --git-dir=/tmp/evil status
+assert_fail  "git -C /tmp is blocked"           locki x -m "$AUTH" git -C /tmp status
 
 # Stash: message must carry the sandbox suffix; pop/drop require an owned ref.
 assert_fail  "stash push without suffix"        locki x -m "$AUTH" git stash push -m plain

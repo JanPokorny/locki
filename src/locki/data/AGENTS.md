@@ -12,13 +12,17 @@ Some commands execute on the host using a self-service proxy. This lets you exec
 
 ## Git
 
+Only the exact command shapes listed below are allowed.
+
 ```locki-self-service-command-filter
-git status
+git status [--short] [--porcelain]
 git diff [--staged] [--name-only] [--stat] [--name-status] [<ref> [<ref>]]
 git log [--oneline] [--all] [--graph] [--reverse] [--format=<fmt>] [--pretty=<fmt>] [-n/--max-count=<n>] [<ref>]
 git show [<ref>] [--stat] [--name-only] [--name-status] [--format=<fmt>] [--pretty=<fmt>] [<file> ...]
 git blame <file>
 git reflog
+git rev-parse (HEAD | --git-dir)
+git hash-object -- <file>
 git add (--all | <file> ...)
 git restore [--staged] [--source=<ref>] <file> ...
 git commit (-m/--message=<msg> [-s/--signoff] | -C/--reuse-message=<sha>) [--amend [--no-edit]] [--gpg-sign]
