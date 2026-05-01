@@ -4,6 +4,7 @@ import click
 
 from locki.cmd.ai import ai_cmd
 from locki.cmd.exec import exec_cmd
+from locki.cmd.gui import gui_cmd
 from locki.cmd.include import include_cmd
 from locki.cmd.internal import internal_app
 from locki.cmd.list import list_cmd
@@ -22,6 +23,7 @@ app = click.group(
 )(lambda: None)
 app.add_command(ai_cmd, "ai")
 app.add_command(exec_cmd, "exec | x")
+app.add_command(gui_cmd, "gui")
 app.add_command(include_cmd, "include")
 app.add_command(internal_app, "internal")
 app.add_command(list_cmd, "list | ls")
