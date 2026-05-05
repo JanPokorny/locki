@@ -84,7 +84,7 @@ When you start a network service the user should access, forward the port to hos
 
 ## Web browser
 
-You can open, inspect and interact with websites using agent-browser. When in need of a browser, start by running `agent-browser --help`.
+You can open, inspect and interact with websites using agent-browser. When in need of a browser, start by running `agent-browser --help`. If it gives you trouble, run `agent-browser doctor` to autofix known issues.
 
 ## Other
 
