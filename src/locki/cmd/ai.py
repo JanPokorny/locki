@@ -79,6 +79,7 @@ def ai_cmd(ctx, match, interactive, create, id_file):
         else:
             ctx.args.extend(RESUME_ARGS.get(harness, []))
 
+    ctx.obj = sandbox
     ctx.invoke(
         exec_cmd.callback,
         match=sandbox.wt_id,

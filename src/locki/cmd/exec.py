@@ -17,6 +17,7 @@ from locki.config import load_config
 from locki.paths import DATA, LIMA, PACKAGE_DATA, PID_FILE, PORT_FILE, RUNTIME, WORKTREES
 from locki.runes import EXIT, INFO, SPINNER
 from locki.utils import (
+    SandboxInfo,
     fail,
     file_lock,
     gen_id,
@@ -104,7 +105,8 @@ def exec_cmd(ctx, match, interactive, create, id_file):
 
     click.echo(f"{SPINNER} Entering a Locki sandbox.", err=True)
 
-    sandbox = resolve_sandbox(
+    pre_resolved = ctx.obj if isinstance(ctx.obj, SandboxInfo) else None
+    sandbox = pre_resolved or resolve_sandbox(
         match=match,
         interactive=interactive,
         create="force" if create else "allow",
