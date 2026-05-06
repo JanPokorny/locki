@@ -16,6 +16,7 @@ import click
 from locki.config import load_config
 from locki.paths import DATA, LIMA, PACKAGE_DATA, PID_FILE, PORT_FILE, RUNTIME, WORKTREES
 from locki.runes import EXIT, INFO, SPINNER
+from locki.cmd.new import create_sandbox_worktree
 from locki.utils import (
     SandboxInfo,
     fail,
@@ -26,7 +27,6 @@ from locki.utils import (
     resolve_sandbox,
     run_command,
     run_in_vm,
-    setup_worktree_hooks,
     vm_status,
 )
 
@@ -171,31 +171,7 @@ def exec_cmd(ctx, match, interactive, create, id_file):
         fail(f"Lima VM failed to start. LIMA_HOME={LIMA}")
 
     if not sandbox.wt_path.exists():
-        run_command(
-            ["git", "-C", str(sandbox.repo), "worktree", "prune"],
-            "Pruning stale git worktrees",
-        )
-
-        sandbox.wt_path.mkdir(parents=True, exist_ok=True)
-
-        run_command(
-            ["git", "-C", str(sandbox.repo), "branch", sandbox.branch],
-            f"Creating branch {click.style(sandbox.branch, fg='green')}",
-        )
-        run_command(
-            ["git", "-C", str(sandbox.repo), "worktree", "add", str(sandbox.wt_path), sandbox.branch],
-            f"Creating worktree for {click.style(sandbox.branch, fg='green')}",
-        )
-
-        locki_dir = sandbox.wt_path / ".locki"
-        locki_dir.mkdir(parents=True, exist_ok=True)
-        (locki_dir / ".gitignore").write_text("*\n")
-
-        sandbox.meta_path.mkdir(parents=True, exist_ok=True)
-        (sandbox.meta_path / ".git").write_text((sandbox.wt_path / ".git").read_text())
-        (sandbox.meta_path / "repo").write_text(str(sandbox.repo))
-
-        setup_worktree_hooks(sandbox.repo, sandbox.meta_path, sandbox.wt_path)
+        create_sandbox_worktree(sandbox)
 
     config = load_config(sandbox.repo)
 

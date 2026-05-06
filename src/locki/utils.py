@@ -384,7 +384,7 @@ def cwd_git_repo() -> pathlib.Path | None:
     return pathlib.Path(result.stdout.strip()).resolve()
 
 
-def _new_sandbox(repo: pathlib.Path) -> SandboxInfo:
+def new_sandbox(repo: pathlib.Path) -> SandboxInfo:
     wt_id = gen_id()
     return SandboxInfo(wt_id=wt_id, branch=f"untitled#locki-{wt_id}", repo=repo)
 
@@ -416,7 +416,7 @@ def resolve_sandbox(
     if create == "force":
         if cwd_repo is None:
             fail("Cannot create a sandbox outside a git repo.")
-        return _new_sandbox(cwd_repo)
+        return new_sandbox(cwd_repo)
 
     all_sandboxes = list_sandboxes()
     cwd_sandbox = (
@@ -474,7 +474,7 @@ def resolve_sandbox(
 
         if selected == "__create__":
             assert cwd_repo is not None
-            return _new_sandbox(cwd_repo)
+            return new_sandbox(cwd_repo)
         if selected == "__all__":
             candidate_sandboxes = all_sandboxes
             scope_all = True
