@@ -289,15 +289,20 @@ class SandboxInfo:
     wt_id: str
     branch: str
     repo: pathlib.Path
+    wt_dir: str = ""
     include: list[IncludeInfo] = dataclasses.field(default_factory=list)
+
+    def __post_init__(self):
+        if not self.wt_dir:
+            self.wt_dir = f"{self.repo.name}#locki-{self.wt_id}"
 
     @property
     def wt_path(self) -> pathlib.Path:
-        return WORKTREES / self.wt_id
+        return WORKTREES / self.wt_dir
 
     @property
     def meta_path(self) -> pathlib.Path:
-        return WORKTREES_META / self.wt_id
+        return WORKTREES_META / self.wt_dir
 
     def include_wt_path(self, name: str) -> pathlib.Path:
         return self.wt_path / ".locki" / "include" / name
@@ -315,9 +320,9 @@ def live_branch(meta_dir: pathlib.Path) -> str:
     show the same id as their parent.
     """
     try:
-        wt_id = meta_dir.resolve().relative_to(WORKTREES_META.resolve()).parts[0]
+        wt_id = meta_dir.resolve().relative_to(WORKTREES_META.resolve()).parts[0][-8:]
     except ValueError, IndexError:
-        wt_id = meta_dir.name
+        wt_id = meta_dir.name[-8:]
     try:
         gitdir_line = (meta_dir / ".git").read_text().strip()
         if gitdir_line.startswith("gitdir:"):
@@ -353,9 +358,10 @@ def list_sandboxes() -> list[SandboxInfo]:
                     )
         sandboxes.append(
             SandboxInfo(
-                wt_id=meta_dir.name,
+                wt_id=meta_dir.name[-8:],
                 branch=live_branch(meta_dir),
                 repo=pathlib.Path((meta_dir / "repo").read_text().strip()),
+                wt_dir=meta_dir.name,
                 include=include,
             )
         )
@@ -420,7 +426,7 @@ def resolve_sandbox(
 
     all_sandboxes = list_sandboxes()
     cwd_sandbox = (
-        next((s for s in all_sandboxes if s.wt_id == wt_path.name), None) if (wt_path := current_worktree()) else None
+        next((s for s in all_sandboxes if s.wt_dir == wt_path.name), None) if (wt_path := current_worktree()) else None
     )
 
     if filter_out_current_repo and cwd_repo is None:

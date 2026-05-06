@@ -59,7 +59,8 @@ chromium_path=$(command -v chromium 2>/dev/null || command -v chromium-browser 2
 if [ -z "$chromium_path" ]; then
   echo "agent-browser: chromium not installed and could not be installed automatically." >&2
 fi
-AGENT_BROWSER_EXECUTABLE_PATH="$chromium_path" exec mise x github:vercel-labs/agent-browser -- agent-browser "$@"
+mise install github:vercel-labs/agent-browser
+AGENT_BROWSER_EXECUTABLE_PATH="$chromium_path" AGENT_BROWSER_SKILLS_DIR="$(mise where github:vercel-labs/agent-browser)/skills" exec mise x github:vercel-labs/agent-browser -- agent-browser "$@"
 __LOCKI_EOF__
 
 chmod +x /opt/locki/bin/*

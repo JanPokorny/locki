@@ -5,9 +5,9 @@ import click
 from locki.cmd.ai import ai_cmd
 from locki.cmd.exec import exec_cmd
 from locki.cmd.include import include_cmd
-from locki.cmd.new import new_cmd
 from locki.cmd.internal import internal_app
 from locki.cmd.list import list_cmd
+from locki.cmd.new import new_cmd
 from locki.cmd.port_forward import port_forward_cmd
 from locki.cmd.remove import remove_cmd
 from locki.cmd.vm import vm_app

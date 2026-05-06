@@ -13,10 +13,10 @@ import time
 
 import click
 
+from locki.cmd.new import create_sandbox_worktree
 from locki.config import load_config
 from locki.paths import DATA, LIMA, PACKAGE_DATA, PID_FILE, PORT_FILE, RUNTIME, WORKTREES
 from locki.runes import EXIT, INFO, SPINNER
-from locki.cmd.new import create_sandbox_worktree
 from locki.utils import (
     SandboxInfo,
     fail,

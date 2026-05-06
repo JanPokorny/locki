@@ -278,6 +278,15 @@ assert_ok    ":port forward cleaned up" locki port-forward -m "$LOGIN" --clear
 # Reject privileged ports
 assert_fail  "port < 1024 rejected" locki port-forward -m "$LOGIN" 80
 
+# ── locki new ──────────────────────────────────────────────────────────────
+
+echo
+echo "Testing locki new..."
+
+NEW_PATH=$(locki new -n 2>/dev/null)
+assert_ok    "locki new creates worktree dir" test -d "$NEW_PATH"
+assert_output "worktree dir uses <repo>#locki-<id> format" "/r#locki-" echo "$NEW_PATH"
+
 # ── sandbox creation with --create ─────────────────────────────────────────
 
 echo
@@ -333,12 +342,11 @@ echo from-include | locki x -m "$AUTH" bash -c "cat > $INCLUDE_PATH/include-file
 locki x -m "$AUTH" bash -c "cd $INCLUDE_PATH && git add --all && git commit --message='inside include'"
 assert_output "include commit landed"             "inside include" git -C "$INCLUDE_PATH" log -1 --format=%s
 
-# Tampering with the include's .git pointer should be detected by self-service.
+# Tampering with the include's .git pointer is auto-repaired by self-service.
 ORIGINAL_DOTGIT=$(cat "$INCLUDE_PATH/.git")
 echo "gitdir: /tmp/evil" > "$INCLUDE_PATH/.git"
-assert_fail "tampered .git is rejected" locki x -m "$AUTH" bash -c "cd $INCLUDE_PATH && git status"
-echo "$ORIGINAL_DOTGIT" > "$INCLUDE_PATH/.git"
-assert_ok   "restored .git works again" locki x -m "$AUTH" bash -c "cd $INCLUDE_PATH && git status"
+assert_ok   "tampered .git is auto-repaired" locki x -m "$AUTH" bash -c "cd $INCLUDE_PATH && git status"
+assert_output ".git restored from metadata" "$ORIGINAL_DOTGIT" cat "$INCLUDE_PATH/.git"
 
 # ── worktree cleanup ─────────────────────────────────────────────────────────
 

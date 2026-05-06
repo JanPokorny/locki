@@ -555,49 +555,6 @@ def internal_daemon() -> None:
         PORT_FILE.unlink(missing_ok=True)
 
 
-def _locate_worktree(cwd: pathlib.Path) -> tuple[str, pathlib.Path, pathlib.Path]:
-    """Walk up from *cwd* to find the nearest `.git` file and identify its sandbox.
-
-    Returns `(wt_id, dot_git_path, meta_git_path)`.  `wt_id` is the *parent* sandbox id
-    even when cwd is inside an include — that keeps branch/stash ownership rules
-    consistent across the whole sandbox.  Exits on any invariant violation.
-    """
-    wt_root = WORKTREES.resolve()
-    if not cwd.is_relative_to(wt_root):
-        sys.exit(f"Not inside a locki worktree: {str(cwd)!r}")
-    parts = cwd.relative_to(wt_root).parts
-    if not parts:
-        sys.exit(f"Not inside a locki worktree: {str(cwd)!r}")
-
-    wt_id = parts[0]
-    sandbox_root = WORKTREES / wt_id
-
-    # Walk up from cwd towards the sandbox root, stopping at the first `.git` file.
-    p: pathlib.Path = cwd
-    while True:
-        candidate = p / ".git"
-        if candidate.is_file():
-            break
-        if p == sandbox_root:
-            sys.exit(f"No worktree .git found at or above {str(cwd)!r}")
-        p = p.parent
-
-    # Map the found .git back to its expected meta location.
-    rel = p.relative_to(wt_root).parts
-    if len(rel) == 1:
-        meta_git = WORKTREES_META / wt_id / ".git"
-    elif len(rel) == 4 and rel[1] == ".locki" and rel[2] == "include":
-        meta_git = WORKTREES_META / wt_id / "include" / rel[3] / ".git"
-    else:
-        sys.exit(f"Unexpected worktree layout: {'/'.join(rel)!r}")
-
-    if not meta_git.exists():
-        sys.exit(f"Missing worktree metadata: {meta_git}")
-    if p.joinpath(".git").read_text().strip() != meta_git.read_text().strip():
-        sys.exit("Worktree .git mismatch — possible tampering.")
-    return wt_id, p / ".git", meta_git
-
-
 @internal_app.command("self-service")
 def internal_self_service() -> None:
     """SSH forced command: validate and execute an allowed self-service command."""
@@ -613,7 +570,36 @@ def internal_self_service() -> None:
     cwd_str, *argv = parts
 
     cwd = pathlib.Path(cwd_str).resolve()
-    wt_id, _dot_git, _meta_git = _locate_worktree(cwd)
+    wt_root = WORKTREES.resolve()
+    if not cwd.is_relative_to(wt_root):
+        sys.exit(f"Not inside a locki worktree: {str(cwd)!r}")
+    rel_parts = cwd.relative_to(wt_root).parts
+    if not rel_parts:
+        sys.exit(f"Not inside a locki worktree: {str(cwd)!r}")
+    wt_dir = rel_parts[0]
+    wt_id = wt_dir[-8:]
+
+    # Walk up from cwd to find the .git file, then rewrite it from the trusted
+    # metadata copy so a compromised container cannot redirect the gitdir.
+    sandbox_root = WORKTREES / wt_dir
+    p: pathlib.Path = cwd
+    while True:
+        if (p / ".git").is_file():
+            break
+        if p == sandbox_root:
+            sys.exit(f"No worktree .git found at or above {str(cwd)!r}")
+        p = p.parent
+    rel = p.relative_to(wt_root).parts
+    if len(rel) == 1:
+        meta_git = WORKTREES_META / wt_dir / ".git"
+    elif len(rel) == 4 and rel[1] == ".locki" and rel[2] == "include":
+        meta_git = WORKTREES_META / wt_dir / "include" / rel[3] / ".git"
+    else:
+        sys.exit(f"Unexpected worktree layout: {'/'.join(rel)!r}")
+    if not meta_git.exists():
+        sys.exit(f"Missing worktree metadata: {meta_git}")
+    (p / ".git").write_text(meta_git.read_text())
+
     if not argv:
         sys.exit("Empty command.")
 

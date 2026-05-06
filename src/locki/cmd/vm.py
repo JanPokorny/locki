@@ -36,17 +36,16 @@ def vm_status_cmd():
             continue
         wt_id = parts[0].strip()
         status = parts[1].strip().lower()
-        meta_dir = WORKTREES_META / wt_id
+        meta_dir = next(WORKTREES_META.glob(f"*{wt_id}"))
         repo_file = meta_dir / "repo"
         branch = live_branch(meta_dir) if meta_dir.is_dir() else ""
-        repo_path = pathlib.Path(repo_file.read_text().strip()) if repo_file.exists() else None
         rows.append(
             (
                 wt_id,
                 status,
-                pretty_path(repo_path) if repo_path else "",
+                pretty_path(pathlib.Path(repo_file.read_text().strip() if repo_file.exists() else "")),
                 branch,
-                pretty_path(WORKTREES / wt_id),
+                pretty_path(next(WORKTREES.glob(f"*{wt_id}"))),
             )
         )
 
