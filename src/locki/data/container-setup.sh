@@ -6,7 +6,7 @@ set -eux
 # AGENTS.md is injected as base64 (silenced to keep xtrace output readable).
 mkdir -p /etc/claude-code /etc/gemini-cli /etc/codex /etc/opencode /etc/copilot
 set +x
-echo '__AGENTS_MD_B64__' | base64 -d | tee /etc/claude-code/CLAUDE.md /etc/gemini-cli/GEMINI.md /etc/codex/AGENTS.md /etc/opencode/AGENTS.md /etc/copilot > /dev/null
+echo '__AGENTS_MD_B64__' | base64 -d | tee /etc/claude-code/CLAUDE.md /etc/gemini-cli/GEMINI.md /etc/codex/AGENTS.md /etc/opencode/AGENTS.md /etc/copilot/AGENTS.md > /dev/null
 set -x
 
 cat > /etc/gemini-cli/settings.json << '__LOCKI_EOF__'
@@ -59,8 +59,8 @@ chromium_path=$(command -v chromium 2>/dev/null || command -v chromium-browser 2
 if [ -z "$chromium_path" ]; then
   echo "agent-browser: chromium not installed and could not be installed automatically." >&2
 fi
-mise install github:vercel-labs/agent-browser
-AGENT_BROWSER_EXECUTABLE_PATH="$chromium_path" AGENT_BROWSER_SKILLS_DIR="$(mise where github:vercel-labs/agent-browser)/skills" exec mise x github:vercel-labs/agent-browser -- agent-browser "$@"
+mise install npm:agent-browser
+AGENT_BROWSER_EXECUTABLE_PATH="$chromium_path" AGENT_BROWSER_SKILLS_DIR="$(mise where npm:agent-browser)/skills" exec mise x npm:agent-browser -- agent-browser "$@"
 __LOCKI_EOF__
 
 chmod +x /opt/locki/bin/*
