@@ -96,7 +96,7 @@ Case study: [Kagenti ADK](https://github.com/kagenti/adk) uses Locki to run a fu
 
     <small>
 
-    (Supported harnesses: `claude`, `gemini`, `codex`, `opencode`, `pi`.)
+    (Supported harnesses: `claude`, `gemini`, `codex`, `opencode`, `pi`, `copilot`.)
 
     </small>
 1. First start takes longer, wait a few minutes for the VM to boot.
@@ -128,6 +128,9 @@ To my knowledge Locki is the only one packing a fully vertically integrated Incu
 &nbsp;
 
 ## Pro-tips for power users
+
+- Launch an IDE in the worktree folder using `locki ide`. Supported: VSCode, Zed, Fresh -- PR if you want to add your favorite.\
+  *(The IDE runs on host: you still need to run `locki ai` / `locki x -- <cmd>` in the built-in terminal to run commands in the sandbox. This is intentional: running your IDE inside the sandbox (using "remote SSH" or similar features) is unsafe, since the agent could potentially access authentication tokens stored in the IDE's memory.)*
 
 - Editors like VSCode show worktrees in the sidebar, useful as a quick UI for reviewing and modifying changes.\
   *(⚠️ VSCode 1.115.0+ requires setting `"git.detectWorktrees": true` for this to work.)*

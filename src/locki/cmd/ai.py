@@ -8,8 +8,8 @@ from locki.paths import DATA, USER_CONFIG
 from locki.runes import SUCCESS
 from locki.utils import cwd_git_repo, fail, resolve_sandbox
 
-HARNESSES = ["claude", "gemini", "codex", "opencode", "pi"]
-RESUME_ARGS = {"claude": ["-c"], "gemini": ["-r"], "codex": ["resume"], "pi": ["-c"]}
+HARNESSES = ["claude", "gemini", "codex", "opencode", "pi", "copilot"]
+RESUME_ARGS = {"claude": ["-c"], "gemini": ["-r"], "codex": ["resume"], "pi": ["-c"], "copilot": ["--continue"]}
 
 
 def _ask_harness() -> str:

@@ -37,6 +37,7 @@ CONTAINER_ENV = {
     "CARGO_HOME": "/var/cache/locki/cargo",
     "COMPOSER_CACHE_DIR": "/var/cache/locki/composer",
     "CONAN_USER_HOME": "/var/cache/locki/conan",
+    "COPILOT_CUSTOM_INSTRUCTIONS_DIRS": "/etc/copilot",
     "COREPACK_ENABLE_DOWNLOAD_PROMPT": "0",
     "COURSIER_CACHE": "/var/cache/locki/coursier",
     "DENO_DIR": "/var/cache/locki/deno",
