@@ -1,5 +1,3 @@
-import subprocess
-
 import click
 
 from locki.utils import (
@@ -7,7 +5,6 @@ from locki.utils import (
     cwd_git_repo,
     fail,
     new_sandbox,
-    pretty_path,
     run_command,
     setup_worktree_hooks,
 )
@@ -18,14 +15,6 @@ def create_sandbox_worktree(sandbox: SandboxInfo) -> None:
         ["git", "-C", str(sandbox.repo), "worktree", "prune"],
         "Pruning stale git worktrees",
     )
-    if subprocess.run(
-        ["git", "-C", str(sandbox.repo), "rev-parse", "--verify", "--quiet", "HEAD"],
-        capture_output=True,
-    ).returncode != 0:
-        fail(
-            f"Repo {pretty_path(sandbox.repo)} has no commits on HEAD yet. "
-            "Make an initial commit before creating a sandbox."
-        )
     sandbox.wt_path.mkdir(parents=True, exist_ok=True)
     run_command(
         ["git", "-C", str(sandbox.repo), "branch", sandbox.branch],
