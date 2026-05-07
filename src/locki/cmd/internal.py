@@ -5,7 +5,6 @@
 * `locki internal command-bridge` — SSH forced bridged command handler: validate and run a whitelisted command.
 """
 
-from locki.utils import AliasGroup
 from __future__ import annotations
 
 import asyncio
@@ -30,7 +29,7 @@ import click
 from lark import Lark, Token, Transformer
 
 from locki.paths import DATA, DENIED_LOG, PACKAGE_DATA, PID_FILE, PORT_FILE, RUNTIME, STATE, WORKTREES, WORKTREES_META
-from locki.utils import limactl, vm_status
+from locki.utils import AliasGroup, limactl, vm_status
 
 logger = logging.getLogger(__name__)
 
