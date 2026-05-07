@@ -25,9 +25,10 @@ __LOCKI_EOF__
 
 mkdir -p /opt/locki/bin
 
-## self-service through ssh proxy
+## command bridge through ssh proxy
 tee /opt/locki/bin/git /opt/locki/bin/gh /opt/locki/bin/locki > /dev/null << '__LOCKI_EOF__'
 #!/bin/sh
+echo "[Locki info] Running a command bridge shim. This command is executed in equivalent working dir on host." 1>&2
 cmd=$(basename "$0")
 set -- "$(pwd)" "$cmd" "$@"
 q=""

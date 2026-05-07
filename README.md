@@ -180,4 +180,4 @@ Despite best effort, Locki provides no security guarantees and is provided "as i
 - Single [Lima](https://lima-vm.io/) VM
 - Multiple [Incus](https://linuxcontainers.org/incus/introduction/) containers
 - [Mise](https://mise.jdx.dev) for ergonomic package installation
-- Host proxy for self-service commands (`git`, `gh`, port forwarding)
+- Host proxy for bridged commands (`git`, `gh`, port forwarding)

@@ -333,7 +333,7 @@ assert_output "include branch named #locki-<id>"  "untitled#locki-$AUTH" git -C 
 # Second include call for same repo should fail (collision).
 assert_fail  "duplicate include rejected"         locki include -m "$AUTH" --repo "$REPO2"
 
-# Git commands inside the include go through the self-service proxy.
+# Git commands inside the include go through the command bridge.
 assert_output "git status works inside include"   "nothing to commit" \
     locki x -m "$AUTH" bash -c "cd $INCLUDE_PATH && git status"
 
@@ -342,7 +342,7 @@ echo from-include | locki x -m "$AUTH" bash -c "cat > $INCLUDE_PATH/include-file
 locki x -m "$AUTH" bash -c "cd $INCLUDE_PATH && git add --all && git commit --message='inside include'"
 assert_output "include commit landed"             "inside include" git -C "$INCLUDE_PATH" log -1 --format=%s
 
-# Tampering with the include's .git pointer is auto-repaired by self-service.
+# Tampering with the include's .git pointer is auto-repaired by command bridge.
 ORIGINAL_DOTGIT=$(cat "$INCLUDE_PATH/.git")
 echo "gitdir: /tmp/evil" > "$INCLUDE_PATH/.git"
 assert_ok   "tampered .git is auto-repaired" locki x -m "$AUTH" bash -c "cd $INCLUDE_PATH && git status"

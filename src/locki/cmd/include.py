@@ -2,7 +2,7 @@
 
 The included worktree lives at `<sandbox>/.locki/include/<name>/` and is a
 full git worktree of the other repo, with its own branch `untitled#locki-<sandbox-id>`
-tracked in that repo.  Git / gh self-service proxy rules apply identically inside
+tracked in that repo. Bridged command rules (git, gh, ...) apply identically inside
 included worktrees; ownership is scoped by the parent sandbox's id.
 """
 

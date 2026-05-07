@@ -2,7 +2,7 @@
 
 * `locki internal cleanup` — one-shot: stop idle containers, remove orphans, power off idle VM.
 * `locki internal daemon`  — long-running host daemon: asyncssh forced-command proxy + cleanup scheduler.
-* `locki internal self-service` — SSH forced command handler: validate and run a whitelisted command.
+* `locki internal command-bridge` — SSH forced bridged command handler: validate and run a whitelisted command.
 """
 
 from __future__ import annotations
@@ -62,7 +62,7 @@ def _list_containers() -> list[tuple[str, str]]:
     return pairs
 
 
-# ── Self-service grammar engine ───────────────────────────────────────────────
+# ── Command bridge grammar engine ───────────────────────────────────────────────
 
 
 @dataclass
@@ -375,12 +375,12 @@ class Ruleset:
 
     @classmethod
     def from_markdown(cls, md: str) -> Ruleset:
-        """Parse every non-blank line inside ```locki-self-service-command-filter fences."""
+        """Parse every non-blank line inside ```locki-bridged-command-filter fences."""
         raw: dict[tuple[str, str], tuple[list[Rule], list[str]]] = {}
         in_block = False
         for line_raw in md.splitlines():
             line = line_raw.strip()
-            if line == "```locki-self-service-command-filter":
+            if line == "```locki-bridged-command-filter":
                 in_block = True
             elif in_block and line.startswith("```"):
                 in_block = False
@@ -533,7 +533,7 @@ def internal_daemon() -> None:
                     "-m",
                     "locki",
                     "internal",
-                    "self-service",
+                    "command-bridge",
                     env=env,
                     stdin=asyncio.subprocess.PIPE,
                     stdout=asyncio.subprocess.PIPE,
@@ -591,9 +591,9 @@ def internal_daemon() -> None:
         PORT_FILE.unlink(missing_ok=True)
 
 
-@internal_app.command("self-service")
-def internal_self_service() -> None:
-    """SSH forced command: validate and execute an allowed self-service command."""
+@internal_app.command("command-bridge | self-service")
+def internal_command_bridge() -> None:
+    """SSH forced command: validate and execute an allowed bridged command."""
     cmd = os.environ.get("SSH_ORIGINAL_COMMAND", "")
     if not cmd:
         sys.exit("No command specified.")

@@ -283,7 +283,7 @@ def exec_cmd(ctx, match, interactive, create, id_file):
                     break
             time.sleep(0.1)
     if not ssh_port:
-        logger.warning("Locki daemon did not report a port in time. Self-service proxy is disabled in this sandbox.")
+        logger.warning("Locki daemon did not report a port in time. Command bridge proxy is disabled in this sandbox.")
     (client_ssh_dir / "locki-ssh-config").write_text(
         (PACKAGE_DATA / "locki-ssh-config").read_text() + f"    Port {ssh_port}\n    User {getpass.getuser()}\n"
     )
