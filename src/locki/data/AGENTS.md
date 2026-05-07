@@ -13,31 +13,39 @@ Some commands execute on the host using a self-service proxy. This lets you exec
 ## Git
 
 ```locki-self-service-command-filter
-git status
-git diff [--staged] [--name-only] [--stat] [--name-status] [<ref> [<ref>]]
-git log [--oneline] [--all] [--graph] [--reverse] [--format=<fmt>] [--pretty=<fmt>] [-n/--max-count=<n>] [<ref>]
-git show [<ref>] [--stat] [--name-only] [--name-status] [--format=<fmt>] [--pretty=<fmt>] [<file> ...]
-git blame <file>
-git reflog
 git add (--all | <file> ...)
-git restore [--staged] [--source=<ref>] <file> ...
-git commit (-m/--message=<msg> [-s/--signoff] | -C/--reuse-message=<sha>) [--amend [--no-edit]] [--gpg-sign]
-git push [--force-with-lease]
-git fetch [--prune]
-git pull [--rebase] [--ff-only]
-git switch ([--create | --force-create] <name>#locki-<wt-id> [<start-point>] | --detach <ref>)
+git blame <file>
 git branch (<name>#locki-<wt-id> [<start-point> | --move | --delete [--force]] | --show-current)
-git reset [--hard] <ref>
+git check-ignore <file> ...
+git cherry-pick (--continue | --abort | --skip)
 git cherry-pick [--no-commit] [--gpg-sign] <ref>
-git (rebase | merge) <ref>
-git (rebase | cherry-pick | merge) (--continue | --abort | --skip)
-git stash push -m/--message=<text>#locki-<wt-id>
-git stash list
-git stash apply <stash-ref>
+git commit (-m/--message=<msg> [-s/--signoff] | -C/--reuse-message=<sha> | --amend --no-edit) [--amend [--no-edit]] [--gpg-sign]
+git config [--get] [--local] <key>
+git diff [--staged | --cached] [--name-only] [--stat] [--name-status] [<ref> [<ref>]] [<file> ...]
+git fetch [--prune] [<ref>]
+git grep [-l/--files-with-matches] <pattern> [<ref>] [<file> ...]
+git log [--oneline] [--all] [--graph] [--reverse] [--format=<fmt>] [--pretty=<fmt>] [-n/--max-count=<n>] [--name-only] [--diff-filter=<filter>] [--since=<date>] [<ref>] [<file> ...]
+git ls-files [<path> ...]
+git merge (--continue | --abort | --skip)
+git merge <ref>
+git pull [--rebase] [--ff-only]
+git push [--force-with-lease]
+git rebase (--continue | --abort | --skip)
+git rebase <ref>
+git reflog
+git reset [--hard] <ref>
+git restore [--staged] [--source=<ref>] <file> ...
+git rev-parse [--show-cdup] [--show-toplevel] [--git-dir] [--is-inside-work-tree] [--abbrev-ref] [--verify] [<arg> ...]
+git show [<ref>] [--stat] [--name-only] [--name-status] [--format=<fmt>] [--pretty=<fmt>] [<file> ...]
 git stash (pop | drop) <owned-stash-ref>
+git stash apply <stash-ref>
+git stash list
+git stash push -m/--message=<text>#locki-<wt-id>
+git status [-s/--short] [-u/--untracked-files=<mode>] [<file> ...]
+git switch ([--create | --force-create] <name>#locki-<wt-id> [<start-point>] | --detach <ref>)
 ```
 
-`<wt-id>` is the last segment of the worktree path. Branches you create, modify, or switch to must match the `<name>#locki-<wt-id>` pattern. You may read from any ref. `<owned-stash-ref>` is a stash whose message contains `#locki-<wt-id>` -- only those can be popped or dropped; any stash can be applied.
+`<wt-id>` is the 8-char slug in worktree directory name: `.../locki/worktrees/<repo-name>#locki-<wt-id>`. Branches you create, modify, or switch to must be named matching this pattern: `<name>#locki-<wt-id>`. You may read from any ref. `<owned-stash-ref>` is a stash whose message contains `#locki-<wt-id>` -- only those can be popped or dropped; any stash can be applied.
 
 ### Interactive rebase
 
@@ -63,13 +71,13 @@ Finish:
 ## GitHub CLI
 
 ```locki-self-service-command-filter
-gh pr (view [<number>] [--comments] | list | diff [<number>] [--name-only] [--patch] | status | checks [<number>])
+gh api repos/<owner>/<repo>/pulls/<number>/comments
+gh issue (view [<number>] [--comments] | list [-L/--limit=<n>] [-s/--state=<state>] [-S/--search=<query>])
+gh pr (view [<number>] [--comments] [--json=<fields>] | list [-L/--limit=<n>] [-s/--state=<state>] [-S/--search=<query>] | diff [<number>] [--name-only] [--patch] [--stat] | status | checks [<number>])
+gh pr comment <number> -b/--body=<b>
 gh pr create -t/--title=<t> [-b/--body=<b>] [-B/--base=<b>] [-H/--head=<h>] [-d/--draft] [-f/--fill] [-r/--reviewer=<r>] [-l/--label=<l>] [-a/--assignee=<a>]
 gh pr edit [<number>] [-t/--title=<t>] [-b/--body=<b>] [--add-label=<l>] [--add-reviewer=<r>] [--add-assignee=<a>]
-gh pr comment <number> -b/--body=<b>
-gh run (view [<number>] [-j/--job=<number>] [--log] [--log-failed] | list)
-gh issue (view [<number>] | list)
-gh api repos/<owner>/<repo>/pulls/<number>/comments
+gh run (view [<number>] [-j/--job=<number>] [--log] [--log-failed] | list [-L/--limit=<n>])
 ```
 
 `<owner>/<repo>` may only be the current repo.

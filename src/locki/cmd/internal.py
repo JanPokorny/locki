@@ -88,19 +88,24 @@ class ArgRule:
 
 @dataclass
 class FlagRule:
-    short_name: str | None
-    long_name: str  # Underscored form, matches `split_argv` flag keys.
+    short_name: str | None  # Full form, e.g. "-s".
+    long_name: str  # Full form, e.g. "--short".
     value: ArgRule | None  # None for bool flags.
 
     def match(self, pos: int, used: frozenset[str], mc: MatchContext) -> Iterator[tuple[int, frozenset[str]]]:
-        if self.long_name in used:
+        key: str | None = None
+        if self.long_name in mc.flags and self.long_name not in used:
+            key = self.long_name
+        elif self.short_name is not None and self.short_name in mc.flags and self.short_name not in used:
+            key = self.short_name
+        if key is None:
             return
-        val = mc.flags.get(self.long_name)
+        val = mc.flags[key]
         if self.value is None:
             if val == "":
-                yield pos, used | {self.long_name}
-        elif val is not None and mc.ctx.compound(self.value.value).fullmatch(val):
-            yield pos, used | {self.long_name}
+                yield pos, used | {key}
+        elif mc.ctx.compound(self.value.value).fullmatch(val):
+            yield pos, used | {key}
 
     def walk_flags(self) -> Iterator[FlagRule]:
         yield self
@@ -272,11 +277,11 @@ class _ASTBuilder(Transformer):
         tok = str(c[0])
         short: str | None = None
         if tok.startswith("-") and not tok.startswith("--"):
-            short = tok[1]
+            short = tok[:2]
             tok = tok[3:]
-        name, sep, value_text = tok[2:].partition("=")
+        name, sep, value_text = tok.partition("=")
         value = ArgRule(value=_compound_parts(value_text)) if sep == "=" else None
-        return FlagRule(short_name=short, long_name=name.replace("-", "_"), value=value)
+        return FlagRule(short_name=short, long_name=name, value=value)
 
     def compound(self, c: list[Token]) -> ArgRule:
         return ArgRule(value=_compound_parts(str(c[0])))
@@ -288,107 +293,138 @@ _PARSER = Lark(_GRAMMAR, start="alt", parser="lalr", transformer=_ASTBuilder())
 # ── Ruleset ──────────────────────────────────────────────────────────────────
 
 
+def _extract_prefix(rule: Rule) -> tuple[str, str]:
+    """Get the first two literal words from a top-level SequenceRule."""
+    if not isinstance(rule, SequenceRule):
+        raise ValueError("Top-level rule must be a sequence")
+    words: list[str] = []
+    for item in rule.sequence:
+        if isinstance(item, ArgRule) and len(item.value) == 1 and isinstance(item.value[0], str):
+            words.append(item.value[0])
+            if len(words) == 2:
+                return (words[0], words[1])
+        else:
+            break
+    raise ValueError(f"Rule must start with two literal words, got {words}")
+
+
+def _collect_value_flag_keys(rules: list[Rule]) -> frozenset[str]:
+    keys: set[str] = set()
+    for rule in rules:
+        for flag in rule.walk_flags():
+            if flag.value is not None:
+                keys.add(flag.long_name)
+                if flag.short_name is not None:
+                    keys.add(flag.short_name)
+    return frozenset(keys)
+
+
+def _split_argv(args: list[str], value_flag_keys: frozenset[str]) -> tuple[list[str], dict[str, str]]:
+    """Split args into positionals and flags keyed by their original form.
+
+    Flags are stored with their full name (e.g. ``--limit``, ``-L``).
+    For value-flags, ``--flag value``, ``--flag=value``, ``-x value``,
+    ``-xvalue`` and ``-x=value`` all work; bool flags are standalone.
+    """
+    positionals: list[str] = []
+    flags: dict[str, str] = {}
+    rest_positional = False
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if rest_positional:
+            positionals.append(arg)
+        elif arg == "--":
+            rest_positional = True
+        elif arg.startswith("--"):
+            key, sep, value = arg.partition("=")
+            if sep == "" and key in value_flag_keys and i + 1 < len(args) and not args[i + 1].startswith("-"):
+                value = args[i + 1]
+                i += 1
+            flags[key] = value
+        elif len(arg) >= 2 and arg[0] == "-":
+            if arg[1:].isdigit():
+                flags["--max-count"] = arg[1:]
+                i += 1
+                continue
+            key = arg[:2]
+            glued = arg[2:].removeprefix("=")
+            if glued:
+                flags[key] = glued
+            elif key in value_flag_keys and i + 1 < len(args) and not args[i + 1].startswith("-"):
+                flags[key] = args[i + 1]
+                i += 1
+            else:
+                flags[key] = ""
+        else:
+            positionals.append(arg)
+        i += 1
+    return positionals, flags
+
+
+@dataclass
+class _RuleGroup:
+    rules: list[Rule]
+    lines: list[str]
+    value_flag_keys: frozenset[str]
+
+
 class Ruleset:
-    def __init__(self, rules: list[Rule]) -> None:
-        self.rules = rules
+    def __init__(self, groups: dict[tuple[str, str], _RuleGroup]) -> None:
+        self._groups = groups
 
     @classmethod
     def from_markdown(cls, md: str) -> Ruleset:
-        """Parse every non-blank line inside ```locki-self-service-command-filter fences as a grammar rule."""
-        rules: list[Rule] = []
+        """Parse every non-blank line inside ```locki-self-service-command-filter fences."""
+        raw: dict[tuple[str, str], tuple[list[Rule], list[str]]] = {}
         in_block = False
-        for raw in md.splitlines():
-            line = raw.strip()
+        for line_raw in md.splitlines():
+            line = line_raw.strip()
             if line == "```locki-self-service-command-filter":
                 in_block = True
             elif in_block and line.startswith("```"):
                 in_block = False
             elif in_block and line:
-                rules.append(_PARSER.parse(line))  # pyrefly: ignore
-        return cls(rules)
+                rule: Rule = _PARSER.parse(line)  # pyrefly: ignore
+                prefix = _extract_prefix(rule)
+                entry = raw.setdefault(prefix, ([], []))
+                entry[0].append(rule)
+                entry[1].append(line)
+        return cls({
+            prefix: _RuleGroup(
+                rules=rules,
+                lines=lines,
+                value_flag_keys=_collect_value_flag_keys(rules),
+            )
+            for prefix, (rules, lines) in raw.items()
+        })
 
-    @cached_property
-    def _flag_index(self) -> tuple[frozenset[str], dict[str, str]]:
-        """Discover every flag declared in the grammar: (value-flag long keys, short→long)."""
-        value_keys: set[str] = set()
-        short_aliases: dict[str, str] = {}
-        for rule in self.rules:
-            for flag in rule.walk_flags():
-                if flag.value is not None:
-                    value_keys.add(flag.long_name)
-                if flag.short_name is not None:
-                    prior = short_aliases.get(flag.short_name)
-                    if prior is not None and prior != flag.long_name:
-                        raise ValueError(f"Short flag -{flag.short_name} maps to both --{prior} and --{flag.long_name}")
-                    short_aliases[flag.short_name] = flag.long_name
-        return frozenset(value_keys), short_aliases
+    def check(self, argv: list[str], wt_id: str) -> str | None:
+        """Return None if allowed, or an error message."""
+        if len(argv) < 2 or argv[1].startswith("-"):
+            return f"Command not allowed: {shlex.join(argv)!r}"
 
-    @property
-    def value_flag_keys(self) -> frozenset[str]:
-        return self._flag_index[0]
+        prefix = (argv[0], argv[1])
+        group = self._groups.get(prefix)
+        if group is None:
+            return f"Command not allowed: {shlex.join(argv)!r}"
 
-    @property
-    def short_aliases(self) -> dict[str, str]:
-        return self._flag_index[1]
-
-    def split_argv(self, args: list[str]) -> tuple[list[str], dict[str, str]]:
-        """Split argv into positionals and long flags.
-
-        Short flags registered in the grammar (`-x/--long`) are normalized to their
-        long key.  For value-flags, `--flag value`, `--flag=value`, `-x value`, `-xvalue`
-        and `-x=value` all work; bool flags are standalone.
-        """
-        positionals: list[str] = []
-        flags: dict[str, str] = {}
-        rest_positional = False
-        i = 0
-        while i < len(args):
-            arg = args[i]
-            if rest_positional:
-                positionals.append(arg)
-            elif arg == "--":
-                rest_positional = True
-            elif arg.startswith("--"):
-                key, sep, value = arg[2:].partition("=")
-                key = key.replace("-", "_")
-                if sep == "" and key in self.value_flag_keys and i + 1 < len(args) and not args[i + 1].startswith("-"):
-                    value = args[i + 1]
-                    i += 1
-                flags[key] = value
-            elif len(arg) >= 2 and arg[0] == "-":
-                # git treats -<digits> as --max-count=<digits>
-                if arg[1:].isdigit():
-                    flags["max_count"] = arg[1:]
-                    i += 1
-                    continue
-                short = arg[1]
-                if short not in self.short_aliases:
-                    raise ValueError(f"Unknown short flag: {arg!r}")
-                key = self.short_aliases[short]
-                glued = arg[2:].removeprefix("=")
-                if glued:
-                    if key not in self.value_flag_keys:
-                        raise ValueError(f"Short flag -{short} does not take a value: {arg!r}")
-                    flags[key] = glued
-                elif key in self.value_flag_keys and i + 1 < len(args) and not args[i + 1].startswith("-"):
-                    flags[key] = args[i + 1]
-                    i += 1
-                else:
-                    flags[key] = ""
-            else:
-                positionals.append(arg)
-            i += 1
-        return positionals, flags
-
-    def is_allowed(self, positionals: list[str], flags: dict[str, str], wt_id: str) -> bool:
-        """`--help` is always allowed; every other flag must be consumed by the matching rule."""
-        effective = {k: v for k, v in flags.items() if k != "help"}
-        mc = MatchContext(positionals, effective, Context(wt_id))
+        positionals, flags = _split_argv(argv[2:], group.value_flag_keys)
+        effective = {k: v for k, v in flags.items() if k != "--help"}
+        all_positionals = [*prefix, *positionals]
+        mc = MatchContext(all_positionals, effective, Context(wt_id))
         expected = set(effective)
-        target = len(positionals)
-        return any(
-            p == target and used == expected for rule in self.rules for p, used in rule.match(0, frozenset(), mc)
-        )
+        target = len(all_positionals)
+
+        if any(
+            p == target and used == expected
+            for rule in group.rules
+            for p, used in rule.match(0, frozenset(), mc)
+        ):
+            return None
+
+        lines = "\n".join(f"  {line}" for line in group.lines)
+        return f'Allowed forms of "{prefix[0]} {prefix[1]}" are:\n{lines}'
 
 
 @cache
@@ -604,21 +640,17 @@ def internal_self_service() -> None:
         sys.exit("Empty command.")
 
     exe = pathlib.Path(argv[0]).name
-    ruleset = _ruleset()
-    try:
-        positionals, flags = ruleset.split_argv(argv[1:])
-    except ValueError as e:
-        sys.exit(str(e))
-
     # chdir first so `gh repo view` and `git stash list` run inside the worktree.
     os.chdir(str(cwd))
 
-    if not ruleset.is_allowed([exe, *positionals], flags, wt_id):
+    ruleset = _ruleset()
+    error = ruleset.check([exe, *argv[1:]], wt_id)
+    if error:
         with contextlib.suppress(OSError):
             DENIED_LOG.parent.mkdir(parents=True, exist_ok=True)
             with DENIED_LOG.open("a") as fh:
                 fh.write(f"{datetime.datetime.now().isoformat(timespec='seconds')}\t{wt_id}\t{shlex.join(argv)}\n")
-        sys.exit(f"Command not allowed: {' '.join(argv)!r}")
+        sys.exit(error)
 
     if exe == "locki":
         os.execvp(sys.executable, [sys.executable, "-m", "locki", *argv[1:]])
