@@ -321,7 +321,7 @@ def live_branch(meta_dir: pathlib.Path) -> str:
     """
     try:
         wt_id = meta_dir.resolve().relative_to(WORKTREES_META.resolve()).parts[0][-8:]
-    except ValueError, IndexError:
+    except (ValueError, IndexError):
         wt_id = meta_dir.name[-8:]
     try:
         gitdir_line = (meta_dir / ".git").read_text().strip()
