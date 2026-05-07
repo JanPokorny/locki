@@ -337,12 +337,20 @@ def live_branch(meta_dir: pathlib.Path) -> str:
 
 
 def list_sandboxes() -> list[SandboxInfo]:
-    """Every Locki sandbox on disk, read from the meta directory."""
+    """Every Locki sandbox on disk, read from the meta directory.
+
+    Automatically prunes metadata for worktrees that no longer exist on disk
+    (e.g. deleted outside Locki).
+    """
     if not WORKTREES_META.exists():
         return []
     sandboxes: list[SandboxInfo] = []
     for meta_dir in sorted(WORKTREES_META.iterdir()):
         if not meta_dir.is_dir() or not (meta_dir / "repo").exists():
+            continue
+        wt_dir = meta_dir.name
+        if not (WORKTREES / wt_dir).exists():
+            shutil.rmtree(meta_dir, ignore_errors=True)
             continue
         include: list[IncludeInfo] = []
         include_root = meta_dir / "include"
@@ -361,7 +369,7 @@ def list_sandboxes() -> list[SandboxInfo]:
                 wt_id=meta_dir.name[-8:],
                 branch=live_branch(meta_dir),
                 repo=pathlib.Path((meta_dir / "repo").read_text().strip()),
-                wt_dir=meta_dir.name,
+                wt_dir=wt_dir,
                 include=include,
             )
         )
