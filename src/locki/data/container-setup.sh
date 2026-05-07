@@ -28,7 +28,6 @@ mkdir -p /opt/locki/bin
 ## command bridge through ssh proxy
 tee /opt/locki/bin/git /opt/locki/bin/gh /opt/locki/bin/locki > /dev/null << '__LOCKI_EOF__'
 #!/bin/sh
-echo "[Locki info] Running a command bridge shim. This command is executed in equivalent working dir on host." 1>&2
 cmd=$(basename "$0")
 set -- "$(pwd)" "$cmd" "$@"
 q=""
@@ -49,6 +48,10 @@ __LOCKI_EOF__
 
 cat > /opt/locki/bin/agent-browser << '__LOCKI_EOF__'
 #!/bin/sh
+export MISE_STATUS_MESSAGE_MISSING_TOOLS=never
+# run from root to avoid mise discovering mise.toml and triggering full install
+target="$(pwd)"
+cd /
 if ! command -v chromium >/dev/null 2>&1 && ! command -v chromium-browser >/dev/null 2>&1; then
   if command -v dnf >/dev/null 2>&1; then
     dnf install -y chromium >/dev/null
@@ -56,12 +59,12 @@ if ! command -v chromium >/dev/null 2>&1 && ! command -v chromium-browser >/dev/
     apt-get update -qq && apt-get install -y chromium-browser >/dev/null
   fi
 fi
-chromium_path=$(command -v chromium 2>/dev/null || command -v chromium-browser 2>/dev/null)
-if [ -z "$chromium_path" ]; then
-  echo "agent-browser: chromium not installed and could not be installed automatically." >&2
+export AGENT_BROWSER_EXECUTABLE_PATH=$(command -v chromium 2>/dev/null || command -v chromium-browser 2>/dev/null)
+if [ -z "$AGENT_BROWSER_EXECUTABLE_PATH" ]; then
+  echo "[Locki] Failed to install Chromium. You need to install it manually." >&2
 fi
-mise install npm:agent-browser
-AGENT_BROWSER_EXECUTABLE_PATH="$chromium_path" AGENT_BROWSER_SKILLS_DIR="$(mise where npm:agent-browser)/skills" exec mise x npm:agent-browser -- agent-browser "$@"
+if test "$(mise tool node --requested)" = "[none]"; then mise use -g node@24; fi  # avoid broken shim
+exec mise x nodejs@24 -- mise x npm:agent-browser -- bash -c 'cd "$1" && shift && AGENT_BROWSER_SKILLS_DIR="$(mise where npm:agent-browser)/lib/node_modules/agent-browser/skills" exec "$(mise where npm:agent-browser)/bin/agent-browser" "$@"' _ "$target" "$@"
 __LOCKI_EOF__
 
 chmod +x /opt/locki/bin/*
@@ -84,7 +87,7 @@ rm -f "$(readlink -f "$0")"
 if command -v dnf >/dev/null 2>&1; then
   dnf install -y moby-engine docker-compose docker-buildx docker-buildkit
 else
-  echo "Error: unsupported distro by the docker auto-install-shim, please install Docker manually (e.g. using the script from https://get.docker.com/)" >&2
+  echo "[Locki] Error: unsupported distro by the docker auto-install-shim, please install Docker manually (e.g. using the script from https://get.docker.com/)" >&2
   exit 1
 fi
 systemctl enable --now docker
@@ -107,8 +110,7 @@ export MISE_STATUS_MESSAGE_MISSING_TOOLS=never
 # run from root to avoid mise discovering mise.toml and triggering full install
 target="\$(pwd)"
 cd /
-# set global node version to avoid broken mise shim
-if test "\$(mise tool node --requested)" = "[none]"; then mise use -g node@24; fi
+if test "\$(mise tool node --requested)" = "[none]"; then mise use -g node@24; fi  # avoid broken shim
 exec mise x nodejs@24 -- mise x $pkg@\$version -- bash -c 'cd "\$1" && shift && exec $cmd "\$@"' _ "\$target" "\$@"
 EOF
 done
@@ -197,7 +199,7 @@ if ! command -v mise; then
     elif command -v python3 >/dev/null 2>&1; then
       python3 -c "from urllib.request import urlretrieve,install_opener,build_opener;o=build_opener();o.addheaders=[('User-Agent','curl/8')];install_opener(o);urlretrieve('$mise_url','$tmpdir/$mise_file')"
     else
-      echo "Error: no HTTP client found (need curl, wget, or python3)" >&2
+      echo "[Locki] Error: no HTTP client found (need curl, wget, or python3)" >&2
       exit 1
     fi
     if [ "$(sha256sum "$tmpdir/$mise_file" | cut -d' ' -f1)" != "$checksum" ]; then echo "checksum mismatch" >&2; exit 1; fi
