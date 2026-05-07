@@ -5,6 +5,7 @@
 * `locki internal command-bridge` — SSH forced bridged command handler: validate and run a whitelisted command.
 """
 
+from locki.utils import AliasGroup
 from __future__ import annotations
 
 import asyncio
@@ -435,9 +436,9 @@ def _ruleset() -> Ruleset:
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 
-@click.group("internal", hidden=True)
-def internal_app() -> None:
-    """Internal commands (invoked by Locki itself)."""
+internal_app = click.group(
+    cls=AliasGroup, help="Internal commands (invoked by Locki itself).", hidden=True
+)(lambda: None)
 
 
 @internal_app.command("cleanup")
