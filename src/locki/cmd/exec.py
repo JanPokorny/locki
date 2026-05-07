@@ -85,7 +85,7 @@ logger = logging.getLogger(__name__)
 )
 @click.option("-m", "--match", "match", default=None, help="Substring match on existing sandbox branch.")
 @click.option("-i", "--interactive", "interactive", is_flag=True, default=False, help="Force interactive picker.")
-@click.option("-c", "--create", is_flag=True, default=False, help="Create a new sandbox.")
+@click.option("-n", "--new", "create", is_flag=True, default=False, help="Create a new sandbox.")
 @click.option("-f", "--id-file", default=None, type=click.Path(), help="Write the generated sandbox ID to this file.")
 @click.pass_context
 def exec_cmd(ctx, match, interactive, create, id_file):
@@ -97,11 +97,11 @@ def exec_cmd(ctx, match, interactive, create, id_file):
       locki x claude                  # run Claude Code
       locki x -m feat bash            # match sandbox by substring
       locki x -i bash                 # force sandbox picker even inside a worktree
-      locki x -c bash                 # create new sandbox
+      locki x -n bash                 # create new sandbox
       locki x bash -c "echo hello"    # run a one-liner
     """
     if create and (match or interactive):
-        fail("--create conflicts with --match/--interactive.")
+        fail("--new conflicts with --match/--interactive.")
 
     click.echo(f"{SPINNER} Entering a Locki sandbox.", err=True)
 

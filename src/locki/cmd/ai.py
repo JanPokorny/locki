@@ -39,7 +39,7 @@ def _ask_harness() -> str:
 @click.command("ai", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 @click.option("-m", "--match", default=None, help="Substring match on existing sandbox branch.")
 @click.option("-i", "--interactive", is_flag=True, default=False, help="Force interactive picker.")
-@click.option("-c", "--create", is_flag=True, default=False, help="Create a new sandbox.")
+@click.option("-n", "--new", "create", is_flag=True, default=False, help="Create a new sandbox.")
 @click.option("-f", "--id-file", default=None, type=click.Path(), help="Write the generated sandbox ID to this file.")
 @click.pass_context
 def ai_cmd(ctx, match, interactive, create, id_file):
@@ -50,10 +50,10 @@ def ai_cmd(ctx, match, interactive, create, id_file):
       locki ai                        # current sandbox / picker / create
       locki ai -m feat                # resume in existing sandbox
       locki ai -i                     # force sandbox picker
-      locki ai -c                     # new sandbox, fresh conversation
+      locki ai -n                     # new sandbox, fresh conversation
     """
     if create and (match or interactive):
-        fail("--create conflicts with --match/--interactive.")
+        fail("--new conflicts with --match/--interactive.")
 
     config = load_config(cwd_git_repo())
     harness = config.ai.harness if config.ai.harness in HARNESSES else None

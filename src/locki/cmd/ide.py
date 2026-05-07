@@ -52,7 +52,7 @@ def _ask_editor() -> str:
 @click.command("ide")
 @click.option("-m", "--match", default=None, help="Substring match on existing sandbox branch.")
 @click.option("-i", "--interactive", is_flag=True, default=False, help="Force interactive picker.")
-@click.option("-c", "--create", is_flag=True, default=False, help="Create a new sandbox.")
+@click.option("-n", "--new", "create", is_flag=True, default=False, help="Create a new sandbox.")
 def ide_cmd(match, interactive, create):
     """Open an IDE in a sandbox worktree.
 
@@ -61,10 +61,10 @@ def ide_cmd(match, interactive, create):
       locki ide                       # current sandbox / picker / create, open editor
       locki ide -m feat               # open editor in matching sandbox
       locki ide -i                    # force sandbox picker
-      locki ide -c                    # create new sandbox and open editor
+      locki ide -n                    # create new sandbox and open editor
     """
     if create and (match or interactive):
-        fail("--create conflicts with --match/--interactive.")
+        fail("--new conflicts with --match/--interactive.")
 
     config = load_config(cwd_git_repo())
     editor = config.ide.editor if config.ide.editor in EDITOR_CMDS else None
