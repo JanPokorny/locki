@@ -39,9 +39,14 @@ class AiConfig(pydantic.BaseModel):
     harness: str | None = None
 
 
+class IdeConfig(pydantic.BaseModel):
+    editor: str | None = None
+
+
 class LockiConfig(pydantic.BaseModel):
     incus_image: dict[str, str] = pydantic.Field({"x86_64": "images:fedora/43", "aarch64": "images:fedora/43"})
     ai: AiConfig = AiConfig()
+    ide: IdeConfig = IdeConfig()
 
     def get_incus_image(self) -> str:
         if _arch() not in self.incus_image:

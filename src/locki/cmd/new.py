@@ -1,10 +1,4 @@
-import shutil
-import subprocess
-import sys
-
 import click
-from InquirerPy import inquirer
-from InquirerPy.base.control import Choice
 
 from locki.utils import (
     SandboxInfo,
@@ -14,12 +8,6 @@ from locki.utils import (
     run_command,
     setup_worktree_hooks,
 )
-
-EDITORS = [
-    ("code", "Open in VSCode"),
-    ("zed", "Open in Zed"),
-    ("fresh", "Open in Fresh"),
-]
 
 
 def create_sandbox_worktree(sandbox: SandboxInfo) -> None:
@@ -46,14 +34,12 @@ def create_sandbox_worktree(sandbox: SandboxInfo) -> None:
 
 
 @click.command("new | n")
-@click.option("-n", "--no-editor", is_flag=True, default=False, help="Skip editor selection.")
-def new_cmd(no_editor):
-    """Create a new sandbox worktree.
+def new_cmd():
+    """Create a new sandbox worktree. Alternatively, pass --new to other Locki commands as a shortcut.
 
     \b
     Examples:
-      locki new                       # create sandbox, offer to open editor
-      locki new -n                    # create sandbox, skip editor prompt
+      locki new                       # create sandbox worktree
     """
     cwd_repo = cwd_git_repo()
     if cwd_repo is None:
@@ -61,23 +47,3 @@ def new_cmd(no_editor):
     sandbox = new_sandbox(cwd_repo)
     create_sandbox_worktree(sandbox)
     click.echo(str(sandbox.wt_path))
-
-    if no_editor or not sys.stdin.isatty():
-        return
-
-    available = [(cmd, label) for cmd, label in EDITORS if shutil.which(cmd)]
-    if not available:
-        return
-
-    choices = [Choice(value=cmd, name=label) for cmd, label in available]
-    choices.append(Choice(value=None, name="No thanks"))
-
-    print()
-    selected = inquirer.select(
-        message="Worktree created. Open it now?",
-        default=0,
-        choices=choices,
-    ).execute()
-
-    if selected:
-        subprocess.run([selected, "."], cwd=str(sandbox.wt_path))
