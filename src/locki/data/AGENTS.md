@@ -24,6 +24,7 @@ git config [--get] [--local] <key>
 git diff [--staged | --cached] [--name-only] [--stat] [--name-status] [<ref> [<ref>]] [<file> ...]
 git fetch [--prune] [<ref>]
 git grep [-l/--files-with-matches] <pattern> [<ref>] [<file> ...]
+git hash-object <file>
 git log [--oneline] [--all] [--graph] [--reverse] [--format=<fmt>] [--pretty=<fmt>] [-n/--max-count=<n>] [--name-only] [--diff-filter=<filter>] [--since=<date>] [<ref>] [<file> ...]
 git ls-files [<path> ...]
 git merge (--continue | --abort | --skip)
