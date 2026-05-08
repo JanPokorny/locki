@@ -103,9 +103,6 @@ def exec_cmd(ctx, match, interactive, create, id_file):
       locki x -n bash                 # create new sandbox
       locki x bash -c "echo hello"    # run a one-liner
     """
-    if create and (match or interactive):
-        fail("--new conflicts with --match/--interactive.")
-
     click.echo(f"{SPINNER} Entering a Locki sandbox.", err=True)
 
     pre_resolved = ctx.obj if isinstance(ctx.obj, SandboxInfo) else None

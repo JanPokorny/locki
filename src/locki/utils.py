@@ -427,6 +427,9 @@ def resolve_sandbox(
     """
     cwd_repo = cwd_git_repo()
 
+    if sum([create == "force", match is not None, interactive]) > 1:
+        fail("--new, --match, and --interactive are mutually exclusive.")
+
     if create == "force":
         if cwd_repo is None:
             fail("Cannot create a sandbox outside a git repo.")
