@@ -72,6 +72,7 @@ Finish:
 
 ```locki-bridged-command-filter
 gh api repos/<owner>/<repo>/pulls/<number>/comments
+gh auth status
 gh issue (view [<number>] [--comments] | list [-L/--limit=<n>] [-s/--state=<state>] [-S/--search=<query>])
 gh pr (view [<number>] [--comments] [--json=<fields>] | list [-L/--limit=<n>] [-s/--state=<state>] [-S/--search=<query>] | diff [<number>] [--name-only] [--patch] [--stat] | status | checks [<number>])
 gh pr comment <number> -b/--body=<b>
