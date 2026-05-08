@@ -5,7 +5,9 @@ import json
 import logging
 import os
 import pathlib
+import platform
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -114,6 +116,9 @@ def exec_cmd(ctx, match, interactive, create, id_file):
     )
     if id_file and not sandbox.wt_path.exists():
         pathlib.Path(id_file).write_text(sandbox.wt_id)
+
+    if sys.platform == "linux" and (missing := [b for b in [f"qemu-system-{platform.machine()}", "qemu-img"] if not shutil.which(b)]):
+        fail(f"Locki requires QEMU on Linux, but {', '.join(missing)} not found in PATH. Install QEMU: https://www.qemu.org/download/#linux")
 
     LIMA.mkdir(exist_ok=True, parents=True)
     WORKTREES.mkdir(parents=True, exist_ok=True)
