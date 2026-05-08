@@ -21,12 +21,44 @@ developer_instructions = "/etc/codex/AGENTS.md"
 projects."$LOCKI_WORKTREES_HOME".trust_level = "trusted"
 __LOCKI_EOF__
 
-# MARK: High-priority shims
+# MARK: Shims
 
-mkdir -p /opt/locki/bin
+mkdir -p /opt/locki/bin/prereq /opt/locki/bin/wrapper /opt/locki/bin/fallback
 
-## command bridge through ssh proxy
-tee /opt/locki/bin/git /opt/locki/bin/gh /opt/locki/bin/locki > /dev/null << '__LOCKI_EOF__'
+# ── Prereq ───────────────────────────────────────────────────────────────
+
+cat > /opt/locki/bin/prereq/agent-browser << '__LOCKI_EOF__'
+#!/bin/bash
+set -eo pipefail
+if ! command -v chromium >/dev/null 2>&1 && ! command -v chromium-browser >/dev/null 2>&1; then
+  (
+    echo "Installing chromium..."
+    if command -v dnf >/dev/null 2>&1; then dnf install -y chromium
+    elif command -v apt-get >/dev/null 2>&1; then apt-get update -qq && apt-get install -y chromium-browser
+    fi
+  ) 2>&1 | sed 's/^/[locki auto install] /' >&2
+fi
+exec "$(PATH="${PATH#*/opt/locki/bin/prereq:}" command -v agent-browser)" "$@"
+__LOCKI_EOF__
+
+cat > /opt/locki/bin/prereq/pnpm << '__LOCKI_EOF__'
+#!/bin/bash
+set -eo pipefail
+if ! pnpm config get store-dir 2>/dev/null | grep -q /var/cache/locki/pnpm; then
+  (
+    echo "Configuring pnpm..."
+    pnpm config set store-dir /var/cache/locki/pnpm
+    pnpm config set global-bin-dir /usr/local/bin
+  ) 2>&1 | sed 's/^/[locki auto install] /' >&2
+fi
+exec "$(PATH="${PATH#*/opt/locki/bin/prereq:}" command -v pnpm)" "$@"
+__LOCKI_EOF__
+
+chmod +x /opt/locki/bin/prereq/*
+
+# ── Wrapper ──────────────────────────────────────────────────────────────
+
+tee /opt/locki/bin/wrapper/git /opt/locki/bin/wrapper/gh /opt/locki/bin/wrapper/locki > /dev/null << '__LOCKI_EOF__'
 #!/bin/sh
 cmd=$(basename "$0")
 set -- "$(pwd)" "$cmd" "$@"
@@ -37,90 +69,62 @@ done
 exec ssh -F /root/.ssh/locki-ssh-config locki-proxy -- "$q"
 __LOCKI_EOF__
 
-## pnpm -- set store dir
-cat > /opt/locki/bin/pnpm << '__LOCKI_EOF__'
+cat > /opt/locki/bin/wrapper/agent-browser << '__LOCKI_EOF__'
 #!/bin/sh
-rm -f "$(readlink -f "$0")"
-pnpm config set store-dir /var/cache/locki/pnpm
-pnpm config set global-bin-dir /usr/local/bin
-exec pnpm "$@"
-__LOCKI_EOF__
-
-cat > /opt/locki/bin/agent-browser << '__LOCKI_EOF__'
-#!/bin/sh
-export MISE_STATUS_MESSAGE_MISSING_TOOLS=never
-# run from root to avoid mise discovering mise.toml and triggering full install
-target="$(pwd)"
-cd /
-if ! command -v chromium >/dev/null 2>&1 && ! command -v chromium-browser >/dev/null 2>&1; then
-  if command -v dnf >/dev/null 2>&1; then
-    dnf install -y chromium >/dev/null
-  elif command -v apt-get >/dev/null 2>&1; then
-    apt-get update -qq && apt-get install -y chromium-browser >/dev/null
-  fi
-fi
 export AGENT_BROWSER_EXECUTABLE_PATH=$(command -v chromium 2>/dev/null || command -v chromium-browser 2>/dev/null)
-if [ -z "$AGENT_BROWSER_EXECUTABLE_PATH" ]; then
-  echo "[Locki] Failed to install Chromium. You need to install it manually." >&2
-fi
-if test "$(mise tool node --requested)" = "[none]"; then mise use -g node@24; fi  # avoid broken shim
-exec mise x nodejs@24 -- mise x npm:agent-browser -- bash -c 'cd "$1" && shift && AGENT_BROWSER_SKILLS_DIR="$(mise where npm:agent-browser)/lib/node_modules/agent-browser/skills" exec "$(mise where npm:agent-browser)/bin/agent-browser" "$@"' _ "$target" "$@"
+exec "$(PATH="${PATH#*/opt/locki/bin/wrapper:}" command -v agent-browser)" "$@"
 __LOCKI_EOF__
 
-chmod +x /opt/locki/bin/*
-
-# MARK: Low-priority shims
-
-mkdir -p /opt/locki/bin/jit
-
-## bwrap executable needs to be present so Codex shuts up about it
-cat > /opt/locki/bin/jit/bwrap << '__LOCKI_EOF__'
-#!/bin/sh
-rm -f "$(readlink -f "$0")"
-exec bwrap "$@"
-__LOCKI_EOF__
-
-## JIT shim for docker -- not installable with Mise
-command -v docker || cat > /opt/locki/bin/jit/docker << '__LOCKI_EOF__'
-#!/bin/sh
-rm -f "$(readlink -f "$0")"
-if command -v dnf >/dev/null 2>&1; then
-  dnf install -y moby-engine docker-compose docker-buildx docker-buildkit
-else
-  echo "[Locki] Error: unsupported distro by the docker auto-install-shim, please install Docker manually (e.g. using the script from https://get.docker.com/)" >&2
-  exit 1
-fi
-systemctl enable --now docker
-exec docker "$@"
-__LOCKI_EOF__
-
-## JIT shims for nodejs-based tools
 for pair in \
-  "npm:@anthropic-ai/claude-code=claude --dangerously-skip-permissions" \
-  "npm:@google/gemini-cli=gemini --yolo" \
-  "npm:@mariozechner/pi-coding-agent=pi" \
-  "npm:@openai/codex=codex --yolo" \
+  "claude=--dangerously-skip-permissions" \
+  "gemini=--yolo" \
+  "codex=--yolo" \
+  "copilot=--yolo --no-auto-update" \
 ; do
-  pkg="${pair%%=*}"
-  cmd="${pair##*=}"
-  bin="${cmd%% *}"
-  cat > "/opt/locki/bin/jit/$bin" << EOF
+  bin="${pair%%=*}"
+  args="${pair#*=}"
+  cat > "/opt/locki/bin/wrapper/$bin" << EOF
 #!/bin/sh
-export MISE_STATUS_MESSAGE_MISSING_TOOLS=never
-# run from root to avoid mise discovering mise.toml and triggering full install
-target="\$(pwd)"
-cd /
-if test "\$(mise tool node --requested)" = "[none]"; then mise use -g node@24; fi  # avoid broken shim
-exec mise x nodejs@24 -- mise x $pkg@\$version -- bash -c 'cd "\$1" && shift && exec $cmd "\$@"' _ "\$target" "\$@"
+exec "\$(PATH="\${PATH#*/opt/locki/bin/wrapper:}" command -v $bin)" $args "\$@"
 EOF
 done
 
-## JIT shims for other tools
+chmod +x /opt/locki/bin/wrapper/*
+
+# ── Fallback ─────────────────────────────────────────────────────────────
+
 for pair in \
-  "aqua:fish-shell/fish-shell=fish" \
+  "@anthropic-ai/claude-code=claude" \
+  "@google/gemini-cli=gemini" \
+  "@mariozechner/pi-coding-agent=pi" \
+  "@openai/codex=codex" \
+  "agent-browser=agent-browser" \
+; do
+  pkg="${pair%%=*}"
+  bin="${pair#*=}"
+  cat > "/opt/locki/bin/fallback/$bin" << EOF
+#!/bin/bash
+set -eo pipefail
+found=\$(PATH="\${PATH#*/opt/locki/bin/wrapper:}" command -v $bin 2>/dev/null || true)
+case "\$found" in ""|/opt/locki/bin/fallback/*) ;; *) exec "\$found" "\$@" ;; esac
+(
+  if ! command -v node >/dev/null 2>&1; then
+    echo "Installing nodejs and npm..."
+    if command -v dnf >/dev/null 2>&1; then dnf install -y nodejs npm
+    elif command -v apt-get >/dev/null 2>&1; then apt-get update -qq && apt-get install -y nodejs npm
+    fi
+  fi
+  echo "Installing $pkg..."
+  npm install -g $pkg
+) 2>&1 | sed 's/^/[locki auto install] /' >&2
+exec "\$(PATH="\${PATH#*/opt/locki/bin/wrapper:}" command -v $bin)" "\$@"
+EOF
+done
+
+for pair in \
   "fd=fd" \
   "github:anomalyco/opencode=opencode" \
-  "github:github/copilot-cli=copilot --yolo --no-auto-update" \
+  "github:github/copilot-cli=copilot" \
   "jq=jq" \
   "k9s=k9s" \
   "kubectl=kubectl" \
@@ -131,19 +135,45 @@ for pair in \
   "yq=yq" \
 ; do
   pkg="${pair%%=*}"
-  cmd="${pair##*=}"
-  bin="${cmd%% *}"
-  cat > "/opt/locki/bin/jit/$bin" << EOF
-#!/bin/sh
-export MISE_STATUS_MESSAGE_MISSING_TOOLS=never
-# run from root to avoid mise discovering mise.toml and triggering full install
-target="\$(pwd)"
-cd /  
-exec mise x $pkg -- bash -c 'cd "\$1" && shift && exec $cmd "\$@"' _ "\$target" "\$@"
+  bin="${pair#*=}"
+  cat > "/opt/locki/bin/fallback/$bin" << EOF
+#!/bin/bash
+set -eo pipefail
+found=\$(PATH="\${PATH#*/opt/locki/bin/wrapper:}" command -v $bin 2>/dev/null || true)
+case "\$found" in ""|/opt/locki/bin/fallback/*) ;; *) exec "\$found" "\$@" ;; esac
+(
+  echo "Installing $pkg..."
+  cd / && mise use -g $pkg
+) 2>&1 | sed 's/^/[locki auto install] /' >&2
+exec "\$(PATH="\${PATH#*/opt/locki/bin/wrapper:}" command -v $bin)" "\$@"
 EOF
 done
 
-chmod +x /opt/locki/bin/jit/*
+## bwrap: no-op shim so Codex doesn't complain at startup
+cat > /opt/locki/bin/fallback/bwrap << '__LOCKI_EOF__'
+#!/bin/sh
+exec bwrap "$@"
+__LOCKI_EOF__
+
+cat > /opt/locki/bin/fallback/docker << '__LOCKI_EOF__'
+#!/bin/bash
+set -eo pipefail
+found=$(command -v docker 2>/dev/null || true)
+case "$found" in ""|/opt/locki/bin/fallback/*) ;; *) exec "$found" "$@" ;; esac
+(
+  echo "Installing Docker..."
+  if command -v dnf >/dev/null 2>&1; then
+    dnf install -y moby-engine docker-compose docker-buildx docker-buildkit
+  else
+    echo "Error: unsupported distro, install Docker manually (https://get.docker.com/)"
+    exit 1
+  fi
+  systemctl enable --now docker
+) 2>&1 | sed 's/^/[locki auto install] /' >&2
+exec docker "$@"
+__LOCKI_EOF__
+
+chmod +x /opt/locki/bin/fallback/*
 
 # MARK: Caching
 
