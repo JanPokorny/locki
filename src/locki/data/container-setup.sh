@@ -23,42 +23,12 @@ __LOCKI_EOF__
 
 # MARK: Shims
 
-mkdir -p /opt/locki/bin/prereq /opt/locki/bin/wrapper /opt/locki/bin/fallback
+mkdir -p /opt/locki/bin/high /opt/locki/bin/low
 
-# ── Prereq ───────────────────────────────────────────────────────────────
+# ── High-priority shims ─────────────────────────────────────────────────
 
-cat > /opt/locki/bin/prereq/agent-browser << '__LOCKI_EOF__'
-#!/bin/bash
-set -eo pipefail
-if ! command -v chromium >/dev/null 2>&1 && ! command -v chromium-browser >/dev/null 2>&1; then
-  (
-    echo "Installing chromium..."
-    if command -v dnf >/dev/null 2>&1; then dnf install -y chromium
-    elif command -v apt-get >/dev/null 2>&1; then apt-get update -qq && apt-get install -y chromium-browser
-    fi
-  ) 2>&1 | sed 's/^/[locki auto install] /' >&2
-fi
-exec "$(PATH="${PATH#*/opt/locki/bin/prereq:}" command -v agent-browser)" "$@"
-__LOCKI_EOF__
-
-cat > /opt/locki/bin/prereq/pnpm << '__LOCKI_EOF__'
-#!/bin/bash
-set -eo pipefail
-if ! pnpm config get store-dir 2>/dev/null | grep -q /var/cache/locki/pnpm; then
-  (
-    echo "Configuring pnpm..."
-    pnpm config set store-dir /var/cache/locki/pnpm
-    pnpm config set global-bin-dir /usr/local/bin
-  ) 2>&1 | sed 's/^/[locki auto install] /' >&2
-fi
-exec "$(PATH="${PATH#*/opt/locki/bin/prereq:}" command -v pnpm)" "$@"
-__LOCKI_EOF__
-
-chmod +x /opt/locki/bin/prereq/*
-
-# ── Wrapper ──────────────────────────────────────────────────────────────
-
-tee /opt/locki/bin/wrapper/git /opt/locki/bin/wrapper/gh /opt/locki/bin/wrapper/locki > /dev/null << '__LOCKI_EOF__'
+## Command bridge (git, gh, locki → SSH proxy to host)
+tee /opt/locki/bin/high/git /opt/locki/bin/high/gh /opt/locki/bin/high/locki > /dev/null << '__LOCKI_EOF__'
 #!/bin/sh
 cmd=$(basename "$0")
 set -- "$(pwd)" "$cmd" "$@"
@@ -69,12 +39,37 @@ done
 exec ssh -F /root/.ssh/locki-ssh-config locki-proxy -- "$q"
 __LOCKI_EOF__
 
-cat > /opt/locki/bin/wrapper/agent-browser << '__LOCKI_EOF__'
-#!/bin/sh
+## agent-browser: install chromium if missing, set env, then exec real binary
+cat > /opt/locki/bin/high/agent-browser << '__LOCKI_EOF__'
+#!/bin/bash
+set -eo pipefail
+if ! command -v chromium >/dev/null 2>&1 && ! command -v chromium-browser >/dev/null 2>&1; then
+  (
+    echo "Installing chromium..."
+    if command -v dnf >/dev/null 2>&1; then dnf install -y chromium
+    elif command -v apt-get >/dev/null 2>&1; then apt-get update -qq && apt-get install -y chromium-browser
+    fi
+  ) 2>&1 | sed 's/^/[locki auto install] /' >&2
+fi
 export AGENT_BROWSER_EXECUTABLE_PATH=$(command -v chromium 2>/dev/null || command -v chromium-browser 2>/dev/null)
-exec "$(PATH="${PATH#*/opt/locki/bin/wrapper:}" command -v agent-browser)" "$@"
+exec "$(PATH="${PATH#*/opt/locki/bin/high:}" command -v agent-browser)" "$@"
 __LOCKI_EOF__
 
+## pnpm: configure cache dirs on first use, then exec real binary
+cat > /opt/locki/bin/high/pnpm << '__LOCKI_EOF__'
+#!/bin/bash
+set -eo pipefail
+if ! pnpm config get store-dir 2>/dev/null | grep -q /var/cache/locki/pnpm; then
+  (
+    echo "Configuring pnpm..."
+    pnpm config set store-dir /var/cache/locki/pnpm
+    pnpm config set global-bin-dir /usr/local/bin
+  ) 2>&1 | sed 's/^/[locki auto install] /' >&2
+fi
+exec "$(PATH="${PATH#*/opt/locki/bin/high:}" command -v pnpm)" "$@"
+__LOCKI_EOF__
+
+## AI harnesses: inject default flags
 for pair in \
   "claude=--dangerously-skip-permissions" \
   "gemini=--yolo" \
@@ -83,16 +78,17 @@ for pair in \
 ; do
   bin="${pair%%=*}"
   args="${pair#*=}"
-  cat > "/opt/locki/bin/wrapper/$bin" << EOF
+  cat > "/opt/locki/bin/high/$bin" << EOF
 #!/bin/sh
-exec "\$(PATH="\${PATH#*/opt/locki/bin/wrapper:}" command -v $bin)" $args "\$@"
+exec "\$(PATH="\${PATH#*/opt/locki/bin/high:}" command -v $bin)" $args "\$@"
 EOF
 done
 
-chmod +x /opt/locki/bin/wrapper/*
+chmod +x /opt/locki/bin/high/*
 
-# ── Fallback ─────────────────────────────────────────────────────────────
+# ── Low-priority shims (auto-install on first use) ──────────────────────
 
+## NPM packages
 for pair in \
   "@anthropic-ai/claude-code=claude" \
   "@google/gemini-cli=gemini" \
@@ -102,11 +98,11 @@ for pair in \
 ; do
   pkg="${pair%%=*}"
   bin="${pair#*=}"
-  cat > "/opt/locki/bin/fallback/$bin" << EOF
+  cat > "/opt/locki/bin/low/$bin" << EOF
 #!/bin/bash
 set -eo pipefail
-found=\$(PATH="\${PATH#*/opt/locki/bin/wrapper:}" command -v $bin 2>/dev/null || true)
-case "\$found" in ""|/opt/locki/bin/fallback/*) ;; *) exec "\$found" "\$@" ;; esac
+found=\$(PATH="\${PATH#*/opt/locki/bin/high:}" command -v $bin 2>/dev/null || true)
+case "\$found" in ""|/opt/locki/bin/low/*) ;; *) exec "\$found" "\$@" ;; esac
 (
   if ! command -v node >/dev/null 2>&1; then
     echo "Installing nodejs and npm..."
@@ -117,10 +113,11 @@ case "\$found" in ""|/opt/locki/bin/fallback/*) ;; *) exec "\$found" "\$@" ;; es
   echo "Installing $pkg..."
   npm install -g $pkg
 ) 2>&1 | sed 's/^/[locki auto install] /' >&2
-exec "\$(PATH="\${PATH#*/opt/locki/bin/wrapper:}" command -v $bin)" "\$@"
+exec "\$(PATH="\${PATH#*/opt/locki/bin/high:}" command -v $bin)" "\$@"
 EOF
 done
 
+## Mise packages
 for pair in \
   "fd=fd" \
   "github:anomalyco/opencode=opencode" \
@@ -136,30 +133,31 @@ for pair in \
 ; do
   pkg="${pair%%=*}"
   bin="${pair#*=}"
-  cat > "/opt/locki/bin/fallback/$bin" << EOF
+  cat > "/opt/locki/bin/low/$bin" << EOF
 #!/bin/bash
 set -eo pipefail
-found=\$(PATH="\${PATH#*/opt/locki/bin/wrapper:}" command -v $bin 2>/dev/null || true)
-case "\$found" in ""|/opt/locki/bin/fallback/*) ;; *) exec "\$found" "\$@" ;; esac
+found=\$(PATH="\${PATH#*/opt/locki/bin/high:}" command -v $bin 2>/dev/null || true)
+case "\$found" in ""|/opt/locki/bin/low/*) ;; *) exec "\$found" "\$@" ;; esac
 (
   echo "Installing $pkg..."
   cd / && mise use -g $pkg
 ) 2>&1 | sed 's/^/[locki auto install] /' >&2
-exec "\$(PATH="\${PATH#*/opt/locki/bin/wrapper:}" command -v $bin)" "\$@"
+exec "\$(PATH="\${PATH#*/opt/locki/bin/high:}" command -v $bin)" "\$@"
 EOF
 done
 
 ## bwrap: no-op shim so Codex doesn't complain at startup
-cat > /opt/locki/bin/fallback/bwrap << '__LOCKI_EOF__'
+cat > /opt/locki/bin/low/bwrap << '__LOCKI_EOF__'
 #!/bin/sh
 exec bwrap "$@"
 __LOCKI_EOF__
 
-cat > /opt/locki/bin/fallback/docker << '__LOCKI_EOF__'
+## Docker
+cat > /opt/locki/bin/low/docker << '__LOCKI_EOF__'
 #!/bin/bash
 set -eo pipefail
 found=$(command -v docker 2>/dev/null || true)
-case "$found" in ""|/opt/locki/bin/fallback/*) ;; *) exec "$found" "$@" ;; esac
+case "$found" in ""|/opt/locki/bin/low/*) ;; *) exec "$found" "$@" ;; esac
 (
   echo "Installing Docker..."
   if command -v dnf >/dev/null 2>&1; then
@@ -173,7 +171,7 @@ case "$found" in ""|/opt/locki/bin/fallback/*) ;; *) exec "$found" "$@" ;; esac
 exec docker "$@"
 __LOCKI_EOF__
 
-chmod +x /opt/locki/bin/fallback/*
+chmod +x /opt/locki/bin/low/*
 
 # MARK: Caching
 
