@@ -8,7 +8,7 @@ import pydantic
 import tomlkit
 
 from locki.paths import CONFIG, USER_CONFIG
-from locki.utils import fail
+from locki.utils import deep_merge, fail
 
 logger = logging.getLogger(__name__)
 
@@ -22,17 +22,6 @@ def _arch() -> str:
             return "x86_64"
         case arch:
             fail(f"Unsupported architecture: {arch}")
-
-
-def _deep_merge(base: dict, override: dict) -> dict:
-    """Recursively merge *override* into *base* (override wins for leaf keys)."""
-    result = base.copy()
-    for key, value in override.items():
-        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
-            result[key] = _deep_merge(result[key], value)
-        else:
-            result[key] = value
-    return result
 
 
 class AiConfig(pydantic.BaseModel):
@@ -75,7 +64,7 @@ def load_config(git_root: pathlib.Path | None) -> LockiConfig:
             except tomllib.TOMLDecodeError as e:
                 fail(f"Invalid repo config {repo_config_path}: {e}")
 
-    merged = _deep_merge(user_data, repo_data)
+    merged = deep_merge(user_data, repo_data)
     try:
         return LockiConfig.model_validate(merged)
     except pydantic.ValidationError as e:

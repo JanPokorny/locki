@@ -21,6 +21,7 @@ from locki.paths import DATA, LIMA, PACKAGE_DATA, PID_FILE, PORT_FILE, RUNTIME, 
 from locki.runes import EXIT, INFO, SPINNER
 from locki.utils import (
     SandboxInfo,
+    deep_merge,
     fail,
     file_lock,
     gen_id,
@@ -122,20 +123,14 @@ def exec_cmd(ctx, match, interactive, create, id_file):
 
     sandbox_home = DATA / "home"
     sandbox_home.mkdir(parents=True, exist_ok=True)
-    for path, content in [
-        (sandbox_home / ".claude.json", '{ "projects": { "/": { "hasTrustDialogAccepted": true } } }'),
-        (
-            sandbox_home / ".claude" / "settings.json",
-            '{ "skipDangerousModePermissionPrompt": true, "permissions": { "defaultMode": "bypassPermissions" } }',
-        ),
-        (
-            sandbox_home / ".config" / "opencode" / "opencode.json",
-            '{ "$schema": "https://opencode.ai/config.json", "permission": "allow", "instructions": "/etc/opencode/AGENTS.md" }',
-        ),
+    for path, updates in [
+        (sandbox_home / ".claude.json", {"projects": {"/": {"hasTrustDialogAccepted": True}}}),
+        (sandbox_home / ".claude" / "settings.json", {"skipDangerousModePermissionPrompt": True, "permissions": {"defaultMode": "bypassPermissions"}}),
+        (sandbox_home / ".config" / "opencode" / "opencode.json", {"$schema": "https://opencode.ai/config.json", "permission": "allow", "instructions": ["/etc/opencode/AGENTS.md"]}),
     ]:
-        if not path.exists():
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(content)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        existing: dict = json.loads(path.read_text()) if path.exists() else {}
+        path.write_text(json.dumps(deep_merge(existing, updates), indent=2))
 
     with file_lock("vm", "Waiting for VM to start"):
         vm_setup = (PACKAGE_DATA / "vm-setup.sh").read_text()
