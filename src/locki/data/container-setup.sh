@@ -4,9 +4,9 @@ set -eux
 # MARK: AI CLIs
 
 # AGENTS.md is injected as base64 (silenced to keep xtrace output readable).
-mkdir -p /etc/claude-code /etc/gemini-cli /etc/codex /etc/opencode /etc/copilot
+mkdir -p /etc/claude-code /etc/gemini-cli /etc/codex /etc/opencode /etc/copilot/.github/instructions/
 set +x
-echo '__AGENTS_MD_B64__' | base64 -d | tee /etc/claude-code/CLAUDE.md /etc/gemini-cli/GEMINI.md /etc/codex/AGENTS.md /etc/opencode/AGENTS.md /etc/copilot/AGENTS.md > /dev/null
+echo '__AGENTS_MD_B64__' | base64 -d | tee /etc/claude-code/CLAUDE.md /etc/gemini-cli/GEMINI.md /etc/codex/AGENTS.md /etc/opencode/AGENTS.md /etc/copilot/.github/instructions/system.instructions.md > /dev/null
 set -x
 
 cat > /etc/gemini-cli/settings.json << '__LOCKI_EOF__'
