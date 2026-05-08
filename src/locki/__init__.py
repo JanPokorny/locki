@@ -1,4 +1,5 @@
 import os
+from importlib.metadata import version
 
 import click
 
@@ -20,8 +21,10 @@ os.environ["LIMA_HOME"] = str(LIMA)  # limactl reads this; set early so every su
 
 setup_logging()
 app = click.group(
-    cls=AliasGroup, help="AI sandboxing without the taste of sand, using a managed Lima VM with Incus containers."
-)(lambda: None)
+    cls=AliasGroup,
+    help="AI sandboxing without the taste of sand, using a managed Lima VM with Incus containers.",
+    context_settings={"help_option_names": ["-h", "--help"]},
+)(click.version_option(version("locki"), prog_name="locki")(lambda: None))
 app.add_command(ai_cmd, "ai")
 app.add_command(exec_cmd, "exec | x")
 app.add_command(ide_cmd, "ide")
