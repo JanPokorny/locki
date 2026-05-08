@@ -41,7 +41,7 @@ git stash (pop | drop) <owned-stash-ref>
 git stash apply <stash-ref>
 git stash list
 git stash push -m/--message=<text>#locki-<wt-id>
-git status [-s/--short] [-u/--untracked-files=<mode>] [<file> ...]
+git status [-s/--short] [-u/--untracked-files=<mode>] [--porcelain] [<file> ...]
 git switch ([--create | --force-create] <name>#locki-<wt-id> [<start-point>] | --detach <ref>)
 ```
 
