@@ -104,12 +104,12 @@ Perform always when starting a conversation.
 
 1. Check project metadata (`mise.toml`, `.tool-versions`, `.nvmrc`, `pyproject.toml`, etc.), CI definitions (`.github/workflows/*.yaml`, etc.) or docs (`README.md`, `CONTRIBUTING.md`, `*.md`, `docs/*`, etc.) to determine needed tools and their versions, and setup commands. If there is `mise.toml`, run `mise install` to set up all tools. Otherwise manually enable specific tool versions using e.g.: `mise use -g python@3.12.1`, `mise use -g node@22`, `mise use -g jq`, falling back to OS package manager if `mise` does not have the tool (`dnf` by default, unless running on a custom image).
 
-2. Check current branch name using `git branch --show-current`. If it is `untitled#locki-<wt-id>`, reset it to main using `git reset --hard main`, then rename using `git branch <new-name>#locki-<wt-id> --move`. Pick `<new-name>` based on the task at hand.
+2. Check current branch name using `git branch --show-current`. If it is `untitled#locki-<wt-id>`, determine the trunk branch (`git symbolic-ref refs/remotes/origin/HEAD` gives e.g. `refs/remotes/origin/main`), reset to it using `git reset --hard origin/<trunk>`, then rename using `git branch <new-name>#locki-<wt-id> --move`. Pick `<new-name>` based on the task at hand.
 
 # Cleanup checklist
 
 Perform when user asks you to cleanup the sandbox. This may come at the end, or even beginning of conversation, if the user forgot to cleanup before starting a new conversation.
 
-1. Check current branch name using `git branch --show-current`. If it is NOT `untitled#locki-<wt-id>`, run `git switch --force-create untitled#locki-<wt-id> origin/main`.
+1. Check current branch name using `git branch --show-current`. If it is NOT `untitled#locki-<wt-id>`, determine the trunk branch (`git symbolic-ref refs/remotes/origin/HEAD`), then run `git switch --force-create untitled#locki-<wt-id> origin/<trunk>`.
 
 2. If the user assigned you more work after the cleanup, continue by following the startup checklist.
