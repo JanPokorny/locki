@@ -83,12 +83,12 @@ locki config setup --defaults
 echo
 echo "Testing cold start + parallel VM creation..."
 
-cold_start=$(timed locki x --create --id-file "$ID_DIR/auth" echo 1) || true
+cold_start=$(timed locki x --new --id-file "$ID_DIR/auth" echo 1) || true
 AUTH=$(cat "$ID_DIR/auth")
 echo "  cold start: ${cold_start}s"
 
 # branch b in parallel with a (VM already exists, but tests lock waiting)
-assert_output "locki x b runs" "2" locki x --create --id-file "$ID_DIR/login" echo 2
+assert_output "locki x b runs" "2" locki x --new --id-file "$ID_DIR/login" echo 2
 LOGIN=$(cat "$ID_DIR/login")
 
 # ── cache persistence across invocations ─────────────────────────────────────
@@ -202,7 +202,7 @@ rm -f "$HOOKS_DIR/commit-msg"
 echo
 echo "Testing warm start..."
 
-warm_start=$(timed locki x --create --id-file "$ID_DIR/release" echo 3) || true
+warm_start=$(timed locki x --new --id-file "$ID_DIR/release" echo 3) || true
 RELEASE=$(cat "$ID_DIR/release")
 echo "  warm start: ${warm_start}s"
 
@@ -233,7 +233,7 @@ aarch64 = "images:ubuntu/24.04"
 x86_64 = "images:ubuntu/24.04"
 TOML
 
-assert_output "custom image container runs ubuntu" "Ubuntu" locki x --create cat /etc/os-release
+assert_output "custom image container runs ubuntu" "Ubuntu" locki x --new cat /etc/os-release
 rm -f "$REPO/locki.toml"
 
 # ── port forwarding ─────────────────────────────────────────────────────────
@@ -289,12 +289,12 @@ NEW_PATH=$(locki new -n 2>/dev/null)
 assert_ok    "locki new creates worktree dir" test -d "$NEW_PATH"
 assert_output "worktree dir uses <repo>#locki-<id> format" "/r#locki-" echo "$NEW_PATH"
 
-# ── sandbox creation with --create ─────────────────────────────────────────
+# ── sandbox creation with --new ─────────────────────────────────────────
 
 echo
-echo "Testing sandbox creation with --create..."
+echo "Testing sandbox creation with --new..."
 
-assert_output "--create creates sandbox" "create-ok" locki x --create echo create-ok
+assert_output "--new creates sandbox" "create-ok" locki x --new echo create-ok
 assert_fail "unknown substring rejects" locki x -m nonexistent-branch echo nope
 
 # ── locki list outside git repo ─────────────────────────────────────────────
