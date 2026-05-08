@@ -106,7 +106,13 @@ def exec_cmd(ctx, match, interactive, create, id_file):
 
     click.echo(f"{SPINNER} Entering a Locki sandbox.", err=True)
 
-    pre_resolved = ctx.obj if isinstance(ctx.obj, SandboxInfo) else None
+    pre_resolved: SandboxInfo | None = None
+    paste_filter = False
+    if isinstance(ctx.obj, SandboxInfo):
+        pre_resolved = ctx.obj
+    elif isinstance(ctx.obj, dict):
+        pre_resolved = ctx.obj.get("sandbox")
+        paste_filter = bool(ctx.obj.get("paste_filter"))
     sandbox = pre_resolved or resolve_sandbox(
         match=match,
         interactive=interactive,
@@ -292,34 +298,39 @@ def exec_cmd(ctx, match, interactive, create, id_file):
 
     os.environ["LIMA_SHELLENV_ALLOW"] = ",".join(forwarded_env)
 
-    result = subprocess.run(
-        [
-            limactl(),
-            "shell",
-            "--yes",
-            "--preserve-env",
-            "--start",
-            "--workdir=/",
-            "locki",
-            "--",
-            "bash",
-            "-c",
-            " ".join(
-                [
-                    "sudo",
-                    "incus",
-                    "exec",
-                    shlex.quote(sandbox.wt_id),
-                    "--cwd",
-                    shlex.quote(str(sandbox.wt_path)),
-                    *(f"--env={k}={v}" for k, v in CONTAINER_ENV.items()),
-                    *(f"--env={env}=${env}" for env in forwarded_env),
-                    "--",
-                    *((shlex.quote(a) for a in ctx.args) if ctx.args else ["bash"]),
-                ]
-            ),
-        ],
-    )
+    argv = [
+        limactl(),
+        "shell",
+        "--yes",
+        "--preserve-env",
+        "--start",
+        "--workdir=/",
+        "locki",
+        "--",
+        "bash",
+        "-c",
+        " ".join(
+            [
+                "sudo",
+                "incus",
+                "exec",
+                shlex.quote(sandbox.wt_id),
+                "--cwd",
+                shlex.quote(str(sandbox.wt_path)),
+                *(f"--env={k}={v}" for k, v in CONTAINER_ENV.items()),
+                *(f"--env={env}=${env}" for env in forwarded_env),
+                "--",
+                *((shlex.quote(a) for a in ctx.args) if ctx.args else ["bash"]),
+            ]
+        ),
+    ]
+
+    if paste_filter and sys.stdin.isatty():
+        from locki.paste import make_stdin_filter, spawn_with_filter
+
+        returncode = spawn_with_filter(argv, make_stdin_filter(sandbox.wt_path))
+    else:
+        returncode = subprocess.run(argv).returncode
 
     click.echo()
     click.echo(f"{EXIT} Exited Locki sandbox.", err=True)
@@ -334,4 +345,4 @@ def exec_cmd(ctx, match, interactive, create, id_file):
         err=True,
     )
     click.echo(f"{INFO}     on disk: {click.style(pretty_path(sandbox.wt_path), fg='green')}", err=True)
-    raise SystemExit(result.returncode)
+    raise SystemExit(returncode)
