@@ -27,47 +27,63 @@
 
 <div align=center>
   
-  ![](https://badgen.net/badge/_/macOS%20%E2%9C%94/green?icon=apple&label)
-  ![](https://badgen.net/badge/_/Linux%20%E2%9C%94/green?icon=linux&label)
-  ![](https://badgen.net/badge/_/uv%20tool%20install%20locki/DE5FE9?icon=uv&label)
+![](https://badgen.net/badge/_/macOS%20%E2%9C%94/green?icon=apple&label)
+![](https://badgen.net/badge/_/Linux%20%E2%9C%94/green?icon=linux&label)
+![](https://badgen.net/badge/_/uv%20tool%20install%20locki/DE5FE9?icon=uv&label)
   
 </div>
 
 &nbsp;
 
-<b>Locki</b> is a CLI that safely runs AI agents with all permissions bypassed in isolated worktrees.
+**Locki** is an AI sandbox for real-world projects. Not another vibe-coded `docker` wrapper, but an actual engineered solution built for the development needs of [Agent Stack](https://github.com/i-am-bee/agentstack). Other sandoxes break down on anything more complex than "a single Next.js app". Locki can handle as many containers, systemd services and even Kuberentes clusters as you like (and your RAM allows).
+
+&nbsp;
 
 <table align=center>
 <tr>
-<th>❌ without Locki</th>
-<th>✅ with Locki</th>
-</tr>
+<td colspan=3 align=center>
+
+Run agents in parallel with no collisions in ports, image tags, or infrastructure:
+
+</td>
+<tr>
 <tr>
 <td>
 
 ```sh
-git worktree add -b fix-42 ../fix-42
-cd ../fix-42
-claude "fix issue #42"
-# ...wait a few seconds
-# ...approve a command
-# ...wait a few seconds
-# ...approve another command
-# ...different agent rebuilt the image
-#    and caused a name clash‽
-# ...something is hogging the port‽
-# ...approve another command
-# ...
+locki x claude "fix #42"
+# Read issue using `gh`...
+# Determined the cause...
+# Fixed in code...
+# Built image app:local...
+# Started k3s cluster...
+# Verified the fix...
 ```
 
 </td>
 <td>
 
 ```sh
-locki x claude "fix issue #42"
-# ...go make a cup of tea
-# ...drink tea 🍵
-# ...look, the PR is ready
+locki x codex "improve perf"
+# Built image app:local...
+# Started k3s cluster...
+# Measured performance...
+# Improved critical paths...
+# Re-build and re-deployed...
+# Measured again...
+```
+
+</td>
+<td>
+
+```sh
+locki x pi "add CZ translation"
+# Built image app:local...
+# Started k3s cluster...
+# Explored UI in context...
+# Translated strings...
+# Re-build and re-deployed...
+# Verified accuracy...
 ```
 
 </td>
@@ -76,11 +92,10 @@ locki x claude "fix issue #42"
 
 &nbsp;
 
-## Selling Points
-
-- **First-class DX**: `locki ai`, work in your CLI of choice. Zero config. No sign Locki is even there.
+- **First-class DX**: Work with your AI of choice. Zero config. No sign Locki is even there.
 - **No compromises**: Run anything including `systemd`, containers, even Kubernetes clusters.
-- **Safe Git**: Sandboxes are only able to modify namespaced branches. Stash is scoped. Hooks are redirected.
+- **Worktree-backed**: All data remains on your disk in a git worktree. No need to dig in VMs.
+- **Safe Git**: Agents are only able to modify namespaced branches. Stash is scoped. Hooks are redirected.
 - **Visibility and control**: Worktrees live on your computer, see and modify them right there.
 - **Agent-friendly**: Bundled hand-picked tools and sandbox-specific instructions for best behavior.
 
@@ -91,7 +106,7 @@ Case study: [Kagenti ADK](https://github.com/kagenti/adk) uses Locki to run a fu
 ## Tutorial
 
 1. Install: `uv tool install locki`. ([Install uv](https://docs.astral.sh/uv/getting-started/installation/) first if you don't have it.)
-1. If you're on Linux, also install [OpenSSH](https://repology.org/project/openssh/versions) (usually preinstalled) and [QEMU](https://www.qemu.org/download/#linux).
+1. If on Linux, install [QEMU](https://www.qemu.org/download/#linux). (Not needed on macOS.)
 1. `cd` to your Git repository and run: `locki ai`
 
     <small>
@@ -131,6 +146,8 @@ To my knowledge Locki is the only one packing a fully vertically integrated Incu
 
 - Launch an IDE in the worktree folder using `locki ide`. Supported: VSCode, Zed, Fresh -- PR if you want to add your favorite.\
   *(The IDE runs on host: you still need to run `locki ai` / `locki x -- <cmd>` in the built-in terminal to run commands in the sandbox. This is intentional: running your IDE inside the sandbox (using "remote SSH" or similar features) is unsafe, since the agent could potentially access authentication tokens stored in the IDE's memory.)*
+
+- When `cd`'d into a worktree folder (`~/.local/share/locki/worktrees/.../`), `locki` commands use it by default -- otherwise they show an interactive picker. Use `--match ...` to select by sandbox id or branch name.
 
 - Editors like VSCode show worktrees in the sidebar, useful as a quick UI for reviewing and modifying changes.\
   *(⚠️ VSCode 1.115.0+ requires setting `"git.detectWorktrees": true` for this to work.)*
