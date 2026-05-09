@@ -1,4 +1,5 @@
 import pathlib
+import sys
 
 import click
 
@@ -67,7 +68,14 @@ def vm_stop_cmd():
 
 
 @vm_app.command("delete | remove | rm", help="Delete the Locki VM entirely.")
-def vm_delete_cmd():
+@click.option("-y", "--yes", is_flag=True, help="Skip confirmation prompt.")
+def vm_delete_cmd(yes):
+    if not yes:
+        click.echo("Warning: Deleting the VM will stop all current sandboxes. Worktree and home data won't be lost. Sandboxes may need to reinstall dependencies after reopening.")
+        if not sys.stdin.isatty():
+            click.echo("Pass --yes to accept this warning.")
+            raise SystemExit(1)
+        click.confirm("Continue?", abort=True)
     run_command(
         [limactl(), "delete", "-f", "locki"],
         "Deleting VM",
