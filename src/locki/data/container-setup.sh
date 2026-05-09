@@ -55,7 +55,7 @@ exec agent-browser "$@"
 EOF
 
 ## node/npm/npx/yarn: install libatomic if missing
-for bin in node npm npx yarn; do
+for bin in node npm npx; do
   cat > "/opt/locki/bin/high/$bin" << EOF
 #!/bin/bash
 set -eo pipefail
@@ -72,19 +72,11 @@ exec $bin "\$@"
 EOF
 done
 
-## pnpm: libatomic + configure cache dirs on first use
+## pnpm: configure cache dirs on first use
 cat > /opt/locki/bin/high/pnpm << 'EOF'
 #!/bin/bash
 set -eo pipefail
 export PATH="${PATH#*/opt/locki/bin/high:}"
-if ! ldconfig -p 2>/dev/null | grep -q libatomic; then
-  (
-    echo "Installing libatomic..."
-    if command -v dnf >/dev/null 2>&1; then dnf install -yq libatomic
-    elif command -v apt-get >/dev/null 2>&1; then apt-get update -qq && apt-get install -yqq libatomic1
-    fi
-  ) 2>&1 | sed 's/^/[locki auto install] /' >&2
-fi
 if ! pnpm config get store-dir 2>/dev/null | grep -q /var/cache/locki/pnpm; then
   (
     echo "Configuring pnpm..."
@@ -144,6 +136,8 @@ for pair in \
   "@mariozechner/pi-coding-agent=pi" \
   "@openai/codex=codex" \
   "agent-browser=agent-browser" \
+  "pnpm=pnpm" \
+  "yarn=yarn" \
 ; do
   pkg="${pair%%=*}"
   bin="${pair#*=}"
@@ -169,10 +163,8 @@ for pair in \
   "jq=jq" \
   "k9s=k9s" \
   "kubectl=kubectl" \
-  "pnpm=pnpm" \
   "rg=rg" \
   "uv=uv" \
-  "yarn=yarn" \
   "yq=yq" \
 ; do
   pkg="${pair%%=*}"
