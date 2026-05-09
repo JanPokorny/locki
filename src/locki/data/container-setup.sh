@@ -136,8 +136,7 @@ for pair in \
   "@mariozechner/pi-coding-agent=pi" \
   "@openai/codex=codex" \
   "agent-browser=agent-browser" \
-  "pnpm=pnpm" \
-  "yarn=yarn" \
+  "corepack=corepack" \
 ; do
   pkg="${pair%%=*}"
   bin="${pair#*=}"
@@ -148,6 +147,22 @@ if ! PATH=\$(printf '%s' "\$PATH" | tr ':' '\\n' | grep -v '^/opt/locki/bin/' | 
   (
     echo "Installing $pkg..."
     npm install -g $pkg
+  ) 2>&1 | sed 's/^/[locki auto install] /' >&2
+fi
+export PATH=\$(printf '%s' "\$PATH" | tr ':' '\\n' | grep -v '^/opt/locki/bin/low\$' | paste -sd:)
+exec $bin "\$@"
+EOF
+done
+
+## Corepack packages (yarn, pnpm)
+for bin in yarn pnpm; do
+  cat > "/opt/locki/bin/low/$bin" << EOF
+#!/bin/bash
+set -eo pipefail
+if ! PATH=\$(printf '%s' "\$PATH" | tr ':' '\\n' | grep -v '^/opt/locki/bin/' | paste -sd:) command -v $bin >/dev/null 2>&1; then
+  (
+    echo "Enabling corepack for $bin..."
+    corepack enable $bin
   ) 2>&1 | sed 's/^/[locki auto install] /' >&2
 fi
 export PATH=\$(printf '%s' "\$PATH" | tr ':' '\\n' | grep -v '^/opt/locki/bin/low\$' | paste -sd:)
