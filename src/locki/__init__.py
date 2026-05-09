@@ -29,7 +29,7 @@ setup_logging()
     help="AI sandboxing without the taste of sand, using a managed Lima VM with Incus containers.",
     context_settings={"help_option_names": ["-h", "--help"]},
 )
-@click.version_option(version("locki"), prog_name="locki")
+@click.version_option(version("locki"), "-v", "--version", prog_name="locki")
 @click.pass_context
 def app(ctx):
     if not USER_CONFIG.exists() and ctx.invoked_subcommand not in ("config", "internal", None):
