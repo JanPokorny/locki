@@ -139,6 +139,8 @@ def exec_cmd(ctx, match, interactive, create, id_file):
             {
                 "minimumLimaVersion": "2.0.0",
                 "base": ["template:fedora"],
+                "memory": f"{os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") // (1024 ** 3)}GiB",
+                "cpus": os.cpu_count(),
                 "containerd": {"system": False, "user": False},
                 "mounts": [
                     {"location": str(WORKTREES), "writable": True},
