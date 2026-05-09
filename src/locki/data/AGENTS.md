@@ -13,6 +13,7 @@ Some commands execute on the host using a command bridge. This lets you execute 
 ## Git
 
 ```locki-bridged-command-filter
+git -v/--version
 git add (--all | <file> ...)
 git blame <file>
 git branch (<name>#locki-<wt-id> [<start-point> | --move | --delete [--force]] | --show-current)
@@ -72,6 +73,7 @@ Finish:
 ## GitHub CLI
 
 ```locki-bridged-command-filter
+gh -v/--version
 gh api repos/<owner>/<repo>/pulls/<number>/comments
 gh auth status
 gh issue (view [<number>] [--comments] | list [-L/--limit=<n>] [-s/--state=<state>] [-S/--search=<query>])

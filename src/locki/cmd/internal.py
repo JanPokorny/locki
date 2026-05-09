@@ -293,8 +293,8 @@ _PARSER = Lark(_GRAMMAR, start="alt", parser="lalr", transformer=_ASTBuilder())
 # ── Ruleset ──────────────────────────────────────────────────────────────────
 
 
-def _extract_prefix(rule: Rule) -> tuple[str, str]:
-    """Get the first two literal words from a top-level SequenceRule."""
+def _extract_prefix(rule: Rule) -> tuple[str, ...]:
+    """Get the leading literal words (1 or 2) from a top-level SequenceRule."""
     if not isinstance(rule, SequenceRule):
         raise ValueError("Top-level rule must be a sequence")
     words: list[str] = []
@@ -302,10 +302,12 @@ def _extract_prefix(rule: Rule) -> tuple[str, str]:
         if isinstance(item, ArgRule) and len(item.value) == 1 and isinstance(item.value[0], str):
             words.append(item.value[0])
             if len(words) == 2:
-                return (words[0], words[1])
+                return tuple(words)
         else:
             break
-    raise ValueError(f"Rule must start with two literal words, got {words}")
+    if words:
+        return tuple(words)
+    raise ValueError(f"Rule must start with at least one literal word, got {words}")
 
 
 def _collect_value_flag_keys(rules: list[Rule]) -> frozenset[str]:
@@ -370,13 +372,13 @@ class _RuleGroup:
 
 
 class Ruleset:
-    def __init__(self, groups: dict[tuple[str, str], _RuleGroup]) -> None:
+    def __init__(self, groups: dict[tuple[str, ...], _RuleGroup]) -> None:
         self._groups = groups
 
     @classmethod
     def from_markdown(cls, md: str) -> Ruleset:
         """Parse every non-blank line inside ```locki-bridged-command-filter fences."""
-        raw: dict[tuple[str, str], tuple[list[Rule], list[str]]] = {}
+        raw: dict[tuple[str, ...], tuple[list[Rule], list[str]]] = {}
         in_block = False
         for line_raw in md.splitlines():
             line = line_raw.strip()
@@ -401,15 +403,24 @@ class Ruleset:
 
     def check(self, argv: list[str], wt_id: str) -> str | None:
         """Return None if allowed, or an error message."""
-        if len(argv) < 2 or argv[1].startswith("-"):
+        if not argv:
             return f"Command not allowed: {shlex.join(argv)!r}"
 
-        prefix = (argv[0], argv[1])
-        group = self._groups.get(prefix)
+        prefix: tuple[str, ...] | None = None
+        group: _RuleGroup | None = None
+
+        if len(argv) >= 2 and not argv[1].startswith("-"):
+            prefix = (argv[0], argv[1])
+            group = self._groups.get(prefix)
+
         if group is None:
+            prefix = (argv[0],)
+            group = self._groups.get(prefix)
+
+        if group is None or prefix is None:
             return f"Command not allowed: {shlex.join(argv)!r}"
 
-        positionals, flags = _split_argv(argv[2:], group.value_flag_keys)
+        positionals, flags = _split_argv(argv[len(prefix):], group.value_flag_keys)
         effective = {k: v for k, v in flags.items() if k != "--help"}
         all_positionals = [*prefix, *positionals]
         mc = MatchContext(all_positionals, effective, Context(wt_id))
@@ -424,7 +435,7 @@ class Ruleset:
             return None
 
         lines = "\n".join(f"  {line}" for line in group.lines)
-        return f'Allowed forms of "{prefix[0]} {prefix[1]}" are:\n{lines}'
+        return f'Allowed forms of "{" ".join(prefix)}" are:\n{lines}'
 
 
 @cache
