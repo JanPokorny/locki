@@ -4,13 +4,13 @@ set -eux
 if ! command -v incus >/dev/null 2>&1; then
   echo "root:1000000:1000000000" >> /etc/subuid
   echo "root:1000000:1000000000" >> /etc/subgid
-  dnf install -y --setopt install_weak_deps=False incus incus-client
+  dnf install -y --setopt install_weak_deps=False incus incus-client btrfs-progs
   systemctl enable --now incus
   mkdir -p /var/cache/locki
   incus admin init --preseed << '__LOCKI_EOF__'
 storage_pools:
   - name: default
-    driver: dir
+    driver: btrfs
 networks:
   - name: incusbr0
     type: bridge
