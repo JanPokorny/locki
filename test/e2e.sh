@@ -247,13 +247,19 @@ locki x -m "$LOGIN" dnf install -y nmap-ncat
 # Start a persistent listener inside the container
 locki x -m "$LOGIN" bash -c "nohup bash -c 'while true; do echo pf-ok | ncat -l 9111; done' &>/dev/null &"
 
-# Forward host 9111 -> container 9111
-assert_ok    "port-forward adds device" locki port-forward -m "$LOGIN" 9111
+# Use a random host port to avoid conflicts with the user's main locki VM
+add_output=$(locki port-forward -m "$LOGIN" :9111 2>&1 >/dev/null || true)
+pf_host_port=$(printf '%s\n' "$add_output" | sed -nE 's/.*host port ([0-9]+) -> sandbox port 9111.*/\1/p' | head -1)
+if [[ -n "$pf_host_port" && "$pf_host_port" -ge 1024 ]]; then
+    pass "port-forward assigns host port >= 1024"
+else
+    fail "port-forward assigns host port >= 1024 (got '$pf_host_port')"
+fi
 
 # Wait for Lima to detect and forward the new listening port
 pf_ok=false
 for i in $(seq 1 10); do
-    if result=$(nc -4 -w2 127.0.0.1 9111 2>/dev/null) && [[ "$result" == *"pf-ok"* ]]; then
+    if result=$(nc -4 -w2 127.0.0.1 "$pf_host_port" 2>/dev/null) && [[ "$result" == *"pf-ok"* ]]; then
         pf_ok=true; break
     fi
     sleep 1
@@ -263,11 +269,9 @@ if $pf_ok; then pass "port-forward is reachable"; else fail "port-forward is rea
 # Clear all forwards
 assert_ok    "port-forward --clear removes device" locki port-forward -m "$LOGIN" --clear
 sleep 3
-assert_fail  "cleared forward is unreachable" bash -c "nc -4 -w2 127.0.0.1 9111"
+assert_fail  "cleared forward is unreachable" bash -c "nc -4 -w2 127.0.0.1 $pf_host_port"
 
-# Random host port with :sandbox_port syntax.  `port-forward` reports the
-# assigned host port only via the stderr spinner ("Forwarding host port <N>
-# -> sandbox port 9222"); we parse that instead of relying on stdout.
+# Random host port with :sandbox_port syntax (different sandbox port)
 add_output=$(locki port-forward -m "$LOGIN" :9222 2>&1 >/dev/null || true)
 random_host_port=$(printf '%s\n' "$add_output" | sed -nE 's/.*host port ([0-9]+) -> sandbox port 9222.*/\1/p' | head -1)
 if [[ -n "$random_host_port" && "$random_host_port" -ge 1024 ]]; then
