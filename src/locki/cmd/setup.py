@@ -39,8 +39,8 @@ def setup_cmd(defaults: bool):
     """Interactive setup wizard (AI harness, editor, config copy)."""
     if defaults or not sys.stdin.isatty():
         if not USER_CONFIG.exists():
-            save_user_config("ai", "harness", "claude")
-            save_user_config("ide", "editor", "code")
+            save_user_config("ai", "claude")
+            save_user_config("ide", "code")
         return
 
     click.echo(click.style("\nWelcome to Locki! Let's set up.\n", fg="yellow"), err=True)
@@ -52,7 +52,7 @@ def setup_cmd(defaults: bool):
         message="Default AI harness for 'locki ai':",
         choices=[Choice(value=h, name=h) for h in HARNESSES],
     ).execute()
-    save_user_config("ai", "harness", harness)
+    save_user_config("ai", harness)
 
     available_editors = [(cmd, label) for cmd, label in EDITORS if shutil.which(cmd)]
     if available_editors:
@@ -60,7 +60,7 @@ def setup_cmd(defaults: bool):
             message="Default editor for 'locki ide':",
             choices=[Choice(value=cmd, name=label) for cmd, label in available_editors],
         ).execute()
-        save_user_config("ide", "editor", editor)
+        save_user_config("ide", editor)
     else:
         click.echo(f"{INFO} No supported editors found in PATH, skipping.", err=True)
 
@@ -72,7 +72,9 @@ def setup_cmd(defaults: bool):
         if inquirer.confirm(message="Copy these into the sandbox home?", default=True).execute():
             copy_cmd.callback()  # pyrefly: ignore[not-callable]
         else:
-            click.echo(f"{INFO} Skipped. You can copy later with {click.style('locki config copy', fg='green')}.", err=True)
+            click.echo(
+                f"{INFO} Skipped. You can copy later with {click.style('locki config copy', fg='green')}.", err=True
+            )
 
     click.echo(f"\n{SUCCESS} Config saved to {USER_CONFIG}", err=True)
     click.echo(f"{SUCCESS} Re-run setup anytime with {click.style('locki config setup', fg='green')}.", err=True)

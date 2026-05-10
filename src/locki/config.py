@@ -24,18 +24,10 @@ def _arch() -> str:
             fail(f"Unsupported architecture: {arch}")
 
 
-class AiConfig(pydantic.BaseModel):
-    harness: str | None = None
-
-
-class IdeConfig(pydantic.BaseModel):
-    editor: str | None = None
-
-
 class LockiConfig(pydantic.BaseModel):
     incus_image: dict[str, str] = pydantic.Field({"x86_64": "images:fedora/43", "aarch64": "images:fedora/43"})
-    ai: AiConfig = AiConfig()
-    ide: IdeConfig = IdeConfig()
+    ai: str | None = None
+    ide: str | None = None
 
     def get_incus_image(self) -> str:
         if _arch() not in self.incus_image:
@@ -71,11 +63,9 @@ def load_config(git_root: pathlib.Path | None) -> LockiConfig:
         fail(f"Invalid config: {e}")
 
 
-def save_user_config(section: str, key: str, value: object) -> None:
-    """Write a single key under [section] in the user config file."""
+def save_user_config(key: str, value: object) -> None:
+    """Write a top-level key in the user config file."""
     CONFIG.mkdir(parents=True, exist_ok=True)
     data = tomlkit.loads(USER_CONFIG.read_text()) if USER_CONFIG.exists() else tomlkit.document()
-    if section not in data:
-        data.add(section, tomlkit.table())
-    data[section][key] = value  # pyrefly: ignore[unsupported-operation] -- tomlkit Item supports subscript at runtime
+    data[key] = value  # pyrefly: ignore[unsupported-operation] -- tomlkit Item supports subscript at runtime
     USER_CONFIG.write_text(tomlkit.dumps(data))

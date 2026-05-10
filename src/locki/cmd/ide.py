@@ -23,7 +23,7 @@ def _ask_editor() -> str:
         fail(
             f"No default editor configured. "
             f"Run {click.style('locki ide', fg='green')} interactively first to pick one, "
-            f"or configure e.g. {click.style('ide.editor = "code"', fg='yellow')} in {click.style(str(USER_CONFIG), fg='cyan')}."
+            f"or configure e.g. {click.style('ide = "code"', fg='yellow')} in {click.style(str(USER_CONFIG), fg='cyan')}."
         )
 
     available = [(cmd, label) for cmd, label in EDITORS if shutil.which(cmd)]
@@ -41,7 +41,7 @@ def _ask_editor() -> str:
             choices=[Choice(value=cmd, name=label) for cmd, label in available],
         ).execute()
 
-    save_user_config("ide", "editor", selected)
+    save_user_config("ide", selected)
     click.echo(
         f"{SUCCESS} Saved default editor {click.style(selected, fg='green')} to {USER_CONFIG}",
         err=True,
@@ -67,7 +67,7 @@ def ide_cmd(match, interactive, create):
         fail("--new conflicts with --match/--interactive.")
 
     config = load_config(cwd_git_repo())
-    editor = config.ide.editor if config.ide.editor in EDITOR_CMDS else None
+    editor = config.ide if config.ide in EDITOR_CMDS else None
     if editor is None:
         editor = _ask_editor()
 

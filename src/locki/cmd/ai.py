@@ -17,7 +17,7 @@ def _ask_harness() -> str:
         fail(
             f"No default AI harness configured. "
             f"Run {click.style('locki ai', fg='green')} interactively first to pick one, "
-            f"or configure e.g. {click.style('ai.harness = "claude"', fg='yellow')} in {click.style(str(USER_CONFIG), fg='cyan')}."
+            f"or configure e.g. {click.style('ai = "claude"', fg='yellow')} in {click.style(str(USER_CONFIG), fg='cyan')}."
         )
 
     from InquirerPy import inquirer
@@ -28,7 +28,7 @@ def _ask_harness() -> str:
         choices=[Choice(value=h, name=h) for h in HARNESSES],
     ).execute()
 
-    save_user_config("ai", "harness", selected)
+    save_user_config("ai", selected)
     click.echo(
         f"{SUCCESS} Saved default harness {click.style(selected, fg='green')} to {USER_CONFIG}",
         err=True,
@@ -56,7 +56,7 @@ def ai_cmd(ctx, match, interactive, create, id_file):
         fail("--new conflicts with --match/--interactive.")
 
     config = load_config(cwd_git_repo())
-    harness = config.ai.harness if config.ai.harness in HARNESSES else None
+    harness = config.ai if config.ai in HARNESSES else None
     if harness is None:
         harness = _ask_harness()
 

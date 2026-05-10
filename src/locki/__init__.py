@@ -34,7 +34,9 @@ setup_logging()
 def app(ctx):
     if not USER_CONFIG.exists() and ctx.invoked_subcommand not in ("config", "internal", None):
         from locki.cmd.setup import setup_cmd
+
         ctx.invoke(setup_cmd, defaults=not sys.stdin.isatty())
+
 
 app.add_command(ai_cmd, "ai")
 app.add_command(exec_cmd, "exec | x")

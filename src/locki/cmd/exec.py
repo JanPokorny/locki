@@ -116,8 +116,12 @@ def exec_cmd(ctx, match, interactive, create, id_file):
     if id_file and not sandbox.wt_path.exists():
         pathlib.Path(id_file).write_text(sandbox.wt_id)
 
-    if sys.platform == "linux" and (missing := [b for b in [f"qemu-system-{platform.machine()}", "qemu-img"] if not shutil.which(b)]):
-        fail(f"Locki requires QEMU on Linux, but {', '.join(missing)} not found in PATH. Install QEMU: https://www.qemu.org/download/#linux")
+    if sys.platform == "linux" and (
+        missing := [b for b in [f"qemu-system-{platform.machine()}", "qemu-img"] if not shutil.which(b)]
+    ):
+        fail(
+            f"Locki requires QEMU on Linux, but {', '.join(missing)} not found in PATH. Install QEMU: https://www.qemu.org/download/#linux"
+        )
 
     LIMA.mkdir(exist_ok=True, parents=True)
     WORKTREES.mkdir(parents=True, exist_ok=True)
@@ -126,8 +130,18 @@ def exec_cmd(ctx, match, interactive, create, id_file):
     sandbox_home.mkdir(parents=True, exist_ok=True)
     for path, updates in [
         (sandbox_home / ".claude.json", {"projects": {"/": {"hasTrustDialogAccepted": True}}}),
-        (sandbox_home / ".claude" / "settings.json", {"skipDangerousModePermissionPrompt": True, "permissions": {"defaultMode": "bypassPermissions"}}),
-        (sandbox_home / ".config" / "opencode" / "opencode.json", {"$schema": "https://opencode.ai/config.json", "permission": "allow", "instructions": ["/etc/opencode/AGENTS.md"]}),
+        (
+            sandbox_home / ".claude" / "settings.json",
+            {"skipDangerousModePermissionPrompt": True, "permissions": {"defaultMode": "bypassPermissions"}},
+        ),
+        (
+            sandbox_home / ".config" / "opencode" / "opencode.json",
+            {
+                "$schema": "https://opencode.ai/config.json",
+                "permission": "allow",
+                "instructions": ["/etc/opencode/AGENTS.md"],
+            },
+        ),
     ]:
         path.parent.mkdir(parents=True, exist_ok=True)
         existing: dict = json.loads(path.read_text()) if path.exists() else {}
@@ -139,7 +153,7 @@ def exec_cmd(ctx, match, interactive, create, id_file):
             {
                 "minimumLimaVersion": "2.0.0",
                 "base": ["template:fedora"],
-                "memory": f"{os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") // (1024 ** 3)}GiB",
+                "memory": f"{os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES') // (1024**3)}GiB",
                 "cpus": os.cpu_count(),
                 "containerd": {"system": False, "user": False},
                 "mounts": [

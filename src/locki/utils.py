@@ -474,7 +474,9 @@ def resolve_sandbox(
             case []:
                 fail(f"No sandbox matching {click.style(repr(match), fg='yellow')}.")
             case _:
-                fail(f"Ambiguous match for {click.style(repr(match), fg='yellow')}: {', '.join(s.branch for s in matches)}")
+                fail(
+                    f"Ambiguous match for {click.style(repr(match), fg='yellow')}: {', '.join(s.branch for s in matches)}"
+                )
 
     if cwd_sandbox is not None and not interactive and not filter_out_current_repo:
         return cwd_sandbox

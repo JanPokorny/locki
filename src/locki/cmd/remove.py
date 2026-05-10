@@ -57,7 +57,9 @@ def _remove_sandbox(sandbox: SandboxInfo, *, delete_branch: bool) -> None:
 @click.option("-i", "--interactive", is_flag=True, default=False, help="Force interactive picker.")
 @click.option("--force", "-f", is_flag=True, default=False, help="Skip safety checks.")
 @click.option("--delete-branch", is_flag=True, default=False, help="Also delete the git branch.")
-@click.option("--merged", is_flag=True, default=False, help="Remove all clean sandboxes whose branch is merged into trunk.")
+@click.option(
+    "--merged", is_flag=True, default=False, help="Remove all clean sandboxes whose branch is merged into trunk."
+)
 def remove_cmd(match, interactive, force, delete_branch, merged):
     """Remove a sandbox."""
     if merged:
@@ -75,27 +77,47 @@ def remove_cmd(match, interactive, force, delete_branch, merged):
         repo = all_sandboxes[0].repo
         ref = subprocess.run(
             ["git", "-C", str(repo), "symbolic-ref", "refs/remotes/origin/HEAD"],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
         )
-        trunk = ref.stdout.strip().removeprefix("refs/remotes/origin/") if ref.returncode == 0 else next(
-            (name for name in ("main", "master") if subprocess.run(
-                ["git", "-C", str(repo), "rev-parse", "--verify", name], capture_output=True,
-            ).returncode == 0),
-            None,
+        trunk = (
+            ref.stdout.strip().removeprefix("refs/remotes/origin/")
+            if ref.returncode == 0
+            else next(
+                (
+                    name
+                    for name in ("main", "master")
+                    if subprocess.run(
+                        ["git", "-C", str(repo), "rev-parse", "--verify", name],
+                        capture_output=True,
+                    ).returncode
+                    == 0
+                ),
+                None,
+            )
         )
         if not trunk:
             fail("Could not determine the trunk branch.")
 
         targets = [
-            s for s in all_sandboxes
-            if s.branch in subprocess.run(
+            s
+            for s in all_sandboxes
+            if s.branch
+            in subprocess.run(
                 ["git", "-C", str(s.repo), "branch", "--merged", trunk, "--list", s.branch],
-                capture_output=True, text=True,
+                capture_output=True,
+                text=True,
             ).stdout
-            and (force or not s.wt_path.exists() or not run_command(
-                ["git", "-C", str(s.wt_path), "status", "--porcelain"],
-                "Checking for uncommitted changes", check=False, quiet=True,
-            ).stdout.strip())
+            and (
+                force
+                or not s.wt_path.exists()
+                or not run_command(
+                    ["git", "-C", str(s.wt_path), "status", "--porcelain"],
+                    "Checking for uncommitted changes",
+                    check=False,
+                    quiet=True,
+                ).stdout.strip()
+            )
         ]
 
         if not targets:
@@ -121,7 +143,8 @@ def remove_cmd(match, interactive, force, delete_branch, merged):
         and not force
         and run_command(
             ["git", "-C", str(sandbox.wt_path), "status", "--porcelain"],
-            "Checking for uncommitted changes", check=False,
+            "Checking for uncommitted changes",
+            check=False,
         ).stdout.strip()
     ):
         fail(

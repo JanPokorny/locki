@@ -392,14 +392,16 @@ class Ruleset:
                 entry = raw.setdefault(prefix, ([], []))
                 entry[0].append(rule)
                 entry[1].append(line)
-        return cls({
-            prefix: _RuleGroup(
-                rules=rules,
-                lines=lines,
-                value_flag_keys=_collect_value_flag_keys(rules),
-            )
-            for prefix, (rules, lines) in raw.items()
-        })
+        return cls(
+            {
+                prefix: _RuleGroup(
+                    rules=rules,
+                    lines=lines,
+                    value_flag_keys=_collect_value_flag_keys(rules),
+                )
+                for prefix, (rules, lines) in raw.items()
+            }
+        )
 
     def check(self, argv: list[str], wt_id: str) -> str | None:
         """Return None if allowed, or an error message."""
@@ -420,18 +422,14 @@ class Ruleset:
         if group is None or prefix is None:
             return f"Command not allowed: {shlex.join(argv)!r}"
 
-        positionals, flags = _split_argv(argv[len(prefix):], group.value_flag_keys)
+        positionals, flags = _split_argv(argv[len(prefix) :], group.value_flag_keys)
         effective = {k: v for k, v in flags.items() if k != "--help"}
         all_positionals = [*prefix, *positionals]
         mc = MatchContext(all_positionals, effective, Context(wt_id))
         expected = set(effective)
         target = len(all_positionals)
 
-        if any(
-            p == target and used == expected
-            for rule in group.rules
-            for p, used in rule.match(0, frozenset(), mc)
-        ):
+        if any(p == target and used == expected for rule in group.rules for p, used in rule.match(0, frozenset(), mc)):
             return None
 
         lines = "\n".join(f"  {line}" for line in group.lines)
@@ -446,9 +444,9 @@ def _ruleset() -> Ruleset:
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 
-internal_app = click.group(
-    cls=AliasGroup, help="Internal commands (invoked by Locki itself).", hidden=True
-)(lambda: None)
+internal_app = click.group(cls=AliasGroup, help="Internal commands (invoked by Locki itself).", hidden=True)(
+    lambda: None
+)
 
 
 @internal_app.command("cleanup")
