@@ -58,7 +58,7 @@ cat > /opt/locki/bin/high/agent-browser << 'EOF'
 set -eo pipefail
 export PATH="${PATH#*/opt/locki/bin/high:}"
 if ! command -v chromium >/dev/null 2>&1 && ! command -v chromium-browser >/dev/null 2>&1; then
-  locki-auto-install chromium sh -c 'if command -v dnf >/dev/null 2>&1; then dnf install -yq chromium; elif command -v apt-get >/dev/null 2>&1; then apt-get update -qq && apt-get install -yqq chromium-browser; fi'
+  /opt/locki/bin/high/locki-auto-install chromium sh -c 'if command -v dnf >/dev/null 2>&1; then dnf install -yq chromium; elif command -v apt-get >/dev/null 2>&1; then apt-get update -qq && apt-get install -yqq chromium-browser; fi'
 fi
 export AGENT_BROWSER_EXECUTABLE_PATH=$(command -v chromium 2>/dev/null || command -v chromium-browser 2>/dev/null)
 exec agent-browser "$@"
@@ -70,9 +70,9 @@ for bin in node npm npx; do
 #!/bin/bash
 set -eo pipefail
 if ! PATH="\$(printf '%s' "\$PATH" | tr ':' '\\n' | grep -v '^/opt/locki/bin/' | paste -sd:)" command -v node >/dev/null 2>&1; then
-  locki-auto-install nodejs sh -c 'if command -v dnf >/dev/null 2>&1; then dnf install -yq nodejs npm libatomic; elif command -v apt-get >/dev/null 2>&1; then apt-get update -qq && apt-get install -yqq nodejs npm libatomic1; fi'
+  /opt/locki/bin/high/locki-auto-install nodejs sh -c 'if command -v dnf >/dev/null 2>&1; then dnf install -yq nodejs npm libatomic; elif command -v apt-get >/dev/null 2>&1; then apt-get update -qq && apt-get install -yqq nodejs npm libatomic1; fi'
 elif ! ldconfig -p 2>/dev/null | grep -q libatomic; then
-  locki-auto-install libatomic sh -c 'if command -v dnf >/dev/null 2>&1; then dnf install -yq libatomic; elif command -v apt-get >/dev/null 2>&1; then apt-get update -qq && apt-get install -yqq libatomic1; fi'
+  /opt/locki/bin/high/locki-auto-install libatomic sh -c 'if command -v dnf >/dev/null 2>&1; then dnf install -yq libatomic; elif command -v apt-get >/dev/null 2>&1; then apt-get update -qq && apt-get install -yqq libatomic1; fi'
 fi
 PATH="\${PATH#*/opt/locki/bin/high:}" exec $bin "\$@"
 EOF
@@ -84,7 +84,7 @@ cat > /opt/locki/bin/high/pnpm << 'EOF'
 set -eo pipefail
 export PATH="${PATH#*/opt/locki/bin/high:}"
 if ! pnpm config get store-dir 2>/dev/null | grep -q /var/cache/locki/pnpm; then
-  locki-auto-install pnpm sh -c 'pnpm config set store-dir /var/cache/locki/pnpm && pnpm config set global-bin-dir /usr/local/bin'
+  /opt/locki/bin/high/locki-auto-install pnpm sh -c 'pnpm config set store-dir /var/cache/locki/pnpm && pnpm config set global-bin-dir /usr/local/bin'
 fi
 exec pnpm "$@"
 EOF
@@ -110,7 +110,7 @@ for pair in \
 #!/bin/bash
 set -eo pipefail
 if ! PATH=\$(printf '%s' "\$PATH" | tr ':' '\\n' | grep -v '^/opt/locki/bin/' | paste -sd:) command -v $bin >/dev/null 2>&1; then
-  locki-auto-install $pkg npm install -g $pkg
+  /opt/locki/bin/high/locki-auto-install $pkg npm install -g $pkg
 fi
 export PATH=\$(printf '%s' "\$PATH" | tr ':' '\\n' | grep -v '^/opt/locki/bin/low\$' | paste -sd:)
 exec $bin "\$@"
@@ -123,7 +123,7 @@ for bin in yarn pnpm; do
 #!/bin/bash
 set -eo pipefail
 if ! PATH=\$(printf '%s' "\$PATH" | tr ':' '\\n' | grep -v '^/opt/locki/bin/' | paste -sd:) command -v $bin >/dev/null 2>&1; then
-  locki-auto-install $bin corepack enable $bin
+  /opt/locki/bin/high/locki-auto-install $bin corepack enable $bin
 fi
 export PATH=\$(printf '%s' "\$PATH" | tr ':' '\\n' | grep -v '^/opt/locki/bin/low\$' | paste -sd:)
 exec $bin "\$@"
@@ -148,7 +148,7 @@ for pair in \
 #!/bin/bash
 set -eo pipefail
 if ! PATH=\$(printf '%s' "\$PATH" | tr ':' '\\n' | grep -v '^/opt/locki/bin/' | paste -sd:) command -v $bin >/dev/null 2>&1; then
-  locki-auto-install $pkg env MISE_AUTO_INSTALL=false MISE_NO_HOOKS=true mise use -g $pkg
+  /opt/locki/bin/high/locki-auto-install $pkg env MISE_AUTO_INSTALL=false MISE_NO_HOOKS=true mise use -g $pkg
 fi
 export PATH=\$(printf '%s' "\$PATH" | tr ':' '\\n' | grep -v '^/opt/locki/bin/low\$' | paste -sd:)
 exec $bin "\$@"
@@ -166,7 +166,7 @@ cat > /opt/locki/bin/low/docker << 'EOF'
 #!/bin/bash
 set -eo pipefail
 if ! PATH=$(printf '%s' "$PATH" | tr ':' '\n' | grep -v '^/opt/locki/bin/' | paste -sd:) command -v docker >/dev/null 2>&1; then
-  locki-auto-install docker sh -c 'if command -v dnf >/dev/null 2>&1; then dnf install -yq moby-engine docker-compose docker-buildx docker-buildkit; else echo "Error: unsupported distro, install Docker manually (https://get.docker.com/)"; exit 1; fi && systemctl enable --now docker'
+  /opt/locki/bin/high/locki-auto-install docker sh -c 'if command -v dnf >/dev/null 2>&1; then dnf install -yq moby-engine docker-compose docker-buildx docker-buildkit; else echo "Error: unsupported distro, install Docker manually (https://get.docker.com/)"; exit 1; fi && systemctl enable --now docker'
 fi
 export PATH=$(printf '%s' "$PATH" | tr ':' '\n' | grep -v '^/opt/locki/bin/low$' | paste -sd:)
 exec docker "$@"
