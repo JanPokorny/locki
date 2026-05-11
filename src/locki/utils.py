@@ -483,7 +483,7 @@ def resolve_sandbox(
 
     allow_create = create == "allow" and cwd_repo is not None and not filter_out_current_repo
     if not sys.stdin.isatty():
-        hint = " or --create" if allow_create else ""
+        hint = " or --new" if allow_create else ""
         fail(f"No sandbox specified. Use -m <query>{hint} in non-interactive mode.")
 
     by_id = {s.wt_id: s for s in all_sandboxes}
