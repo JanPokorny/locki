@@ -215,9 +215,9 @@ mkdir -p /etc/apt/apt.conf.d /var/cache/locki/apt/cache /var/cache/locki/apt/sta
 printf 'Dir::Cache "/var/cache/locki/apt/cache";\nDir::State "/var/cache/locki/apt/state";\n' > /etc/apt/apt.conf.d/99local-cache
 
 mkdir -p /etc/dnf /var/cache/locki/dnf
-printf "cachedir=/var/cache/locki/dnf\nkeepcache=1" >> /etc/dnf/dnf.conf
+printf "system_cachedir=/var/cache/locki/dnf\nkeepcache=1" >> /etc/dnf/dnf.conf
 
-ln -sfn /var/cache/locki $HOME/.cache
+ln -sfn /var/cache/locki/user $HOME/.cache
 
 # MARK: Networking
 
