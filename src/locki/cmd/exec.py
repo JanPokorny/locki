@@ -257,11 +257,11 @@ def exec_cmd(ctx, match, interactive, create, id_file):
             "Starting container",
         )
 
-        agents_md = (PACKAGE_DATA / "AGENTS.md").read_bytes()
         setup_script = (
             (PACKAGE_DATA / "container-setup.sh")
             .read_bytes()
-            .replace(b"__AGENTS_MD_B64__", base64.b64encode(agents_md))
+            .replace(b"__AGENTS_MD_B64__", base64.b64encode((PACKAGE_DATA / "AGENTS.md").read_bytes()))
+            .replace(b"__LIBATOMIC_B64__", base64.b64encode((PACKAGE_DATA / "libatomic.so.1").read_bytes()) if (PACKAGE_DATA / "libatomic.so.1").is_file() else b"")
         )
         env_flags = [flag for k, v in CONTAINER_ENV.items() for flag in ("--env", f"{k}={v}")]
         run_in_vm(

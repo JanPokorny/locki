@@ -73,7 +73,7 @@ run = "./test/e2e.sh"
 
 # build
 
-[tasks."build:download-binaries"]
+[tasks."build:download-limactl"]
 description = "Download Lima binaries for all platforms"
 run = '''
 #!/usr/bin/env bash
@@ -88,10 +88,54 @@ echo '*' >./vendor/.gitignore
 wait
 '''
 
+[tasks."build:download-libatomic"]
+description = "Download libatomic shared libraries for Linux (x86_64 + aarch64)"
+run = '''
+#!/usr/bin/env bash
+set -euxo pipefail
+version="15.2.1"
+release="7.fc43"
+base="https://kojipkgs.fedoraproject.org/packages/gcc/${version}/${release}"
+
+extract_rpm() {
+  local rpm="$1" dest="$2"
+  mkdir -p "$dest"
+  uv run --with zstandard python3 -c "
+import sys, subprocess, lzma
+data = open(sys.argv[1], 'rb').read()
+off = data.find(b'\x28\xb5\x2f\xfd')
+if off >= 0:
+    import zstandard
+    payload = zstandard.ZstdDecompressor().decompress(data[off:], max_output_size=10*1024*1024)
+elif (off := data.find(b'\xfd7zXZ\x00')) >= 0:
+    payload = lzma.decompress(data[off:])
+else:
+    raise RuntimeError('Unknown RPM compression')
+subprocess.run(['cpio', '-idm'], input=payload, cwd=sys.argv[2], check=True)
+" "$rpm" "$dest"
+}
+
+tmpdir=$(mktemp -d)
+trap 'rm -rf "$tmpdir"' EXIT
+
+mkdir -p ./vendor
+echo '*' >./vendor/.gitignore
+
+for arch in x86_64 aarch64; do
+  out="./vendor/libatomic/${arch}/libatomic.so.1"
+  test -f "$out" && continue
+  rpm_name="libatomic-${version}-${release}.${arch}.rpm"
+  curl -fsSL -o "$tmpdir/$rpm_name" "${base}/${arch}/${rpm_name}"
+  extract_rpm "$tmpdir/$rpm_name" "$tmpdir/$arch"
+  mkdir -p "./vendor/libatomic/${arch}"
+  cp "$tmpdir/$arch/usr/lib64/libatomic.so.1.2.0" "$out"
+done
+'''
+
 [tasks.build]
 description = "Build sdist, universal wheel, and platform-specific wheels with bundled limactl"
 depends = ["setup", "build:*"]
-sources = ["src/**/*", "pyproject.toml", "vendor/lima/**/*"]
+sources = ["src/**/*", "pyproject.toml", "vendor/lima/**/*", "vendor/libatomic/**/*"]
 outputs = ["dist/**/*"]
 run = '''
 #!/usr/bin/env bash
@@ -135,6 +179,7 @@ build_wheel() {
   mkdir -p "$tmpdir/locki/data/bin" "$tmpdir/locki/data/share/lima"
   cp "./vendor/lima-$lima_version/$wheel_tag/bin/limactl" "$tmpdir/locki/data/bin/"
   cp -R "./vendor/lima-$lima_version/$wheel_tag/share/lima/." "$tmpdir/locki/data/share/lima/"
+  cp "./vendor/libatomic/${hostagent_arch}/libatomic.so.1" "$tmpdir/locki/data/"
   perl -pi -e "s/Root-Is-Purelib: true/Root-Is-Purelib: false/" "$tmpdir/locki-$version.dist-info/WHEEL"
   perl -pi -e "s/Tag: .*/Tag: py3-none-$wheel_tag/" "$tmpdir/locki-$version.dist-info/WHEEL"
   uv run -m wheel pack "$tmpdir" --dest-dir ./dist >/dev/null

@@ -21,6 +21,21 @@ developer_instructions = "/etc/codex/AGENTS.md"
 projects."$LOCKI_WORKTREES_HOME".trust_level = "trusted"
 EOF
 
+# MARK: libatomic
+## Node 25+ needs it, distros don't ship it, Locki vendors it
+
+if ! ldconfig -p 2>/dev/null | grep -q libatomic; then
+  set +x
+  libatomic_b64='__LIBATOMIC_B64__'
+  set -x
+  if [ -n "$libatomic_b64" ]; then
+    mkdir -p /usr/local/lib
+    echo "$libatomic_b64" | base64 -d > /usr/local/lib/libatomic.so.1
+    echo /usr/local/lib > /etc/ld.so.conf.d/locki.conf
+    ldconfig
+  fi
+fi
+
 # MARK: High-priority shims
 
 mkdir -p /opt/locki/bin/high
@@ -64,15 +79,13 @@ export AGENT_BROWSER_EXECUTABLE_PATH=$(command -v chromium 2>/dev/null || comman
 exec agent-browser "$@"
 EOF
 
-## node/npm/npx: install Node.js+libatomic if missing, or just libatomic if node exists but libatomic doesn't
+## node/npm/npx: install Node.js if missing via mise
 for bin in node npm npx; do
   cat > "/opt/locki/bin/high/$bin" << EOF
 #!/bin/bash
 set -eo pipefail
 if ! PATH="\$(printf '%s' "\$PATH" | tr ':' '\\n' | grep -v '^/opt/locki/bin/' | paste -sd:)" command -v node >/dev/null 2>&1; then
-  /opt/locki/bin/high/locki-auto-install nodejs sh -c 'if command -v dnf >/dev/null 2>&1; then dnf install -yq nodejs npm libatomic; elif command -v apt-get >/dev/null 2>&1; then apt-get update -qq && apt-get install -yqq nodejs npm libatomic1; fi'
-elif ! ldconfig -p 2>/dev/null | grep -q libatomic; then
-  /opt/locki/bin/high/locki-auto-install libatomic sh -c 'if command -v dnf >/dev/null 2>&1; then dnf install -yq libatomic; elif command -v apt-get >/dev/null 2>&1; then apt-get update -qq && apt-get install -yqq libatomic1; fi'
+  /opt/locki/bin/high/locki-auto-install nodejs env MISE_AUTO_INSTALL=false MISE_NO_HOOKS=true mise use -g node
 fi
 PATH="\${PATH#*/opt/locki/bin/high:}" exec $bin "\$@"
 EOF
