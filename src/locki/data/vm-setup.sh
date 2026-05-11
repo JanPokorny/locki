@@ -11,6 +11,8 @@ if ! command -v incus >/dev/null 2>&1; then
 storage_pools:
   - name: default
     driver: btrfs
+    config:
+      btrfs.mount_options: compress=zstd:1,noatime
 networks:
   - name: incusbr0
     type: bridge

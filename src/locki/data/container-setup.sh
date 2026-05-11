@@ -180,7 +180,8 @@ mkdir -p /etc/apt/apt.conf.d /var/cache/locki/apt/cache /var/cache/locki/apt/sta
 printf 'Dir::Cache "/var/cache/locki/apt/cache";\nDir::State "/var/cache/locki/apt/state";\n' > /etc/apt/apt.conf.d/99local-cache
 
 mkdir -p /etc/dnf /var/cache/locki/dnf
-printf "system_cachedir=/var/cache/locki/dnf\nkeepcache=1" >> /etc/dnf/dnf.conf
+printf "system_cachedir=/var/cache/locki/dnf\nkeepcache=1\ntsflags=nodocs\ninstall_weak_deps=False\nfastestmirror=True\n" >> /etc/dnf/dnf.conf
+printf '%%_install_langs en_US:en\n' >> /etc/rpm/macros.locki
 
 ln -sfn /var/cache/locki $HOME/.cache
 
