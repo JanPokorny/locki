@@ -18,7 +18,7 @@ def list_cmd(show_all: bool) -> None:
 
     if not sandboxes:
         if show_all:
-            click.echo(t"{INFO} No Locki sandboxes found.", err=True)
+            click.echo(f"{INFO} No Locki sandboxes found.", err=True)
         else:
             click.echo(f"{INFO} No Locki sandboxes found in this repo. Add {click.style("--all", fg="green")} to look in all repos.", err=True)
         return
