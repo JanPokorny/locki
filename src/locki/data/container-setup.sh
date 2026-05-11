@@ -102,8 +102,8 @@ export MISE_ENABLE_TOOLS=""
 if ! PATH=\$(printf '%s' "\$PATH" | tr ':' '\\n' | grep -v '^/opt/locki/bin/' | paste -sd:) node -v >/dev/null 2>&1; then
   (
     echo "Installing Node.js..."
-    if command -v dnf >/dev/null 2>&1; then dnf install -yq nodejs npm
-    elif command -v apt-get >/dev/null 2>&1; then apt-get update -qq && apt-get install -yqq nodejs npm
+    if command -v dnf >/dev/null 2>&1; then dnf install -yq nodejs npm libatomic
+    elif command -v apt-get >/dev/null 2>&1; then apt-get update -qq && apt-get install -yqq nodejs npm libatomic1
     fi
   ) 2>&1 | sed 's/^/[locki auto install] /' >&2
 fi
