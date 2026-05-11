@@ -182,7 +182,7 @@ printf 'Dir::Cache "/var/cache/locki/apt/cache";\nDir::State "/var/cache/locki/a
 mkdir -p /etc/dnf /var/cache/locki/dnf
 printf "system_cachedir=/var/cache/locki/dnf\nkeepcache=1" >> /etc/dnf/dnf.conf
 
-ln -sfn /var/cache/locki/user $HOME/.cache
+ln -sfn /var/cache/locki $HOME/.cache
 
 # MARK: Networking
 
