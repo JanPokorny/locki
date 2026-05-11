@@ -112,8 +112,7 @@ set -eo pipefail
 if ! PATH=\$(printf '%s' "\$PATH" | tr ':' '\\n' | grep -v '^/opt/locki/bin/' | paste -sd:) command -v $bin >/dev/null 2>&1; then
   /opt/locki/bin/high/locki-auto-install $pkg npm install -g $pkg
 fi
-export PATH=\$(printf '%s' "\$PATH" | tr ':' '\\n' | grep -v '^/opt/locki/bin/low\$' | paste -sd:)
-exec $bin "\$@"
+exec "\$(PATH=\$(printf '%s' "\$PATH" | tr ':' '\\n' | grep -v '^/opt/locki/bin/low\$' | paste -sd:) command -v $bin)" "\$@"
 EOF
 done
 
@@ -125,8 +124,7 @@ set -eo pipefail
 if ! PATH=\$(printf '%s' "\$PATH" | tr ':' '\\n' | grep -v '^/opt/locki/bin/' | paste -sd:) command -v $bin >/dev/null 2>&1; then
   /opt/locki/bin/high/locki-auto-install $bin corepack enable $bin
 fi
-export PATH=\$(printf '%s' "\$PATH" | tr ':' '\\n' | grep -v '^/opt/locki/bin/low\$' | paste -sd:)
-exec $bin "\$@"
+exec "\$(PATH=\$(printf '%s' "\$PATH" | tr ':' '\\n' | grep -v '^/opt/locki/bin/low\$' | paste -sd:) command -v $bin)" "\$@"
 EOF
 done
 
@@ -150,8 +148,7 @@ set -eo pipefail
 if ! PATH=\$(printf '%s' "\$PATH" | tr ':' '\\n' | grep -v '^/opt/locki/bin/' | paste -sd:) command -v $bin >/dev/null 2>&1; then
   /opt/locki/bin/high/locki-auto-install $pkg env MISE_AUTO_INSTALL=false MISE_NO_HOOKS=true mise use -g $pkg
 fi
-export PATH=\$(printf '%s' "\$PATH" | tr ':' '\\n' | grep -v '^/opt/locki/bin/low\$' | paste -sd:)
-exec $bin "\$@"
+exec "\$(PATH=\$(printf '%s' "\$PATH" | tr ':' '\\n' | grep -v '^/opt/locki/bin/low\$' | paste -sd:) command -v $bin)" "\$@"
 EOF
 done
 
@@ -168,8 +165,7 @@ set -eo pipefail
 if ! PATH=$(printf '%s' "$PATH" | tr ':' '\n' | grep -v '^/opt/locki/bin/' | paste -sd:) command -v docker >/dev/null 2>&1; then
   /opt/locki/bin/high/locki-auto-install docker sh -c 'if command -v dnf >/dev/null 2>&1; then dnf install -yq moby-engine docker-compose docker-buildx docker-buildkit; else echo "Error: unsupported distro, install Docker manually (https://get.docker.com/)"; exit 1; fi && systemctl enable --now docker'
 fi
-export PATH=$(printf '%s' "$PATH" | tr ':' '\n' | grep -v '^/opt/locki/bin/low$' | paste -sd:)
-exec docker "$@"
+exec "$(PATH=$(printf '%s' "$PATH" | tr ':' '\n' | grep -v '^/opt/locki/bin/low$' | paste -sd:) command -v docker)" "$@"
 EOF
 
 chmod +x /opt/locki/bin/low/*
