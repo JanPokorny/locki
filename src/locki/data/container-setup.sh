@@ -54,13 +54,19 @@ export AGENT_BROWSER_EXECUTABLE_PATH=$(command -v chromium 2>/dev/null || comman
 exec agent-browser "$@"
 EOF
 
-## node/npm/npx/yarn: install libatomic if missing
+## node/npm/npx: install Node.js+libatomic if missing, or just libatomic if node exists but libatomic doesn't
 for bin in node npm npx; do
   cat > "/opt/locki/bin/high/$bin" << EOF
 #!/bin/bash
 set -eo pipefail
-export PATH="\${PATH#*/opt/locki/bin/high:}"
-if ! ldconfig -p 2>/dev/null | grep -q libatomic; then
+if ! PATH="\$(printf '%s' "\$PATH" | tr ':' '\\n' | grep -v '^/opt/locki/bin/' | paste -sd:)" command -v node >/dev/null 2>&1; then
+  (
+    echo "Installing Node.js..."
+    if command -v dnf >/dev/null 2>&1; then dnf install -yq nodejs npm libatomic
+    elif command -v apt-get >/dev/null 2>&1; then apt-get update -qq && apt-get install -yqq nodejs npm libatomic1
+    fi
+  ) 2>&1 | sed 's/^/[locki auto install] /' >&2
+elif ! ldconfig -p 2>/dev/null | grep -q libatomic; then
   (
     echo "Installing libatomic..."
     if command -v dnf >/dev/null 2>&1; then dnf install -yq libatomic
@@ -68,7 +74,7 @@ if ! ldconfig -p 2>/dev/null | grep -q libatomic; then
     fi
   ) 2>&1 | sed 's/^/[locki auto install] /' >&2
 fi
-exec $bin "\$@"
+PATH="\${PATH#*/opt/locki/bin/high:}" exec $bin "\$@"
 EOF
 done
 
@@ -92,25 +98,6 @@ chmod +x /opt/locki/bin/high/*
 # MARK: Low-priority shims
 
 mkdir -p /opt/locki/bin/low
-
-## Node.js and npm
-for bin in node npm npx; do
-  cat > "/opt/locki/bin/low/$bin" << EOF
-#!/bin/bash
-set -eo pipefail
-export MISE_ENABLE_TOOLS=""
-if ! PATH=\$(printf '%s' "\$PATH" | tr ':' '\\n' | grep -v '^/opt/locki/bin/' | paste -sd:) node -v >/dev/null 2>&1; then
-  (
-    echo "Installing Node.js..."
-    if command -v dnf >/dev/null 2>&1; then dnf install -yq nodejs npm libatomic
-    elif command -v apt-get >/dev/null 2>&1; then apt-get update -qq && apt-get install -yqq nodejs npm libatomic1
-    fi
-  ) 2>&1 | sed 's/^/[locki auto install] /' >&2
-fi
-export PATH=\$(printf '%s' "\$PATH" | tr ':' '\\n' | grep -v '^/opt/locki/bin/low\$' | paste -sd:)
-exec $bin "\$@"
-EOF
-done
 
 ## NPM packages
 for pair in \
