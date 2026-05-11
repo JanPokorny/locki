@@ -17,7 +17,7 @@ import click
 
 from locki.cmd.new import create_sandbox_worktree
 from locki.config import load_config
-from locki.paths import DATA, LIMA, PACKAGE_DATA, PID_FILE, PORT_FILE, RUNTIME, WORKTREES
+from locki.paths import LIMA, PACKAGE_DATA, PID_FILE, PORT_FILE, RUNTIME, SANDBOX_HOME, WORKTREES
 from locki.runes import EXIT, INFO, SPINNER
 from locki.utils import (
     SandboxInfo,
@@ -126,16 +126,15 @@ def exec_cmd(ctx, match, interactive, create, id_file):
     LIMA.mkdir(exist_ok=True, parents=True)
     WORKTREES.mkdir(parents=True, exist_ok=True)
 
-    sandbox_home = DATA / "home"
-    sandbox_home.mkdir(parents=True, exist_ok=True)
+    SANDBOX_HOME.mkdir(parents=True, exist_ok=True)
     for path, updates in [
-        (sandbox_home / ".claude.json", {"projects": {"/": {"hasTrustDialogAccepted": True}}}),
+        (SANDBOX_HOME / ".claude.json", {"projects": {"/": {"hasTrustDialogAccepted": True}}}),
         (
-            sandbox_home / ".claude" / "settings.json",
+            SANDBOX_HOME / ".claude" / "settings.json",
             {"skipDangerousModePermissionPrompt": True, "permissions": {"defaultMode": "bypassPermissions"}},
         ),
         (
-            sandbox_home / ".config" / "opencode" / "opencode.json",
+            SANDBOX_HOME / ".config" / "opencode" / "opencode.json",
             {
                 "$schema": "https://opencode.ai/config.json",
                 "permission": "allow",
@@ -158,7 +157,7 @@ def exec_cmd(ctx, match, interactive, create, id_file):
                 "containerd": {"system": False, "user": False},
                 "mounts": [
                     {"location": str(WORKTREES), "writable": True},
-                    {"location": str(sandbox_home), "mountPoint": "/root/.locki/home", "writable": True},
+                    {"location": str(SANDBOX_HOME), "mountPoint": "/root/.locki/home", "writable": True},
                 ],
                 "provision": [{"mode": "system", "script": vm_setup}],
             }
@@ -272,7 +271,7 @@ def exec_cmd(ctx, match, interactive, create, id_file):
 
     # Idempotently start the Locki host daemon (SSH forced-command proxy + periodic cleanup).
     RUNTIME.mkdir(parents=True, exist_ok=True)
-    client_ssh_dir = DATA / "home" / ".ssh"
+    client_ssh_dir = SANDBOX_HOME / ".ssh"
     client_ssh_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
     ssh_port = 0
     with file_lock("daemon", "Waiting for daemon start"):

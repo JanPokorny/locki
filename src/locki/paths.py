@@ -18,6 +18,7 @@ else:
     )
 
 LIMA = STATE / "lima"
+SANDBOX_HOME = DATA / "home"
 WORKTREES = DATA / "worktrees"
 WORKTREES_META = DATA / "worktrees-meta"
 LOG = STATE / "logs"

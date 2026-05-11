@@ -28,7 +28,17 @@ import asyncssh
 import click
 from lark import Lark, Token, Transformer
 
-from locki.paths import DATA, DENIED_LOG, PACKAGE_DATA, PID_FILE, PORT_FILE, RUNTIME, STATE, WORKTREES, WORKTREES_META
+from locki.paths import (
+    DENIED_LOG,
+    PACKAGE_DATA,
+    PID_FILE,
+    PORT_FILE,
+    RUNTIME,
+    SANDBOX_HOME,
+    STATE,
+    WORKTREES,
+    WORKTREES_META,
+)
 from locki.utils import AliasGroup, limactl, vm_status
 
 logger = logging.getLogger(__name__)
@@ -40,7 +50,7 @@ CLEANUP_INTERVAL = 60
 LAST_ACTIVE_FILE = STATE / "cleanup" / "last-active.json"
 VM_IDLE_SINCE_FILE = STATE / "cleanup" / "vm-idle-since"
 HOST_KEY = STATE / "ssh" / "host_key"
-CLIENT_KEY = DATA / "home" / ".ssh" / "id_locki"
+CLIENT_KEY = SANDBOX_HOME / ".ssh" / "id_locki"
 AUTHORIZED_KEYS_FILE = STATE / "ssh" / "authorized_keys"
 
 

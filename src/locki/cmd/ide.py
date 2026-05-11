@@ -1,52 +1,11 @@
-import shutil
+import shlex
 import subprocess
-import sys
 
 import click
 
 from locki.cmd.new import create_sandbox_worktree
-from locki.config import load_config, save_user_config
-from locki.paths import USER_CONFIG
-from locki.runes import SUCCESS
-from locki.utils import cwd_git_repo, fail, resolve_sandbox
-
-EDITORS = [
-    ("code", "VSCode"),
-    ("zed", "Zed"),
-    ("fresh", "Fresh"),
-]
-EDITOR_CMDS = [cmd for cmd, _ in EDITORS]
-
-
-def _ask_editor() -> str:
-    if not sys.stdin.isatty():
-        fail(
-            f"No default editor configured. "
-            f"Run {click.style('locki ide', fg='green')} interactively first to pick one, "
-            f"or configure e.g. {click.style('ide = "code"', fg='yellow')} in {click.style(str(USER_CONFIG), fg='cyan')}."
-        )
-
-    available = [(cmd, label) for cmd, label in EDITORS if shutil.which(cmd)]
-    if not available:
-        fail("No supported editor found in PATH (code, zed, fresh).")
-
-    if len(available) == 1:
-        selected = available[0][0]
-    else:
-        from InquirerPy import inquirer
-        from InquirerPy.base.control import Choice
-
-        selected = inquirer.select(
-            message="Select your default editor:",
-            choices=[Choice(value=cmd, name=label) for cmd, label in available],
-        ).execute()
-
-    save_user_config("ide", selected)
-    click.echo(
-        f"{SUCCESS} Saved default editor {click.style(selected, fg='green')} to {USER_CONFIG}",
-        err=True,
-    )
-    return selected
+from locki.config import load_config
+from locki.utils import cwd_git_repo, resolve_sandbox
 
 
 @click.command("ide")
@@ -63,13 +22,8 @@ def ide_cmd(match, interactive, create):
       locki ide -i                    # force sandbox picker
       locki ide -n                    # create new sandbox and open editor
     """
-    if create and (match or interactive):
-        fail("--new conflicts with --match/--interactive.")
 
-    config = load_config(cwd_git_repo())
-    editor = config.ide if config.ide in EDITOR_CMDS else None
-    if editor is None:
-        editor = _ask_editor()
+    ide_command = load_config(cwd_git_repo()).ide_command
 
     sandbox = resolve_sandbox(
         match=match,
@@ -80,4 +34,4 @@ def ide_cmd(match, interactive, create):
     if not sandbox.wt_path.exists():
         create_sandbox_worktree(sandbox)
 
-    subprocess.run([editor, "."], cwd=str(sandbox.wt_path))
+    subprocess.run(shlex.split(ide_command), cwd=str(sandbox.wt_path))

@@ -1,39 +1,14 @@
-import sys
+import json
+import re
+import shlex
+import uuid
 
 import click
 
 from locki.cmd.exec import exec_cmd
-from locki.config import load_config, save_user_config
-from locki.paths import DATA, USER_CONFIG
-from locki.runes import SUCCESS
-from locki.utils import cwd_git_repo, fail, resolve_sandbox
-
-HARNESSES = ["claude", "gemini", "codex", "opencode", "pi", "copilot"]
-RESUME_ARGS = {"claude": ["-c"], "gemini": ["-r"], "codex": ["resume"], "pi": ["-c"], "copilot": ["--continue"]}
-
-
-def _ask_harness() -> str:
-    if not sys.stdin.isatty():
-        fail(
-            f"No default AI harness configured. "
-            f"Run {click.style('locki ai', fg='green')} interactively first to pick one, "
-            f"or configure e.g. {click.style('ai = "claude"', fg='yellow')} in {click.style(str(USER_CONFIG), fg='cyan')}."
-        )
-
-    from InquirerPy import inquirer
-    from InquirerPy.base.control import Choice
-
-    selected = inquirer.select(
-        message="Select your default AI harness:",
-        choices=[Choice(value=h, name=h) for h in HARNESSES],
-    ).execute()
-
-    save_user_config("ai", selected)
-    click.echo(
-        f"{SUCCESS} Saved default harness {click.style(selected, fg='green')} to {USER_CONFIG}",
-        err=True,
-    )
-    return selected
+from locki.config import load_config
+from locki.paths import SANDBOX_HOME
+from locki.utils import cwd_git_repo, resolve_sandbox
 
 
 @click.command("ai", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
@@ -52,33 +27,23 @@ def ai_cmd(ctx, match, interactive, create, id_file):
       locki ai -i                     # force sandbox picker
       locki ai -n                     # new sandbox, fresh conversation
     """
-    if create and (match or interactive):
-        fail("--new conflicts with --match/--interactive.")
 
-    config = load_config(cwd_git_repo())
-    harness = config.ai if config.ai in HARNESSES else None
-    if harness is None:
-        harness = _ask_harness()
+    ai_command = load_config(cwd_git_repo()).ai_command
 
     sandbox = resolve_sandbox(
         match=match,
         interactive=interactive,
         create="force" if create else "allow",
     )
-    is_new = not sandbox.wt_path.exists()
 
-    ctx.args = [harness]
+    if shlex.split(ai_command)[0] == "claude":
+        project_name = re.sub(r"[^a-zA-Z0-9]", "-", str(sandbox.wt_path))
+        project_dir = SANDBOX_HOME / ".claude" / "projects" / project_name
+        project_dir.mkdir(parents=True, exist_ok=True)
+        if not any(project_dir.glob("*.jsonl")):
+            (project_dir / f"{uuid.uuid4()}.jsonl").write_text("\n")
 
-    if not is_new:
-        if harness == "claude":
-            projects_dir = DATA / "home" / ".claude" / "projects"
-            if projects_dir.is_dir() and any(
-                d.name.endswith(sandbox.wt_id) for d in projects_dir.iterdir() if d.is_dir()
-            ):
-                ctx.args.extend(RESUME_ARGS["claude"])
-        else:
-            ctx.args.extend(RESUME_ARGS.get(harness, []))
-
+    ctx.args = shlex.split(ai_command)
     ctx.obj = sandbox
     ctx.invoke(
         exec_cmd.callback,

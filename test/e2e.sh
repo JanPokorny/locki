@@ -76,7 +76,7 @@ git -C "$REPO" push
 
 cd "$REPO"
 
-locki config setup --defaults
+locki setup --defaults
 
 # ── cold start + parallel VM creation ────────────────────────────────────────
 

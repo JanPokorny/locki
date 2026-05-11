@@ -26,8 +26,8 @@ def _arch() -> str:
 
 class LockiConfig(pydantic.BaseModel):
     incus_image: dict[str, str] = pydantic.Field({"x86_64": "images:fedora/43", "aarch64": "images:fedora/43"})
-    ai: str | None = None
-    ide: str | None = None
+    ai_command: str = ""
+    ide_command: str = ""
 
     def get_incus_image(self) -> str:
         if _arch() not in self.incus_image:
@@ -35,7 +35,7 @@ class LockiConfig(pydantic.BaseModel):
         return self.incus_image[_arch()]
 
 
-def load_config(git_root: pathlib.Path | None) -> LockiConfig:
+def load_config(git_root: pathlib.Path | None, *, skip_auto_setup: bool = False) -> LockiConfig:
     """Load config from user config and repo locki.toml. Repo config wins on conflict.
     *git_root=None* skips repo-specific config (useful when running outside a git repo)."""
     user_data: dict = {}
@@ -58,9 +58,17 @@ def load_config(git_root: pathlib.Path | None) -> LockiConfig:
 
     merged = deep_merge(user_data, repo_data)
     try:
-        return LockiConfig.model_validate(merged)
+        config = LockiConfig.model_validate(merged)
     except pydantic.ValidationError as e:
         fail(f"Invalid config: {e}")
+
+    if not skip_auto_setup and (not config.ai_command or not config.ide_command):
+        from locki.cmd.setup import setup_cmd
+
+        setup_cmd.main([], standalone_mode=False)
+        return load_config(git_root, skip_auto_setup=True)
+
+    return config
 
 
 def save_user_config(key: str, value: object) -> None:

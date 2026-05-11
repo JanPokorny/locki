@@ -87,23 +87,6 @@ fi
 exec pnpm "$@"
 EOF
 
-## AI harnesses: inject default flags
-for pair in \
-  "claude=--dangerously-skip-permissions" \
-  "gemini=--yolo" \
-  "codex=--yolo" \
-  "copilot=--yolo --no-auto-update" \
-; do
-  bin="${pair%%=*}"
-  args="${pair#*=}"
-  cat > "/opt/locki/bin/high/$bin" << EOF
-#!/bin/bash
-set -eo pipefail
-export PATH="\${PATH#*/opt/locki/bin/high:}"
-exec "\$(command -v $bin)" $args "\$@"
-EOF
-done
-
 chmod +x /opt/locki/bin/high/*
 
 # MARK: Low-priority shims
