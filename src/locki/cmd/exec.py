@@ -1,3 +1,5 @@
+from locki.runes import WARNING
+from json import JSONDecodeError
 import base64
 import contextlib
 import getpass
@@ -144,8 +146,11 @@ def exec_cmd(ctx, match, interactive, create, id_file):
         ),
     ]:
         path.parent.mkdir(parents=True, exist_ok=True)
-        existing: dict = json.loads(path.read_text()) if path.exists() else {}
-        path.write_text(json.dumps(deep_merge(existing, updates), indent=2))
+        try:
+            existing = json.loads(path.read_text()) if path.exists() else {}
+            path.write_text(json.dumps(deep_merge(existing, updates), indent=2))
+        except JSONDecodeError:
+            click.echo(f"{WARNING} Invalid JSON data found in {path}, not updating it.")
 
     with file_lock("vm", "Waiting for VM to start"):
         vm_setup = (PACKAGE_DATA / "vm-setup.sh").read_text()
