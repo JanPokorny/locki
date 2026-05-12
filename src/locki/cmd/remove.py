@@ -5,9 +5,38 @@ import subprocess
 import click
 
 from locki.runes import INFO, SUCCESS
-from locki.utils import SandboxInfo, cwd_git_repo, fail, list_sandboxes, resolve_sandbox, run_command, run_in_vm
+from locki.utils import (
+    SandboxInfo,
+    cwd_git_repo,
+    fail,
+    list_sandboxes,
+    resolve_sandbox,
+    run_command,
+    run_in_vm,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _is_merged(repo_path: str, trunk: str, branch: str) -> bool:
+    git = ["git", "-C", repo_path]
+    devnull = {"capture_output": True, "text": True, "stdin": subprocess.DEVNULL}
+    if branch in subprocess.run([*git, "branch", "--merged", trunk, "--list", branch], **devnull).stdout:
+        return True
+    merge_base = subprocess.run([*git, "merge-base", trunk, branch], **devnull)
+    if merge_base.returncode != 0:
+        return False
+    tree = subprocess.run([*git, "rev-parse", f"{branch}^{{tree}}"], **devnull)
+    if tree.returncode != 0:
+        return False
+    squash_commit = subprocess.run(
+        [*git, "commit-tree", tree.stdout.strip(), "-p", merge_base.stdout.strip(), "-m", "squash check"],
+        **devnull,
+    )
+    if squash_commit.returncode != 0:
+        return False
+    cherry = subprocess.run([*git, "cherry", trunk, squash_commit.stdout.strip()], **devnull)
+    return cherry.returncode == 0 and cherry.stdout.strip().startswith("-")
 
 
 def _remove_sandbox(sandbox: SandboxInfo, *, delete_branch: bool) -> None:
@@ -102,12 +131,7 @@ def remove_cmd(match, interactive, force, delete_branch, merged):
         targets = [
             s
             for s in all_sandboxes
-            if s.branch
-            in subprocess.run(
-                ["git", "-C", str(s.repo), "branch", "--merged", trunk, "--list", s.branch],
-                capture_output=True,
-                text=True,
-            ).stdout
+            if _is_merged(str(s.repo), trunk, s.branch)
             and (
                 force
                 or not s.wt_path.exists()
