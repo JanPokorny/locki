@@ -72,7 +72,7 @@ class AliasGroup(click.Group):
 
 
 @contextmanager
-def spinner(text: str):
+def spinner(text: str, print_success: bool = True):
     is_tty = sys.stderr.isatty()
     stop = threading.Event()
     start = time.time()
@@ -94,17 +94,22 @@ def spinner(text: str):
         thread = threading.Thread(target=_spin, daemon=True)
         thread.start()
     else:
-        sys.stderr.write(f"\n[spinner] {text}")
-        sys.stderr.flush()
+        if print_success:
+            sys.stderr.write(f"\n[spinner] {text}")
+            sys.stderr.flush()
     try:
         yield
         if thread:
             stop.set()
             thread.join()
-        click.echo(
-            f"\r{SUCCESS} {text.replace('ing ', 'ed ', count=1)}{_duration()} ",
-            err=True,
-        )
+            if not print_success:
+                sys.stderr.write("\r\033[2K")
+                sys.stderr.flush()
+        if print_success:
+            click.echo(
+                f"\r{SUCCESS} {text.replace('ing ', 'ed ', count=1)}{_duration()} ",
+                err=True,
+            )
     except BaseException:
         if thread:
             stop.set()
@@ -123,9 +128,10 @@ def run_command(
     check: bool = True,
     input: bytes | None = None,
     quiet: bool = False,
+    print_success: bool = True,
 ) -> subprocess.CompletedProcess[bytes]:
     logger.debug("Command: %s", command)
-    with spinner(message) if not quiet else nullcontext():
+    with spinner(message, print_success=print_success) if not quiet else nullcontext():
         try:
             result = subprocess.run(
                 command,
@@ -184,6 +190,7 @@ def run_in_vm(
     input: bytes | None = None,
     check: bool = True,
     quiet: bool = False,
+    print_success: bool = True,
 ) -> subprocess.CompletedProcess[bytes]:
     return run_command(
         [limactl(), "shell", "--start", "--preserve-env", "--tty=false", "locki", "--", "sudo", "-E", *command],
@@ -193,6 +200,7 @@ def run_in_vm(
         input=input,
         check=check,
         quiet=quiet,
+        print_success=print_success,
     )
 
 
@@ -264,6 +272,7 @@ def setup_worktree_hooks(repo: pathlib.Path, meta_dir: pathlib.Path, wt_path: pa
     run_command(
         ["git", "-C", str(repo), "config", "extensions.worktreeConfig", "true"],
         "Enabling per-worktree git config",
+        print_success=False,
     )
     hooks_dir = meta_dir / "hooks"
     hooks_dir.mkdir(parents=True, exist_ok=True)
@@ -275,10 +284,12 @@ def setup_worktree_hooks(repo: pathlib.Path, meta_dir: pathlib.Path, wt_path: pa
     run_command(
         ["git", "-C", str(wt_path), "config", "--worktree", "core.hooksPath", str(hooks_dir)],
         "Configuring per-worktree hooks",
+        print_success=False,
     )
     run_command(
         ["git", "-C", str(wt_path), "config", "--worktree", "push.autoSetupRemote", "true"],
         "Configuring auto push for new branches",
+        print_success=False,
     )
 
 

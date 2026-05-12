@@ -177,6 +177,7 @@ def exec_cmd(ctx, match, interactive, create, id_file):
                 "Preparing VM",
                 cwd="/",
                 check=False,
+                print_success=False,
             )
         finally:
             os.unlink(lima_yaml)
@@ -199,6 +200,7 @@ def exec_cmd(ctx, match, interactive, create, id_file):
         ["incus", "list", "--format=csv", "--columns=n", sandbox.wt_id],
         "Checking container",
         check=False,
+        print_success=False,
     )
     if sandbox.wt_id in result.stdout.decode():
         run_in_vm(
@@ -217,6 +219,7 @@ def exec_cmd(ctx, match, interactive, create, id_file):
                     [limactl(), "copy", str(local_path.resolve()), f"locki:/tmp/{tmp_name}"],
                     "Copying image into VM",
                     cwd="/",
+                    print_success=False,
                 )
                 run_in_vm(
                     [
@@ -225,6 +228,7 @@ def exec_cmd(ctx, match, interactive, create, id_file):
                         f"out=$(incus image import /tmp/{tmp_name} --alias={tmp_name} 2>&1) || echo \"$out\" | grep -q 'already exists'; rm -f /tmp/{tmp_name}",
                     ],
                     "Importing container image",
+                    print_success=False,
                 )
                 image_ref = tmp_name
             else:
@@ -233,6 +237,7 @@ def exec_cmd(ctx, match, interactive, create, id_file):
             run_in_vm(
                 ["incus", "init", image_ref, sandbox.wt_id],
                 "Creating container",
+                print_success=False,
             )
 
             if local_path.is_file():
@@ -240,6 +245,7 @@ def exec_cmd(ctx, match, interactive, create, id_file):
                     ["incus", "image", "delete", image_ref],
                     "Cleaning up imported image",
                     check=False,
+                    print_success=False,
                 )
 
         run_in_vm(
@@ -255,6 +261,7 @@ def exec_cmd(ctx, match, interactive, create, id_file):
                 f"path={sandbox.wt_path}",
             ],
             "Mounting worktree into container",
+            print_success=False,
         )
 
         run_in_vm(
@@ -273,6 +280,7 @@ def exec_cmd(ctx, match, interactive, create, id_file):
             ["incus", "exec", sandbox.wt_id, *env_flags, "--env", f"LOCKI_WORKTREES_HOME={WORKTREES}", "--", "/bin/sh"],
             "Configuring container",
             input=setup_script,
+            print_success=False,
         )
 
     # Idempotently start the Locki host daemon (SSH forced-command proxy + periodic cleanup).

@@ -14,11 +14,13 @@ def create_sandbox_worktree(sandbox: SandboxInfo) -> None:
     run_command(
         ["git", "-C", str(sandbox.repo), "worktree", "prune"],
         "Pruning stale git worktrees",
+        print_success=False,
     )
     sandbox.wt_path.mkdir(parents=True, exist_ok=True)
     run_command(
         ["git", "-C", str(sandbox.repo), "branch", sandbox.branch],
         f"Creating branch {click.style(sandbox.branch, fg='green')}",
+        print_success=False,
     )
     run_command(
         ["git", "-C", str(sandbox.repo), "worktree", "add", str(sandbox.wt_path), sandbox.branch],
