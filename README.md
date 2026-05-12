@@ -134,7 +134,7 @@ Case study: [Kagenti ADK](https://github.com/kagenti/adk) uses Locki to run a fu
 Each sandbox gets its own [worktree](https://git-scm.com/docs/git-worktree) (a full copy of your repo) and shares a common home folder. The original repo and your actual home stay safely out of reach:
 
 - **Your Git repo** (`~/myproject/`) — ❌ Not visible from any sandbox. That means sandboxes can't reach the `.git` folder and mess it up -- all `git` calls go through a command bridge and get reviewed and filtered.
-- **Each sandbox's worktree** (`~/.local/share/locki/worktrees/myproject#locki-.../`) — Visible in corresponding sandbox, at the same path. All edits in the sandbox are instantly visible on host.
+- **Each sandbox's worktree** (`~/.local/share/locki/worktrees/myproject-locki-.../`) — Visible in corresponding sandbox, at the same path. All edits in the sandbox are instantly visible on host.
 - **Shared sandbox home** (`~/.local/share/locki/home/`) — Visible from every sandbox as `~`. Save your agent configuration here to use it in sandboxes.
 - **Your actual home** (`~`) — ❌ Not visible from any sandbox. Sandboxes can't mess up your global config.
 

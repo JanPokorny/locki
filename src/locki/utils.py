@@ -306,7 +306,7 @@ class SandboxInfo:
 
     def __post_init__(self):
         if not self.wt_dir:
-            self.wt_dir = f"{self.repo.name}#locki-{self.wt_id}"
+            self.wt_dir = f"{self.repo.name}-locki-{self.wt_id}"
 
     @property
     def wt_path(self) -> pathlib.Path:

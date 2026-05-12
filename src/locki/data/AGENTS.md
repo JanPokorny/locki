@@ -48,7 +48,7 @@ git symbolic-ref <ref>
 git switch ([--create | --force-create] <name>#locki-<wt-id> [<start-point>] | --detach <ref>)
 ```
 
-`<wt-id>` is the 8-char slug in worktree directory name: `.../locki/worktrees/<repo-name>#locki-<wt-id>`. Branches you create, modify, or switch to must be named matching this pattern: `<name>#locki-<wt-id>`. You may read from any ref. `<owned-stash-ref>` is a stash whose message contains `#locki-<wt-id>` -- only those can be popped or dropped; any stash can be applied.
+`<wt-id>` is the 8-char slug in worktree directory name: `.../locki/worktrees/<repo-name>-locki-<wt-id>`. Branches you create, modify, or switch to must be named matching this pattern: `<name>#locki-<wt-id>`. You may read from any ref. `<owned-stash-ref>` is a stash whose message contains `#locki-<wt-id>` -- only those can be popped or dropped; any stash can be applied.
 
 ### Interactive rebase
 

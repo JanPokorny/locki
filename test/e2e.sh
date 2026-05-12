@@ -291,7 +291,7 @@ echo "Testing locki new..."
 
 NEW_PATH=$(locki new -n 2>/dev/null)
 assert_ok    "locki new creates worktree dir" test -d "$NEW_PATH"
-assert_output "worktree dir uses <repo>#locki-<id> format" "/r#locki-" echo "$NEW_PATH"
+assert_output "worktree dir uses <repo>-locki-<id> format" "/r-locki-" echo "$NEW_PATH"
 
 # ── sandbox creation with --new ─────────────────────────────────────────
 
