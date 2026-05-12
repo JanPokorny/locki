@@ -39,7 +39,17 @@ def _is_merged(repo_path: str, trunk: str, branch: str) -> bool:
     return cherry.returncode == 0 and cherry.stdout.strip().startswith("-")
 
 
-def _remove_sandbox(sandbox: SandboxInfo, *, delete_branch: bool) -> None:
+def _matching_branches(repo: str, wt_id: str) -> list[str]:
+    result = subprocess.run(
+        ["git", "-C", repo, "branch", "--list", f"*#locki-{wt_id}"],
+        capture_output=True,
+        text=True,
+        stdin=subprocess.DEVNULL,
+    )
+    return [line.lstrip("* ").strip() for line in result.stdout.splitlines() if line.strip()]
+
+
+def _remove_sandbox(sandbox: SandboxInfo, *, branches: bool) -> None:
     for inc in sandbox.include:
         inc_wt = sandbox.include_wt_path(inc.name)
         run_command(
@@ -52,16 +62,17 @@ def _remove_sandbox(sandbox: SandboxInfo, *, delete_branch: bool) -> None:
             f"Pruning {inc.repo.name}",
             check=False,
         )
-        if delete_branch:
-            run_command(
-                ["git", "-C", str(inc.repo), "branch", "-D", inc.branch],
-                f"Deleting include branch {inc.branch}",
-                check=False,
-            )
+        if branches:
+            for b in _matching_branches(str(inc.repo), sandbox.wt_id):
+                run_command(
+                    ["git", "-C", str(inc.repo), "branch", "-D", b],
+                    f"Removing include branch {b}",
+                    check=False,
+                )
 
     run_in_vm(
         ["incus", "delete", "--force", sandbox.wt_id],
-        "Deleting container",
+        "Removing container",
         check=False,
     )
 
@@ -73,24 +84,25 @@ def _remove_sandbox(sandbox: SandboxInfo, *, delete_branch: bool) -> None:
         check=False,
     )
 
-    if delete_branch:
-        run_command(
-            ["git", "-C", str(sandbox.repo), "branch", "-D", sandbox.branch],
-            f"Deleting branch {sandbox.branch}",
-            check=False,
-        )
+    if branches:
+        for b in _matching_branches(str(sandbox.repo), sandbox.wt_id):
+            run_command(
+                ["git", "-C", str(sandbox.repo), "branch", "-D", b],
+                f"Removing branch {b}",
+                check=False,
+            )
 
 
 @click.command()
-@click.option("-m", "--match", default=None, help="Sandbox branch (substring match).")
-@click.option("-i", "--interactive", is_flag=True, default=False, help="Force interactive picker.")
-@click.option("--force", "-f", is_flag=True, default=False, help="Skip safety checks.")
-@click.option("--delete-branch", is_flag=True, default=False, help="Also delete the git branch.")
+@click.option("--match", "-m", default=None, help="Select by sandbox id or branch name (prefix match).")
+@click.option("--interactive", "-i", is_flag=True, default=False, help="Use interactive picker.")
+@click.option("--force", "-f", is_flag=True, default=False, help="Remove despite having uncommited changes. (May lose work!)")
+@click.option("--branches", "-b", is_flag=True, default=False, help="Also delete all git branches belonging to this sandbox.")
 @click.option(
-    "--merged", is_flag=True, default=False, help="Remove all clean sandboxes whose branch is merged into trunk."
+    "--merged", "-M", is_flag=True, default=False, help="Remove all clean sandboxes whose branch is merged into trunk."
 )
-def remove_cmd(match, interactive, force, delete_branch, merged):
-    """Remove a sandbox."""
+def remove_cmd(match, interactive, force, branches, merged):
+    """Remove a sandbox. Container and worktree is deleted, branches remain unless --branches is passed."""
     if merged:
         if match or interactive:
             fail("--merged cannot be combined with --match or --interactive.")
@@ -153,7 +165,7 @@ def remove_cmd(match, interactive, force, delete_branch, merged):
             click.echo(f"     {s.branch}", err=True)
 
         for s in targets:
-            _remove_sandbox(s, delete_branch=delete_branch)
+            _remove_sandbox(s, branches=branches)
             click.echo(f"{SUCCESS} Removed {s.branch}", err=True)
         return
 
@@ -175,4 +187,4 @@ def remove_cmd(match, interactive, force, delete_branch, merged):
             f"Worktree for {sandbox.branch} in {sandbox.wt_path} has uncommitted changes. Commit or stash them, or use --force."
         )
 
-    _remove_sandbox(sandbox, delete_branch=delete_branch)
+    _remove_sandbox(sandbox, branches=branches)
