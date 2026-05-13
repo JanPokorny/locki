@@ -37,7 +37,7 @@ git rebase <ref>
 git reflog
 git reset [--hard] <ref>
 git restore [--staged] [--source=<ref>] <file> ...
-git rev-parse [--show-cdup] [--show-toplevel] [--git-dir] [--is-inside-work-tree] [--abbrev-ref] [--verify] [<arg> ...]
+git rev-parse [--show-cdup] [--show-toplevel] [--git-dir] [--is-inside-work-tree] [--abbrev-ref] [--short] [--verify] [<arg> ...]
 git show [<ref>] [--stat] [--name-only] [--name-status] [--format=<fmt>] [--pretty=<fmt>] [<file> ...]
 git stash (pop | drop) <owned-stash-ref>
 git stash apply <stash-ref>

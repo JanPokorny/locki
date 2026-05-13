@@ -87,6 +87,33 @@ CONTAINER_ENV = {
 logger = logging.getLogger(__name__)
 
 
+def import_local_incus_image(local_path: pathlib.Path) -> str:
+    """Copy a local Incus image archive into the VM and import it."""
+    tmp_name = f"locki-img-{gen_id()}"
+    vm_path = f"/tmp/{tmp_name}"
+    run_command(
+        [limactl(), "copy", str(local_path.resolve()), f"locki:{vm_path}"],
+        "Copying image into VM",
+        cwd="/",
+        print_success=False,
+    )
+    try:
+        run_in_vm(
+            ["incus", "image", "import", vm_path, f"--alias={tmp_name}"],
+            "Importing container image",
+            print_success=False,
+        )
+    finally:
+        run_in_vm(
+            ["rm", "-f", vm_path],
+            "Cleaning up copied image archive",
+            check=False,
+            quiet=True,
+            print_success=False,
+        )
+    return tmp_name
+
+
 @click.command(
     "exec | x",
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True, "allow_interspersed_args": False},
@@ -214,23 +241,7 @@ def exec_cmd(ctx, match, interactive, create, id_file):
         local_path = sandbox.repo / incus_image
         with file_lock("image", "Waiting for another image import"):
             if local_path.is_file():
-                tmp_name = f"locki-img-{gen_id()}"
-                run_command(
-                    [limactl(), "copy", str(local_path.resolve()), f"locki:/tmp/{tmp_name}"],
-                    "Copying image into VM",
-                    cwd="/",
-                    print_success=False,
-                )
-                run_in_vm(
-                    [
-                        "bash",
-                        "-c",
-                        f"out=$(incus image import /tmp/{tmp_name} --alias={tmp_name} 2>&1) || echo \"$out\" | grep -q 'already exists'; rm -f /tmp/{tmp_name}",
-                    ],
-                    "Importing container image",
-                    print_success=False,
-                )
-                image_ref = tmp_name
+                image_ref = import_local_incus_image(local_path)
             else:
                 image_ref = incus_image
 
