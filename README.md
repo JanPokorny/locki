@@ -196,9 +196,9 @@ To my knowledge Locki is the only one packing a fully vertically integrated Incu
 
 Locki uses a single Lima VM which can only access the `~/.local/share/locki/worktrees` and `~/.local/share/locki/home` folders (honoring `$XDG_DATA_HOME`), which forms the security boundary. The sandboxed programs can read and write to these folders, and also access anything on the internet and local network. Furthermore, a guest-to-host SSH server exposes a limited set of `git` and `gh` subcommands, with write access restricted to the sandbox's own namespaced branches and stashes (so an agent in one sandbox cannot alter another sandbox's branch, the main branch, or unrelated stashes). `.git` files are checked for tampering when hooks are executed against them.
 
-Locki is designed to provide protection for the host operating system and files from being messed up by a malfunctioning AI agent. There is no exfiltration protection, so be aware that API keys exposed to the agents need to be treated as potentially exposed and disposable, with limited scope. (This is no different from running the agent locally, just specifying that Locki does not help here. Use a dedicated solution like [OneCLI](https://github.com/onecli/onecli) if interested.)
+Locki is designed to provide protection for the host operating system and files from being messed up by a malfunctioning AI agent. There is no exfiltration protection, so be aware that API keys exposed to the agents need to be treated as potentially exposed and disposable, with limited scope. (This is no different from running the agent locally, just specifying that Locki does not help here. Use a dedicated solution like [DAM!](https://github.com/dam-agents/dam) if interested.)
 
-Despite best effort, Locki provides no security guarantees and is provided "as is". That's the legal speak for "this is a random project by a random dude provided for free", you can't expect corporate-paid-support level security assurances. Random dude believes that while not perfect, using Locki is better than many existing sandboxing solutions and certainly better than going full `--yolo` on your bare machine and hoping for the best.
+Locki may not provide perfect security, however we believe it works better than many existing sandboxing solutions and certainly better than going full `--yolo` on your bare machine and hoping for the best.
 
 &nbsp;
 
@@ -209,3 +209,21 @@ Despite best effort, Locki provides no security guarantees and is provided "as i
 - Multiple [Incus](https://linuxcontainers.org/incus/introduction/) containers
 - [Mise](https://mise.jdx.dev) for ergonomic package installation
 - Host proxy for bridged commands (`git`, `gh`, port forwarding)
+
+&nbsp;
+
+## License
+
+Copyright 2026 Jan Pokorný and [contributors](./graphs/contributors)
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
