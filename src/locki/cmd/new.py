@@ -1,3 +1,6 @@
+import contextlib
+import subprocess
+
 import click
 
 from locki.utils import (
@@ -33,6 +36,8 @@ def create_sandbox_worktree(sandbox: SandboxInfo) -> None:
     (sandbox.meta_path / ".git").write_text((sandbox.wt_path / ".git").read_text())
     (sandbox.meta_path / "repo").write_text(str(sandbox.repo))
     setup_worktree_hooks(sandbox.repo, sandbox.meta_path, sandbox.wt_path)
+    with contextlib.suppress(FileNotFoundError):
+        subprocess.run(["mise", "trust"], cwd=str(sandbox.wt_path), capture_output=True)
 
 
 @click.command("new | n")

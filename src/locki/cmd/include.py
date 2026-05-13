@@ -8,7 +8,9 @@ included worktrees; ownership is scoped by the parent sandbox's id.
 
 from __future__ import annotations
 
+import contextlib
 import pathlib
+import subprocess
 
 import click
 
@@ -72,6 +74,8 @@ def _setup_include(sandbox: SandboxInfo, repo_b: pathlib.Path, name: str) -> Non
     (include_meta / "repo").write_text(str(repo_b))
 
     setup_worktree_hooks(repo_b, include_meta, include_wt)
+    with contextlib.suppress(FileNotFoundError):
+        subprocess.run(["mise", "trust"], cwd=str(include_wt), capture_output=True)
 
 
 @click.command("include")
