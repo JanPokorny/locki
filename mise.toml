@@ -28,7 +28,7 @@ hide = true
 run = """
 #!/bin/bash
 test ! -d .git && exit 0
-printf '#!/bin/sh\nmise run git-hooks:pre-commit' >.git/hooks/pre-commit <<'HOOK'
+printf '#!/bin/sh\nmise run git-hooks:pre-commit' >.git/hooks/pre-commit
 chmod +x .git/hooks/pre-commit
 """
 
