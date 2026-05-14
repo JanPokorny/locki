@@ -91,13 +91,13 @@ PATH="\${PATH#*/opt/locki/bin/high:}" exec $bin "\$@"
 EOF
 done
 
-## pnpm: configure cache dirs on first use
+## pnpm: configure cache dirs + enable global virtual store
 cat > /opt/locki/bin/high/pnpm << 'EOF'
 #!/bin/bash
 set -eo pipefail
 export PATH="${PATH#*/opt/locki/bin/high:}"
-if ! pnpm config get store-dir 2>/dev/null | grep -q /var/cache/locki/pnpm; then
-  /opt/locki/bin/high/locki-auto-install pnpm sh -c 'pnpm config set store-dir /var/cache/locki/pnpm && pnpm config set global-bin-dir /usr/local/bin'
+if ! pnpm config get enable-global-virtual-store 2>/dev/null | grep -q true; then
+  /opt/locki/bin/high/locki-auto-install pnpm sh -c 'pnpm config set store-dir /var/cache/locki/pnpm && pnpm config set global-bin-dir /usr/local/bin && pnpm config set enable-global-virtual-store true && pnpm config delete virtual-store-dir 2>/dev/null || true'
 fi
 exec pnpm "$@"
 EOF
@@ -247,4 +247,3 @@ echo '192.168.5.2 host.lima.internal' >> /etc/hosts
 
 ## network is not available for a short while, wait for it
 timeout 30s sh -c 'while ! ping -c1 -W1 connectivitycheck.gstatic.com >/dev/null 2>&1; do sleep 1; done'
-
