@@ -91,7 +91,7 @@ PATH="\${PATH#*/opt/locki/bin/high:}" exec $bin "\$@"
 EOF
 done
 
-## pnpm: configure cache dirs + enable global virtual store
+## pnpm: cache + global virtual store
 cat > /opt/locki/bin/high/pnpm << 'EOF'
 #!/bin/bash
 set -eo pipefail
@@ -100,6 +100,18 @@ if ! pnpm config get enable-global-virtual-store 2>/dev/null | grep -q true; the
   /opt/locki/bin/high/locki-auto-install pnpm sh -c 'pnpm config set store-dir /var/cache/locki/pnpm && pnpm config set global-bin-dir /usr/local/bin && pnpm config set enable-global-virtual-store true && pnpm config delete virtual-store-dir 2>/dev/null || true'
 fi
 exec pnpm "$@"
+EOF
+
+## uv: symlink .venv to btrfs
+cat > /opt/locki/bin/high/uv << 'EOF'
+#!/bin/bash
+set -eo pipefail
+export PATH="${PATH#*/opt/locki/bin/high:}"
+if _dir="$(uv workspace dir 2>/dev/null)"; then
+  export UV_PROJECT_ENVIRONMENT="/var/cache/locki/uv-venvs${_dir}/.venv"
+  ln -sfn "$UV_PROJECT_ENVIRONMENT" "$_dir/.venv" 2>/dev/null || true
+fi
+exec uv "$@"
 EOF
 
 chmod +x /opt/locki/bin/high/*
