@@ -165,13 +165,20 @@ exec "\$(PATH=\$(printf '%s' "\$PATH" | tr ':' '\\n' | grep -v '^/opt/locki/bin/
 EOF
 done
 
-## Corepack packages (yarn, pnpm)
-for bin in yarn pnpm; do
+## Corepack packages
+for pair in \
+  "pnpm=pnpm" \
+  "pnpm=pnpx" \
+  "pnpm=pnx" \
+  "yarn=yarn" \
+; do
+  pkg="${pair%%=*}"
+  bin="${pair#*=}"
   cat > "/opt/locki/bin/low/$bin" << EOF
 #!/bin/bash
 set -eo pipefail
 if ! PATH=\$(printf '%s' "\$PATH" | tr ':' '\\n' | grep -v '^/opt/locki/bin/' | paste -sd:) command -v $bin >/dev/null 2>&1; then
-  /opt/locki/bin/high/locki-auto-install $bin corepack enable $bin
+  /opt/locki/bin/high/locki-auto-install $pkg corepack enable $pkg
 fi
 exec "\$(PATH=\$(printf '%s' "\$PATH" | tr ':' '\\n' | grep -v '^/opt/locki/bin/low\$' | paste -sd:) command -v $bin)" "\$@"
 EOF
