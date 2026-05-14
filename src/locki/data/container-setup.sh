@@ -114,6 +114,30 @@ fi
 exec uv "$@"
 EOF
 
+## yarn: symlink node_modules to btrfs
+cat > /opt/locki/bin/high/yarn << 'EOF'
+#!/bin/bash
+set -eo pipefail
+export PATH="${PATH#*/opt/locki/bin/high:}"
+if _dir="$(npm prefix 2>/dev/null)"; then
+  mkdir -p "/var/cache/locki/node-modules${_dir}/node_modules"
+  ln -sfn "/var/cache/locki/node-modules${_dir}/node_modules" "$_dir/node_modules" 2>/dev/null || true
+fi
+exec yarn "$@"
+EOF
+
+## bun: symlink node_modules to btrfs + redirect cache
+cat > /opt/locki/bin/high/bun << 'EOF'
+#!/bin/bash
+set -eo pipefail
+export PATH="${PATH#*/opt/locki/bin/high:}"
+if _dir="$(npm prefix 2>/dev/null)"; then
+  mkdir -p "/var/cache/locki/node-modules${_dir}/node_modules"
+  ln -sfn "/var/cache/locki/node-modules${_dir}/node_modules" "$_dir/node_modules" 2>/dev/null || true
+fi
+exec bun "$@"
+EOF
+
 chmod +x /opt/locki/bin/high/*
 
 # MARK: Low-priority shims
@@ -155,14 +179,17 @@ done
 
 ## Mise packages
 for pair in \
+  "bun=bun" \
   "fd=fd" \
   "github:anomalyco/opencode=opencode" \
   "github:github/copilot-cli=copilot" \
   "jq=jq" \
   "k9s=k9s" \
   "kubectl=kubectl" \
+  "poetry=poetry" \
   "rg=rg" \
   "uv=uv" \
+  "uv=uvx" \
   "yq=yq" \
 ; do
   pkg="${pair%%=*}"

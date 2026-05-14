@@ -69,6 +69,8 @@ CONTAINER_ENV = {
     "NUGET_PACKAGES": "/var/cache/locki/nuget",
     "PATH": "/opt/locki/bin/high:/root/.local/bin:/usr/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/locki/bin/low",
     "PIP_CACHE_DIR": "/var/cache/locki/pip",
+    "POETRY_VIRTUALENVS_PATH": "/var/cache/locki/poetry-venvs",
+    "POETRY_VIRTUALENVS_IN_PROJECT": "false",
     "PNPM_HOME": "/usr/share/pnpm",
     "PUB_CACHE": "/var/cache/locki/pub",
     "R_LIBS_USER": "/var/cache/locki/r",
