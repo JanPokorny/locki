@@ -361,8 +361,18 @@ def _split_argv(args: list[str], value_flag_keys: frozenset[str]) -> tuple[list[
                 continue
             key = arg[:2]
             glued = arg[2:].removeprefix("=")
-            if glued:
+            if glued and key in value_flag_keys:
                 flags[key] = glued
+            elif glued:
+                flags[key] = ""
+                for ch in glued[:-1]:
+                    flags[f"-{ch}"] = ""
+                last = f"-{glued[-1]}"
+                if last in value_flag_keys and i + 1 < len(args) and not args[i + 1].startswith("-"):
+                    flags[last] = args[i + 1]
+                    i += 1
+                else:
+                    flags[last] = ""
             elif key in value_flag_keys and i + 1 < len(args) and not args[i + 1].startswith("-"):
                 flags[key] = args[i + 1]
                 i += 1
@@ -673,5 +683,6 @@ def internal_command_bridge() -> None:
 
     if exe == "locki":
         os.execvp(sys.executable, [sys.executable, "-m", "locki", *argv[1:]])
-    else:
-        os.execvp(exe, [exe, *argv[1:]])
+    if exe == "git":
+        os.environ["GIT_EDITOR"] = "true"
+    os.execvp(exe, [exe, *argv[1:]])

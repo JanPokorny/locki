@@ -16,34 +16,37 @@ Some commands execute on the host using a command bridge. This lets you execute 
 git -v/--version
 git add (--all | <file> ...)
 git blame <file>
-git branch (<name>#locki-<wt-id> [<start-point> | --move | --delete [--force]] | --show-current)
+git branch (<name>#locki-<wt-id> [<start-point> | --move | --delete [--force]] | --show-current | -r/--remotes [--contains <ref>])
+git cat-file -t/--type <ref>
 git check-ignore <file> ...
 git cherry-pick (--continue | --abort | --skip)
-git cherry-pick [--no-commit] [--gpg-sign] <ref>
-git commit (-m/--message=<msg> [-s/--signoff] | -C/--reuse-message=<sha> | --amend --no-edit) [--amend [--no-edit]] [--gpg-sign]
+git cherry-pick [--no-commit] [--gpg-sign] <ref> ...
+git commit (-m/--message=<msg> [-s/--signoff] | -C/--reuse-message=<sha> | --amend --no-edit [-s/--signoff]) [--amend [--no-edit]] [--gpg-sign]
 git config [--get] [--local] <key>
-git diff [--staged | --cached] [--name-only] [--stat] [--name-status] [<ref> [<ref>]] [<file> ...]
-git fetch [--prune] [<ref>]
+git diff [--staged | --cached] [--name-only] [--stat] [--name-status] [--diff-filter=<filter>] [<ref> [<ref>]] [<file> ...]
+git fetch [--prune] [<remote>] [<ref>]
 git grep [-l/--files-with-matches] <pattern> [<ref>] [<file> ...]
 git hash-object <file>
-git log [--oneline] [--all] [--graph] [--reverse] [--format=<fmt>] [--pretty=<fmt>] [-n/--max-count=<n>] [--name-only] [--diff-filter=<filter>] [--since=<date>] [<ref>] [<file> ...]
-git ls-files [<path> ...]
+git log [--oneline] [--all] [--graph] [--reverse] [--first-parent] [--format=<fmt>] [--pretty=<fmt>] [-n/--max-count=<n>] [--name-only] [--name-status] [--diff-filter=<filter>] [--since=<date>] [--grep=<pattern>] [--author=<author>] [--ancestry-path] [--not] [<ref>] [<file> ...]
+git ls-files [--error-unmatch] [--recurse-submodules] [<path> ...]
 git merge (--continue | --abort | --skip)
 git merge <ref>
+git merge-base <ref> <ref>
 git pull [--rebase] [--ff-only]
-git push [--force-with-lease]
+git push [-u/--set-upstream] [--force-with-lease] [<remote>] [<name>#locki-<wt-id>]
 git rebase (--continue | --abort | --skip)
 git rebase <ref>
-git reflog
+git reflog [--all]
 git reset [--hard] <ref>
 git restore [--staged] [--source=<ref>] <file> ...
-git rev-parse [--show-cdup] [--show-toplevel] [--git-dir] [--is-inside-work-tree] [--abbrev-ref] [--short] [--verify] [<arg> ...]
-git show [<ref>] [--stat] [--name-only] [--name-status] [--format=<fmt>] [--pretty=<fmt>] [<file> ...]
-git stash (pop | drop) <owned-stash-ref>
-git stash apply <stash-ref>
+git rm <file> ...
+git rev-parse [--show-cdup] [--show-toplevel] [--git-dir] [--git-common-dir] [--is-inside-work-tree] [--abbrev-ref] [--short] [--verify] [<arg> ...]
+git show [<ref>] [--stat] [--name-only] [--name-status] [--no-patch] [--format=<fmt>] [--pretty=<fmt>] [<file> ...]
+git stash [push] [-m/--message=<text>#locki-<wt-id>]
+git stash (pop | drop) [<owned-stash-ref>]
+git stash apply [<stash-ref>]
 git stash list
-git stash push -m/--message=<text>#locki-<wt-id>
-git status [-s/--short] [-u/--untracked-files=<mode>] [--porcelain] [<file> ...]
+git status [-s/--short] [-b/--branch] [-u/--untracked-files=<mode>] [--porcelain] [--ignore-submodules] [<file> ...]
 git symbolic-ref <ref>
 git switch ([--create | --force-create] <name>#locki-<wt-id> [<start-point>] | --detach <ref>)
 ```
@@ -77,7 +80,7 @@ Finish:
 gh -v/--version
 gh api repos/<owner>/<repo>/pulls/<number>/comments
 gh auth status
-gh issue (view [<number>] [--comments] | list [-L/--limit=<n>] [-s/--state=<state>] [-S/--search=<query>])
+gh issue (view [<number>] [--comments] [--json=<fields>] [-q/--jq=<expr>] | list [-L/--limit=<n>] [-s/--state=<state>] [-S/--search=<query>] [--json=<fields>] [-q/--jq=<expr>])
 gh pr (view [<number>] [--comments] [--json=<fields>] | list [-L/--limit=<n>] [-s/--state=<state>] [-S/--search=<query>] | diff [<number>] [--name-only] [--patch] [--stat] | status | checks [<number>])
 gh pr comment <number> -b/--body=<b>
 gh pr create -t/--title=<t> [-b/--body=<b>] [-B/--base=<b>] [-H/--head=<h>] [-d/--draft] [-f/--fill] [-r/--reviewer=<r>] [-l/--label=<l>] [-a/--assignee=<a>]
