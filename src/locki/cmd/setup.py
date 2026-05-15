@@ -4,6 +4,7 @@ import pathlib
 import shlex
 import shutil
 import sys
+import time
 
 import click
 
@@ -125,6 +126,7 @@ def setup_cmd(defaults: bool, copy_only: bool):
                 )
 
     if do_copy:
+        backup_suffix = f".{int(time.time())}.backup"
         for rel in COPY_DIRS:
             src = HOME / rel
             if not src.exists():
@@ -138,7 +140,7 @@ def setup_cmd(defaults: bool, copy_only: bool):
                     d = dst / rel_dir / name
                     with contextlib.suppress(OSError):
                         if d.exists() or d.is_symlink():
-                            d.unlink()
+                            d.rename(d.with_name(d.name + backup_suffix))
                         if s.is_symlink():
                             os.symlink(os.readlink(s), d)
                         else:
@@ -148,6 +150,8 @@ def setup_cmd(defaults: bool, copy_only: bool):
             if src.exists():
                 dst = SANDBOX_HOME / rel
                 dst.parent.mkdir(parents=True, exist_ok=True)
+                if dst.exists() or dst.is_symlink():
+                    dst.rename(dst.with_name(dst.name + backup_suffix))
                 shutil.copy2(src, dst)
         click.echo(
             f"{SUCCESS} Copied AI config files to sandbox home. Copy again anytime with {click.style('locki setup --copy', fg='green')}.",
