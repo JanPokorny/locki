@@ -1,6 +1,7 @@
 import contextlib
 import os
 import pathlib
+import shlex
 import shutil
 import sys
 
@@ -20,9 +21,39 @@ AI_TEMPLATES = {
 }
 
 IDE_TEMPLATES = {
-    "VSCode": "code .",
-    "Zed": "zed .",
+    "Android Studio": "studio .",
+    "BBEdit": "bbedit .",
+    "Cursor": "cursor .",
+    "Emacs": "emacs .",
     "Fresh": "fresh .",
+    "GNOME Builder": "gnome-builder .",
+    "Gram": "gram .",
+    "JetBrains CLion": "clion .",
+    "JetBrains DataGrip": "datagrip .",
+    "JetBrains GoLand": "goland .",
+    "JetBrains IntelliJ IDEA": "idea .",
+    "JetBrains PhpStorm": "phpstorm .",
+    "JetBrains PyCharm": "pycharm .",
+    "JetBrains Rider": "rider .",
+    "JetBrains RubyMine": "rubymine .",
+    "JetBrains RustRover": "rustrover .",
+    "JetBrains WebStorm": "webstorm .",
+    "KDevelop": "kdevelop .",
+    "Kate": "kate .",
+    "Lapce": "lapce .",
+    "Lite XL": "lite-xl .",
+    "Neovide": "neovide .",
+    "Neovim": "nvim .",
+    "Nova": "nova .",
+    "Positron": "positron .",
+    "Pulsar": "pulsar .",
+    "Sublime Text": "subl .",
+    "TextMate": "mate .",
+    "Trae": "trae .",
+    "VSCode": "code .",
+    "VSCodium": "codium .",
+    "Windsurf": "windsurf .",
+    "Zed": "zed .",
 }
 
 COPY_DIRS = [
@@ -65,16 +96,21 @@ def setup_cmd(defaults: bool, copy_only: bool):
         ).execute()
         save_user_config("ai_command", ai_command)
 
-        available = {name: cmd for name, cmd in IDE_TEMPLATES.items() if shutil.which(cmd.split()[0])}
-        if available:
-            ide_command = inquirer.select(
-                message="Default editor for 'locki ide':",
-                choices=[Choice(value=cmd, name=name) for name, cmd in available.items()],
+        available = {name: cmd for name, cmd in IDE_TEMPLATES.items() if shutil.which(shlex.split(cmd)[0])}
+        ide_command = inquirer.select(
+            message="Default editor for 'locki ide':",
+            choices=[
+                *([] if available else [Choice(value="", name="(skip)")]),
+                *(Choice(value=cmd, name=name) for name, cmd in available.items()),
+                Choice(value=None, name="(enter custom command)"),
+            ],
+            default=0,
+        ).execute()
+        if ide_command is None:
+            ide_command = inquirer.text(
+                message="Command to execute in the worktree folder (e.g. `code .`):",
             ).execute()
-            save_user_config("ide_command", ide_command)
-        else:
-            ide_bins = sorted({cmd.split()[0] for cmd in IDE_TEMPLATES.values()})
-            click.echo(f"{INFO} No supported editors found in PATH ({', '.join(ide_bins)}), skipping.", err=True)
+        save_user_config("ide_command", ide_command)
 
         sources = [HOME / p for p in COPY_DIRS + COPY_FILES if (HOME / p).exists()]
         if sources:

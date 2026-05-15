@@ -5,6 +5,7 @@ import click
 
 from locki.cmd.new import create_sandbox_worktree
 from locki.config import load_config
+from locki.paths import USER_CONFIG
 from locki.utils import cwd_git_repo, fail, resolve_sandbox
 
 
@@ -24,6 +25,12 @@ def ide_cmd(match, interactive, create):
     """
 
     ide_command = load_config(cwd_git_repo()).ide_command
+
+    if not ide_command:
+        fail(
+            f"No IDE configured to launch. Set {click.style('ide_command', fg='green')} in {click.style(str(USER_CONFIG), fg='green')}"
+            f" or run {click.style('locki setup', fg='green')}."
+        )
 
     sandbox = resolve_sandbox(
         match=match,
