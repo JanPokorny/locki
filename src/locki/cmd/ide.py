@@ -5,7 +5,7 @@ import click
 
 from locki.cmd.new import create_sandbox_worktree
 from locki.config import load_config
-from locki.utils import cwd_git_repo, resolve_sandbox
+from locki.utils import cwd_git_repo, fail, resolve_sandbox
 
 
 @click.command("ide")
@@ -34,4 +34,8 @@ def ide_cmd(match, interactive, create):
     if not sandbox.wt_path.exists():
         create_sandbox_worktree(sandbox)
 
-    subprocess.run(shlex.split(ide_command), cwd=str(sandbox.wt_path))
+    try:
+        subprocess.run(shlex.split(ide_command), cwd=str(sandbox.wt_path))
+    except FileNotFoundError:
+        executable = shlex.split(ide_command)[0]
+        fail(f"IDE command '{executable}' not found. Is it installed and on your PATH?")
