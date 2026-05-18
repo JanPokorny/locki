@@ -78,7 +78,7 @@ Finish:
 
 ```locki-bridged-command-filter
 gh -v/--version
-gh api repos/<owner>/<repo>/pulls/<number>/comments
+gh api (repos/<owner>/<repo>/pulls/<number>/comments | repos/<owner>/<repo>/dependabot/alerts | repos/<owner>/<repo>/dependabot/alerts/<number>) [-q/--jq=<expr>]
 gh auth status
 gh issue (view [<number>] [--comments] [--json=<fields>] [-q/--jq=<expr>] | list [-L/--limit=<n>] [-s/--state=<state>] [-S/--search=<query>] [--json=<fields>] [-q/--jq=<expr>])
 gh pr (view [<number>] [--comments] [--json=<fields>] | list [-L/--limit=<n>] [-s/--state=<state>] [-S/--search=<query>] | diff [<number>] [--name-only] [--patch] [--stat] | status | checks [<number>])
