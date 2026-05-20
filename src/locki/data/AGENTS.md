@@ -24,13 +24,14 @@ git cherry-pick [--no-commit] [--gpg-sign] <ref> ...
 git commit (-m/--message=<msg> [-s/--signoff] | -C/--reuse-message=<sha> | --amend --no-edit [-s/--signoff]) [--amend [--no-edit]] [--gpg-sign]
 git config [--get] [--local] <key>
 git diff [--staged | --cached] [--name-only] [--stat] [--name-status] [--diff-filter=<filter>] [<ref> [<ref>]] [<file> ...]
-git fetch [--prune] [<remote>] [<ref>]
+git fetch [--prune] [<remote>] [<ref> ...]
 git grep [-l/--files-with-matches] <pattern> [<ref>] [<file> ...]
 git hash-object <file>
 git log [--oneline] [--all] [--graph] [--reverse] [--first-parent] [--format=<fmt>] [--pretty=<fmt>] [-n/--max-count=<n>] [--name-only] [--name-status] [--diff-filter=<filter>] [--since=<date>] [--grep=<pattern>] [--author=<author>] [--ancestry-path] [--not] [<ref>] [<file> ...]
 git ls-files [--error-unmatch] [--recurse-submodules] [<path> ...]
 git merge (--continue | --abort | --skip)
 git merge <ref>
+git mv <file> <file>
 git merge-base <ref> <ref>
 git pull [--rebase] [--ff-only]
 git push [-u/--set-upstream] [--force-with-lease] [<remote>] [<name>#locki-<wt-id>]
@@ -38,8 +39,9 @@ git rebase (--continue | --abort | --skip)
 git rebase <ref>
 git reflog [--all]
 git reset [--hard] <ref>
+git remote get-url <remote>
 git restore [--staged] [--source=<ref>] <file> ...
-git rm <file> ...
+git rm [-q/--quiet] <file> ...
 git rev-parse [--show-cdup] [--show-toplevel] [--git-dir] [--git-common-dir] [--is-inside-work-tree] [--abbrev-ref] [--short] [--verify] [<arg> ...]
 git show [<ref>] [--stat] [--name-only] [--name-status] [--no-patch] [--format=<fmt>] [--pretty=<fmt>] [<file> ...]
 git stash [push] [-m/--message=<text>#locki-<wt-id>]
@@ -78,7 +80,7 @@ Finish:
 
 ```locki-bridged-command-filter
 gh -v/--version
-gh api (repos/<owner>/<repo>/pulls/<number>/comments | repos/<owner>/<repo>/dependabot/alerts | repos/<owner>/<repo>/dependabot/alerts/<number> | repos/<owner>/<repo>/code-scanning/alerts | repos/<owner>/<repo>/code-scanning/alerts/<number> | repos/<owner>/<repo>/secret-scanning/alerts | repos/<owner>/<repo>/secret-scanning/alerts/<number>) [-q/--jq=<expr>]
+gh api (repos/<owner>/<repo>/pulls/<number>/comments | repos/<owner>/<repo>/pulls/<number>/reviews | repos/<owner>/<repo>/dependabot/alerts | repos/<owner>/<repo>/dependabot/alerts/<number> | repos/<owner>/<repo>/code-scanning/alerts | repos/<owner>/<repo>/code-scanning/alerts/<number> | repos/<owner>/<repo>/secret-scanning/alerts | repos/<owner>/<repo>/secret-scanning/alerts/<number>) [-q/--jq=<expr>]
 gh auth status
 gh issue (view [<number>] [--comments] [--json=<fields>] [-q/--jq=<expr>] | list [-L/--limit=<n>] [-s/--state=<state>] [-S/--search=<query>] [--json=<fields>] [-q/--jq=<expr>])
 gh pr (view [<number>] [--comments] [--json=<fields>] | list [-L/--limit=<n>] [-s/--state=<state>] [-S/--search=<query>] | diff [<number>] [--name-only] [--patch] [--stat] | status | checks [<number>])

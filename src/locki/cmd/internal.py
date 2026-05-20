@@ -391,6 +391,31 @@ class _RuleGroup:
     value_flag_keys: frozenset[str]
 
 
+_GIT_TRANSPARENT_BOOL = {"--no-optional-locks"}
+_GIT_TRANSPARENT_CONFIG = {"log.showsignature", "core.quotepath"}
+
+
+def _strip_git_transparent(argv: list[str]) -> list[str]:
+    """Strip harmless top-level git flags (before the subcommand) so they don't block matching."""
+    if not argv or argv[0] != "git":
+        return argv
+    out = [argv[0]]
+    i = 1
+    while i < len(argv):
+        if argv[i] in _GIT_TRANSPARENT_BOOL:
+            i += 1
+        elif argv[i] == "-c" and i + 1 < len(argv):
+            key = argv[i + 1].partition("=")[0].lower()
+            if key in _GIT_TRANSPARENT_CONFIG:
+                i += 2
+            else:
+                break
+        else:
+            break
+    out.extend(argv[i:])
+    return out
+
+
 class Ruleset:
     def __init__(self, groups: dict[tuple[str, ...], _RuleGroup]) -> None:
         self._groups = groups
@@ -427,6 +452,8 @@ class Ruleset:
         """Return None if allowed, or an error message."""
         if not argv:
             return f"Command not allowed: {shlex.join(argv)!r}"
+
+        argv = _strip_git_transparent(argv)
 
         prefix: tuple[str, ...] | None = None
         group: _RuleGroup | None = None

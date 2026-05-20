@@ -56,15 +56,20 @@ fi
 EOF
 
 ## Command bridge (git, gh, locki → SSH proxy to host)
+## When cwd is outside the worktree tree, run the real binary directly in sandbox.
 tee /opt/locki/bin/high/git /opt/locki/bin/high/gh /opt/locki/bin/high/locki > /dev/null << 'EOF'
 #!/bin/sh
 cmd=$(basename "$0")
-set -- "$(pwd)" "$cmd" "$@"
-q=""
-for arg in "$@"; do
-  q="${q:+$q }'$(printf '%s' "$arg" | sed "s/'/'\\\\''/g")'"
-done
-exec ssh -F /root/.ssh/locki-ssh-config locki-proxy -- "$q"
+cwd=$(pwd)
+case "$cwd" in "$LOCKI_WORKTREES_HOME"/*)
+  set -- "$cwd" "$cmd" "$@"
+  q=""
+  for arg in "$@"; do
+    q="${q:+$q }'$(printf '%s' "$arg" | sed "s/'/'\\\\''/g")'"
+  done
+  exec ssh -F /root/.ssh/locki-ssh-config locki-proxy -- "$q"
+esac
+PATH="${PATH#*/opt/locki/bin/high:}" exec "$cmd" "$@"
 EOF
 
 ## agent-browser: install chromium if missing, set env, then exec real binary
