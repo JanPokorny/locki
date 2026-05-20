@@ -308,8 +308,3 @@ echo '192.168.5.2 host.lima.internal' >> /etc/hosts
 
 ## network is not available for a short while, wait for it
 timeout 30s sh -c 'while ! ping -c1 -W1 connectivitycheck.gstatic.com >/dev/null 2>&1; do sleep 1; done'
-
-# MARK: Temp directory
-
-mkdir -p "$LOCKI_WORKTREE_PATH/.locki/tmp"
-ln -sfn "$LOCKI_WORKTREE_PATH/.locki/tmp" /tmp/locki

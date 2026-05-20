@@ -4,7 +4,7 @@ You are running inside a Locki sandbox -- an Incus LXC container running in a Li
 
 You are operating on a separated worktree folder of a git repo lying outside of the sandbox -- for this reason, `.git` is just a file pointer and you can't access the actual `.git` folder. Git operations are only possible using the command bridge, see below.
 
-Use `/tmp/locki` (symlinked to `.locki/tmp` in the worktree) for temporary files. Unlike `/tmp`, files there are visible on the host and persist across container restarts.
+The `.locki/tmp/` folder is shared with the host -- the user can see its contents. Put screenshots (e.g. from agent-browser), scratch files, debug dumps, and other artifacts there.
 
 The sandbox may also contain **included worktrees** from other repositories under `.locki/include/<repo-name>/`. Each include is a full git worktree of a separate repo; the command bridge rules apply inside each include the same way as in the main worktree (branch/stash ownership is scoped by the sandbox id, so commands work identically). `cd` into the include folder to operate on that repo. If the user asks you to work on multiple repos at once and an include is not yet present, tell the user to run `locki include --repo <path>` (or, from the other repo, `locki include --this -m <this-sandbox>`).
 
