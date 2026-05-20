@@ -183,10 +183,13 @@ To my knowledge Locki is the only one packing a fully vertically integrated Incu
 
   ```toml
   # locki.toml
-  
-  [incus_image]
-  aarch64 = "ubuntu/questing"
-  x86_64 = "ubuntu/questing"
+  incus_image = "ubuntu/questing"
+  ```
+
+  For local image archives, use a path (relative to repo root) or a glob pattern. When a glob matches multiple files, the right one is picked by architecture substring (e.g. `arm64`, `x86_64`):
+
+  ```toml
+  incus_image = "images/locki-*.tar.xz"
   ```
   <small>(Since containers share a binary cache, it is not recommended to mix `musl` distros (like Alpine) with regular ones.)
 

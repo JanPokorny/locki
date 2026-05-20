@@ -227,28 +227,44 @@ assert_fail "sandbox b can't see sandbox a's /tmp" locki x -m "$LOGIN" test -f /
 echo
 echo "Testing locki.toml custom image..."
 
+# String format (same image for all arches)
+cat > "$REPO/locki.toml" << 'TOML'
+incus_image = "images:ubuntu/24.04"
+TOML
+
+assert_output "string incus_image runs ubuntu" "Ubuntu" locki x --new --id-file "$ID_DIR/ubuntu" cat /etc/os-release
+UBUNTU_SB=$(cat "$ID_DIR/ubuntu")
+
+# Legacy dict format (backward compat)
 cat > "$REPO/locki.toml" << 'TOML'
 [incus_image]
 aarch64 = "images:ubuntu/24.04"
 x86_64 = "images:ubuntu/24.04"
 TOML
 
-assert_output "custom image container runs ubuntu" "Ubuntu" locki x --new --id-file "$ID_DIR/ubuntu" cat /etc/os-release
-UBUNTU_SB=$(cat "$ID_DIR/ubuntu")
+assert_output "dict incus_image runs ubuntu" "Ubuntu" locki x --new cat /etc/os-release
 
+# Export Ubuntu image to test local file + glob
 LIMACTL=$(python -c 'from locki.utils import limactl; print(limactl())')
 UBUNTU_FP=$("$LIMACTL" shell --start locki -- sudo incus config get "$UBUNTU_SB" volatile.base_image)
 "$LIMACTL" shell --start locki -- sudo incus image export "$UBUNTU_FP" /tmp/locki-e2e-ubuntu-img >/dev/null
 "$LIMACTL" copy locki:/tmp/locki-e2e-ubuntu-img.tar.xz "$TMPDIR_ROOT/ubuntu-img.tar.xz"
 "$LIMACTL" shell --start locki -- sudo rm -f /tmp/locki-e2e-ubuntu-img.tar.xz >/dev/null
 
-cat > "$REPO/locki.toml" << 'TOML'
-[incus_image]
-aarch64 = "../ubuntu-img.tar.xz"
-x86_64 = "../ubuntu-img.tar.xz"
+# Local file via string (no glob)
+cat > "$REPO/locki.toml" << TOML
+incus_image = "../ubuntu-img.tar.xz"
 TOML
 
-assert_output "local image archive container runs ubuntu" "Ubuntu" locki x --new cat /etc/os-release
+assert_output "local file string incus_image works" "Ubuntu" locki x --new cat /etc/os-release
+
+# Glob with single match
+cat > "$REPO/locki.toml" << TOML
+incus_image = "../ubuntu-img*.tar.xz"
+TOML
+
+assert_output "glob incus_image with single match works" "Ubuntu" locki x --new cat /etc/os-release
+
 rm -f "$REPO/locki.toml"
 
 # ── port forwarding ─────────────────────────────────────────────────────────

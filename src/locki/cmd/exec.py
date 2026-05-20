@@ -254,7 +254,7 @@ def exec_cmd(ctx, match, interactive, create, id_file):
             check=False,
         )
     else:
-        incus_image = config.get_incus_image()
+        incus_image = config.get_incus_image(sandbox.repo)
 
         local_path = sandbox.repo / incus_image
         with file_lock("image", "Waiting for another image import"):

@@ -24,15 +24,33 @@ def _arch() -> str:
             fail(f"Unsupported architecture: {arch}")
 
 
+_ARCH_HINTS: dict[str, list[str]] = {
+    "aarch64": ["arm64", "aarch64", "arm"],
+    "x86_64": ["x86_64", "amd64", "x64"],
+}
+
+
 class LockiConfig(pydantic.BaseModel):
-    incus_image: dict[str, str] = pydantic.Field({"x86_64": "images:fedora/43", "aarch64": "images:fedora/43"})
+    incus_image: str | dict[str, str] = "images:fedora/43"
     ai_command: str = ""
     ide_command: str = ""
 
-    def get_incus_image(self) -> str:
-        if _arch() not in self.incus_image:
-            fail(f"No incus_image configured for architecture '{_arch()}'. Available: {', '.join(self.incus_image)}")
-        return self.incus_image[_arch()]
+    def get_incus_image(self, repo: pathlib.Path) -> str:
+        if isinstance(self.incus_image, dict):
+            if _arch() not in self.incus_image:
+                fail(f"No incus_image configured for architecture '{_arch()}'. Available: {', '.join(self.incus_image)}")
+            return self.incus_image[_arch()]
+
+        matches = sorted(repo.glob(self.incus_image))
+        if len(matches) <= 1:
+            return str(matches[0].relative_to(repo)) if matches else self.incus_image
+
+        for hint in _ARCH_HINTS.get(_arch(), []):
+            arch_matches = [m for m in matches if hint in m.name.lower()]
+            if len(arch_matches) == 1:
+                return str(arch_matches[0].relative_to(repo))
+
+        fail(f"Ambiguous incus_image glob '{self.incus_image}' for {_arch()}: {[m.name for m in matches]}")
 
 
 def load_config(git_root: pathlib.Path | None, *, skip_auto_setup: bool = False) -> LockiConfig:
