@@ -173,7 +173,7 @@ for pair in \
 #!/bin/bash
 set -eo pipefail
 if ! locki-command-real $bin >/dev/null 2>&1; then
-  node -v 2>&1 >/dev/null # trigger auto-install of nodejs (Mise misbehaves with the auto-install shim)
+  locki-command-real node >/dev/null 2>&1 || /opt/locki/bin/high/locki-auto-install nodejs env MISE_AUTO_INSTALL=false MISE_NO_HOOKS=true mise use -g node >/dev/null 2>&1
   /opt/locki/bin/high/locki-auto-install $pkg env MISE_AUTO_INSTALL=false MISE_NO_HOOKS=true mise use -g npm:$pkg
 fi
 exec "\$(locki-command-real $bin)" "\$@"
