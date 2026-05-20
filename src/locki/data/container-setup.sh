@@ -55,6 +55,18 @@ else
 fi
 EOF
 
+## locki-command-real: resolve binary outside ALL /opt/locki/bin/ shim folders
+cat > /opt/locki/bin/high/locki-command-real << 'EOF'
+#!/bin/sh
+PATH=$(printf '%s' "$PATH" | tr ':' '\n' | grep -v '^/opt/locki/bin/' | paste -sd:) command -v "$1" || exit 1
+EOF
+
+## locki-command-real-or-autoinstalled: resolve binary outside /opt/locki/bin/high (low shims still reachable)
+cat > /opt/locki/bin/high/locki-command-real-or-autoinstalled << 'EOF'
+#!/bin/sh
+PATH="${PATH#*/opt/locki/bin/high:}" command -v "$1" || exit 1
+EOF
+
 ## Command bridge (git, gh, locki → SSH proxy to host)
 ## When cwd is outside the worktree tree, run the real binary directly in sandbox.
 tee /opt/locki/bin/high/git /opt/locki/bin/high/gh /opt/locki/bin/high/locki > /dev/null << 'EOF'
@@ -69,19 +81,18 @@ case "$cwd" in "$LOCKI_WORKTREES_HOME"/*)
   done
   exec ssh -F /root/.ssh/locki-ssh-config locki-proxy -- "$q"
 esac
-PATH="${PATH#*/opt/locki/bin/high:}" exec "$cmd" "$@"
+exec "$(locki-command-real-or-autoinstalled "$cmd")" "$@"
 EOF
 
 ## agent-browser: install chromium if missing, set env, then exec real binary
 cat > /opt/locki/bin/high/agent-browser << 'EOF'
 #!/bin/bash
 set -eo pipefail
-export PATH="${PATH#*/opt/locki/bin/high:}"
 if ! command -v chromium >/dev/null 2>&1 && ! command -v chromium-browser >/dev/null 2>&1; then
   /opt/locki/bin/high/locki-auto-install chromium sh -c 'if command -v dnf >/dev/null 2>&1; then dnf install -yq chromium; elif command -v apt-get >/dev/null 2>&1; then apt-get update -qq && apt-get install -yqq chromium-browser; fi'
 fi
 export AGENT_BROWSER_EXECUTABLE_PATH=$(command -v chromium 2>/dev/null || command -v chromium-browser 2>/dev/null)
-exec agent-browser "$@"
+exec "$(locki-command-real-or-autoinstalled agent-browser)" "$@"
 EOF
 
 ## node/npm/npx: install Node.js if missing via mise
@@ -89,10 +100,10 @@ for bin in node npm npx; do
   cat > "/opt/locki/bin/high/$bin" << EOF
 #!/bin/bash
 set -eo pipefail
-if ! PATH="\$(printf '%s' "\$PATH" | tr ':' '\\n' | grep -v '^/opt/locki/bin/' | paste -sd:)" command -v node >/dev/null 2>&1; then
-  /opt/locki/bin/high/locki-auto-install nodejs env MISE_AUTO_INSTALL=false MISE_NO_HOOKS=true mise use -g node
+if ! locki-command-real node >/dev/null 2>&1; then
+  /opt/locki/bin/high/locki-auto-install nodejs env MISE_AUTO_INSTALL=false MISE_NO_HOOKS=true mise use -g node >/dev/null 2>&1
 fi
-PATH="\${PATH#*/opt/locki/bin/high:}" exec $bin "\$@"
+exec "\$(locki-command-real-or-autoinstalled $bin)" "\$@"
 EOF
 done
 
@@ -100,47 +111,45 @@ done
 cat > /opt/locki/bin/high/pnpm << 'EOF'
 #!/bin/bash
 set -eo pipefail
-export PATH="${PATH#*/opt/locki/bin/high:}"
-if ! pnpm config get enable-global-virtual-store 2>/dev/null | grep -q true; then
-  /opt/locki/bin/high/locki-auto-install pnpm sh -c 'pnpm config set store-dir /var/cache/locki/pnpm && pnpm config set global-bin-dir /usr/local/bin && pnpm config set enable-global-virtual-store true && pnpm config delete virtual-store-dir 2>/dev/null || true'
+_real=$(locki-command-real-or-autoinstalled pnpm) || exit 1
+if ! "$_real" config get enable-global-virtual-store 2>/dev/null | grep -q true; then
+  /opt/locki/bin/high/locki-auto-install pnpm sh -c "\"$_real\" config set store-dir /var/cache/locki/pnpm && \"$_real\" config set global-bin-dir /usr/local/bin && \"$_real\" config set enable-global-virtual-store true && \"$_real\" config delete virtual-store-dir 2>/dev/null || true"
 fi
-exec pnpm "$@"
+exec "$_real" "$@"
 EOF
 
 ## uv: symlink .venv to btrfs
 cat > /opt/locki/bin/high/uv << 'EOF'
 #!/bin/bash
 set -eo pipefail
-export PATH="${PATH#*/opt/locki/bin/high:}"
-if _dir="$(uv workspace dir 2>/dev/null)"; then
+_real=$(locki-command-real-or-autoinstalled uv) || exit 1
+if _dir="$("$_real" workspace dir 2>/dev/null)"; then
   export UV_PROJECT_ENVIRONMENT="/var/cache/locki/uv-venvs${_dir}/.venv"
   ln -sfn "$UV_PROJECT_ENVIRONMENT" "$_dir/.venv" 2>/dev/null || true
 fi
-exec uv "$@"
+exec "$_real" "$@"
 EOF
 
 ## yarn: symlink node_modules to btrfs
 cat > /opt/locki/bin/high/yarn << 'EOF'
 #!/bin/bash
 set -eo pipefail
-export PATH="${PATH#*/opt/locki/bin/high:}"
-if _dir="$(npm prefix 2>/dev/null)"; then
+if _dir="$("$(locki-command-real-or-autoinstalled npm)" prefix 2>/dev/null)"; then
   mkdir -p "/var/cache/locki/node-modules${_dir}/node_modules"
   ln -sfn "/var/cache/locki/node-modules${_dir}/node_modules" "$_dir/node_modules" 2>/dev/null || true
 fi
-exec yarn "$@"
+exec "$(locki-command-real-or-autoinstalled yarn)" "$@"
 EOF
 
 ## bun: symlink node_modules to btrfs + redirect cache
 cat > /opt/locki/bin/high/bun << 'EOF'
 #!/bin/bash
 set -eo pipefail
-export PATH="${PATH#*/opt/locki/bin/high:}"
-if _dir="$(npm prefix 2>/dev/null)"; then
+if _dir="$("$(locki-command-real-or-autoinstalled npm)" prefix 2>/dev/null)"; then
   mkdir -p "/var/cache/locki/node-modules${_dir}/node_modules"
   ln -sfn "/var/cache/locki/node-modules${_dir}/node_modules" "$_dir/node_modules" 2>/dev/null || true
 fi
-exec bun "$@"
+exec "$(locki-command-real-or-autoinstalled bun)" "$@"
 EOF
 
 chmod +x /opt/locki/bin/high/*
@@ -163,10 +172,11 @@ for pair in \
   cat > "/opt/locki/bin/low/$bin" << EOF
 #!/bin/bash
 set -eo pipefail
-if ! PATH=\$(printf '%s' "\$PATH" | tr ':' '\\n' | grep -v '^/opt/locki/bin/' | paste -sd:) command -v $bin >/dev/null 2>&1; then
-  /opt/locki/bin/high/locki-auto-install $pkg npm install -g $pkg
+if ! locki-command-real $bin >/dev/null 2>&1; then
+  node -v 2>&1 >/dev/null # trigger auto-install of nodejs (Mise misbehaves with the auto-install shim)
+  /opt/locki/bin/high/locki-auto-install $pkg env MISE_AUTO_INSTALL=false MISE_NO_HOOKS=true mise use -g npm:$pkg
 fi
-exec "\$(PATH=\$(printf '%s' "\$PATH" | tr ':' '\\n' | grep -v '^/opt/locki/bin/low\$' | paste -sd:) command -v $bin)" "\$@"
+exec "\$(locki-command-real $bin)" "\$@"
 EOF
 done
 
@@ -182,10 +192,10 @@ for pair in \
   cat > "/opt/locki/bin/low/$bin" << EOF
 #!/bin/bash
 set -eo pipefail
-if ! PATH=\$(printf '%s' "\$PATH" | tr ':' '\\n' | grep -v '^/opt/locki/bin/' | paste -sd:) command -v $bin >/dev/null 2>&1; then
+if ! locki-command-real $bin >/dev/null 2>&1; then
   /opt/locki/bin/high/locki-auto-install $pkg corepack enable $pkg
 fi
-exec "\$(PATH=\$(printf '%s' "\$PATH" | tr ':' '\\n' | grep -v '^/opt/locki/bin/low\$' | paste -sd:) command -v $bin)" "\$@"
+exec "\$(locki-command-real $bin)" "\$@"
 EOF
 done
 
@@ -209,24 +219,24 @@ for pair in \
   cat > "/opt/locki/bin/low/$bin" << EOF
 #!/bin/bash
 set -eo pipefail
-if ! PATH=\$(printf '%s' "\$PATH" | tr ':' '\\n' | grep -v '^/opt/locki/bin/' | paste -sd:) command -v $bin >/dev/null 2>&1; then
+if ! locki-command-real $bin >/dev/null 2>&1; then
   /opt/locki/bin/high/locki-auto-install $pkg env MISE_AUTO_INSTALL=false MISE_NO_HOOKS=true mise use -g $pkg
 fi
-exec "\$(PATH=\$(printf '%s' "\$PATH" | tr ':' '\\n' | grep -v '^/opt/locki/bin/low\$' | paste -sd:) command -v $bin)" "\$@"
+exec "\$(locki-command-real $bin)" "\$@"
 EOF
 done
 
 ## bwrap: no-op shim so Codex doesn't complain at startup
 cat > /opt/locki/bin/low/bwrap << 'EOF'
 #!/bin/sh
-exec bwrap "$@"
+exec "$(locki-command-real bwrap)" "$@"
 EOF
 
 ## Mise
 cat > /opt/locki/bin/low/mise << 'EOF'
 #!/bin/bash
 set -eo pipefail
-if ! PATH=$(printf '%s' "$PATH" | tr ':' '\n' | grep -v '^/opt/locki/bin/' | paste -sd:) command -v mise >/dev/null 2>&1; then
+if ! locki-command-real mise >/dev/null 2>&1; then
   /opt/locki/bin/high/locki-auto-install mise sh -c '
     set -eu
     mise_version="2026.4.10"
@@ -264,17 +274,17 @@ if ! PATH=$(printf '%s' "$PATH" | tr ':' '\n' | grep -v '^/opt/locki/bin/' | pas
     chmod +x /usr/local/bin/mise
   '
 fi
-exec "$(PATH=$(printf '%s' "$PATH" | tr ':' '\n' | grep -v '^/opt/locki/bin/low$' | paste -sd:) command -v mise)" "$@"
+exec "$(locki-command-real mise)" "$@"
 EOF
 
 ## Docker
 cat > /opt/locki/bin/low/docker << 'EOF'
 #!/bin/bash
 set -eo pipefail
-if ! PATH=$(printf '%s' "$PATH" | tr ':' '\n' | grep -v '^/opt/locki/bin/' | paste -sd:) command -v docker >/dev/null 2>&1; then
+if ! locki-command-real docker >/dev/null 2>&1; then
   /opt/locki/bin/high/locki-auto-install docker sh -c 'if command -v dnf >/dev/null 2>&1; then dnf install -yq moby-engine docker-compose docker-buildx docker-buildkit; else echo "Error: unsupported distro, install Docker manually (https://get.docker.com/)"; exit 1; fi && systemctl enable --now docker'
 fi
-exec "$(PATH=$(printf '%s' "$PATH" | tr ':' '\n' | grep -v '^/opt/locki/bin/low$' | paste -sd:) command -v docker)" "$@"
+exec "$(locki-command-real docker)" "$@"
 EOF
 
 chmod +x /opt/locki/bin/low/*
