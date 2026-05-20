@@ -32,6 +32,7 @@ def create_sandbox_worktree(sandbox: SandboxInfo) -> None:
     locki_dir = sandbox.wt_path / ".locki"
     locki_dir.mkdir(parents=True, exist_ok=True)
     (locki_dir / ".gitignore").write_text("*\n")
+    (locki_dir / "tmp").mkdir(exist_ok=True)
     sandbox.meta_path.mkdir(parents=True, exist_ok=True)
     (sandbox.meta_path / ".git").write_text((sandbox.wt_path / ".git").read_text())
     (sandbox.meta_path / "repo").write_text(str(sandbox.repo))

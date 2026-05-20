@@ -306,7 +306,7 @@ def exec_cmd(ctx, match, interactive, create, id_file):
         )
         env_flags = [flag for k, v in CONTAINER_ENV.items() for flag in ("--env", f"{k}={v}")]
         run_in_vm(
-            ["incus", "exec", sandbox.wt_id, *env_flags, "--env", f"LOCKI_WORKTREES_HOME={WORKTREES}", "--", "/bin/sh"],
+            ["incus", "exec", sandbox.wt_id, *env_flags, "--env", f"LOCKI_WORKTREES_HOME={WORKTREES}", "--env", f"LOCKI_WORKTREE_PATH={sandbox.wt_path}", "--", "/bin/sh"],
             "Configuring container",
             input=setup_script,
             print_success=False,
