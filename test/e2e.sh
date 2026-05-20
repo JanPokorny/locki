@@ -369,6 +369,17 @@ echo "gitdir: /tmp/evil" > "$INCLUDE_PATH/.git"
 assert_ok   "tampered .git is auto-repaired" locki x -m "$AUTH" bash -c "cd $INCLUDE_PATH && git status"
 assert_output ".git restored from metadata" "$ORIGINAL_DOTGIT" cat "$INCLUDE_PATH/.git"
 
+# ── branch verification on non-conforming worktree ──────────────────────────
+
+echo
+echo "Testing branch verification on non-conforming worktree..."
+
+WORKTREE_B=$(git worktree list --porcelain | grep -B2 "branch refs/heads/untitled#locki-$LOGIN" | head -1 | sed 's/worktree //')
+git -C "$WORKTREE_B" checkout -b rogue-branch 2>/dev/null
+assert_output "worktree switched to rogue branch" "rogue-branch" git -C "$WORKTREE_B" branch --show-current
+assert_output "locki x auto-fixes branch" "fix-ok" locki x -m "$LOGIN" echo fix-ok
+assert_output "branch renamed with locki suffix" "rogue-branch#locki-$LOGIN" git -C "$WORKTREE_B" branch --show-current
+
 # ── worktree cleanup ─────────────────────────────────────────────────────────
 
 echo

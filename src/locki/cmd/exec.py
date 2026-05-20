@@ -28,6 +28,7 @@ from locki.utils import (
     file_lock,
     gen_id,
     limactl,
+    live_branch,
     pretty_path,
     resolve_sandbox,
     run_command,
@@ -222,6 +223,21 @@ def exec_cmd(ctx, match, interactive, create, id_file):
 
     if not sandbox.wt_path.exists():
         create_sandbox_worktree(sandbox)
+    else:
+        suffix = f"#locki-{sandbox.wt_id}"
+        for meta_dir, wt_path in [
+            (sandbox.meta_path, sandbox.wt_path),
+            *((sandbox.include_meta_path(i.name), sandbox.include_wt_path(i.name))
+              for i in sandbox.include if sandbox.include_wt_path(i.name).exists() and sandbox.include_meta_path(i.name).exists()),
+        ]:
+            branch = live_branch(meta_dir)
+            if branch.startswith("(") or branch.endswith(suffix):
+                continue
+            new_branch = f"{branch.split('#locki-')[0]}{suffix}"
+            run_command(
+                ["git", "-C", str(wt_path), "checkout", "-B", new_branch],
+                f"Fixing branch to {click.style(new_branch, fg='green')}",
+            )
 
     config = load_config(sandbox.repo)
 
