@@ -31,8 +31,9 @@ if ! ldconfig -p 2>/dev/null | grep -q libatomic; then
   if [ -n "$libatomic_b64" ]; then
     mkdir -p /usr/local/lib
     echo "$libatomic_b64" | base64 -d > /usr/local/lib/libatomic.so.1
+    mkdir -p /etc/ld.so.conf.d
     echo /usr/local/lib > /etc/ld.so.conf.d/locki.conf
-    ldconfig
+    ldconfig 2>/dev/null || true
   fi
 fi
 
@@ -52,13 +53,16 @@ if "$@" >>"$log" 2>&1; then
   printf '\033[1;32mᛝ\033[0m Installed %s\n' "$name" >&2
 else
   printf '\033[1;31mᛞ\033[0m Failed to install %s, see log at \033[33m%s\033[0m\n' "$name" "$log" >&2
+  tail -n 30 "$log" >&2
+  exit 1
 fi
 EOF
 
 ## locki-command-real: resolve binary outside ALL /opt/locki/bin/ shim folders
 cat > /opt/locki/bin/high/locki-command-real << 'EOF'
 #!/bin/sh
-PATH=$(printf '%s' "$PATH" | tr ':' '\n' | grep -v '^/opt/locki/bin/' | paste -sd:) command -v "$1" || exit 1
+_mise="${MISE_INSTALL_PATH:-/usr/local/bin/mise}"
+PATH=$(printf '%s' "$PATH" | tr ':' '\n' | grep -v -e '^/opt/locki/bin/' -e '/mise/shims' | paste -sd:) command -v "$1" || "$_mise" which "$1" 2>/dev/null || exit 1
 EOF
 
 ## locki-command-real-or-autoinstalled: resolve binary outside /opt/locki/bin/high (low shims still reachable)
@@ -291,12 +295,17 @@ chmod +x /opt/locki/bin/low/*
 
 # MARK: Caching
 
-mkdir -p /etc/apt/apt.conf.d /var/cache/locki/apt/cache /var/cache/locki/apt/state
-printf 'Dir::Cache "/var/cache/locki/apt/cache";\nDir::State "/var/cache/locki/apt/state";\n' > /etc/apt/apt.conf.d/99local-cache
+if command -v apt-get >/dev/null 2>&1; then
+  mkdir -p /etc/apt/apt.conf.d /var/cache/locki/apt/cache /var/cache/locki/apt/state
+  printf 'Dir::Cache "/var/cache/locki/apt/cache";\nDir::State "/var/cache/locki/apt/state";\n' > /etc/apt/apt.conf.d/99local-cache
+fi
 
-mkdir -p /etc/dnf /var/cache/locki/dnf
-printf "system_cachedir=/var/cache/locki/dnf\nkeepcache=1\ntsflags=nodocs\ninstall_weak_deps=False\nfastestmirror=True\n" >> /etc/dnf/dnf.conf
-printf '%%_install_langs en_US:en\n' >> /etc/rpm/macros.locki
+if command -v dnf >/dev/null 2>&1; then
+  mkdir -p /etc/dnf /var/cache/locki/dnf
+  printf "system_cachedir=/var/cache/locki/dnf\nkeepcache=1\ntsflags=nodocs\ninstall_weak_deps=False\nfastestmirror=True\n" >> /etc/dnf/dnf.conf
+  mkdir -p /etc/rpm
+  printf '%%_install_langs en_US:en\n' >> /etc/rpm/macros.locki
+fi
 
 ln -sfn /var/cache/locki $HOME/.cache
 

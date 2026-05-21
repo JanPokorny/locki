@@ -91,24 +91,37 @@ logger = logging.getLogger(__name__)
 
 
 def import_local_incus_image(local_path: pathlib.Path) -> str:
-    """Copy a local Incus image archive into the VM and import it."""
+    """Copy a local Incus image archive into the VM and import it.
+
+    Supports both unified tarballs and split images (metadata + companion .root file)."""
     tmp_name = f"locki-img-{gen_id()}"
     vm_path = f"/tmp/{tmp_name}"
+    rootfs_local = local_path.parent / (local_path.name + ".root")
+    vm_files = [vm_path]
     run_command(
         [limactl(), "copy", str(local_path.resolve()), f"locki:{vm_path}"],
         "Copying image into VM",
         cwd="/",
         print_success=False,
     )
+    if rootfs_local.is_file():
+        vm_rootfs = f"{vm_path}.root"
+        vm_files.append(vm_rootfs)
+        run_command(
+            [limactl(), "copy", str(rootfs_local.resolve()), f"locki:{vm_rootfs}"],
+            "Copying rootfs into VM",
+            cwd="/",
+            print_success=False,
+        )
     try:
         run_in_vm(
-            ["incus", "image", "import", vm_path, f"--alias={tmp_name}"],
+            ["incus", "image", "import", *vm_files, f"--alias={tmp_name}"],
             "Importing container image",
             print_success=False,
         )
     finally:
         run_in_vm(
-            ["rm", "-f", vm_path],
+            ["rm", "-f", *vm_files],
             "Cleaning up copied image archive",
             check=False,
             quiet=True,

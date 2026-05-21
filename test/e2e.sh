@@ -48,9 +48,10 @@ export XDG_CONFIG_HOME="$TMPDIR_ROOT/xdg/config"
 export XDG_DATA_HOME="$TMPDIR_ROOT/xdg/data"
 export XDG_STATE_HOME="$TMPDIR_ROOT/xdg/state"
 export XDG_RUNTIME_DIR="$TMPDIR_ROOT/xdg/run"
+export LIMA_HOME="$XDG_STATE_HOME/locki/lima"
 kill_locki_sshd() { local pf="$XDG_RUNTIME_DIR/locki/sshd.pid"; [ -f "$pf" ] && kill "$(cat "$pf")" 2>/dev/null || true; }
 kill_locki_sshd
-cleanup() { kill_locki_sshd; rm -rf "$TMPDIR_ROOT"; }
+cleanup() { kill_locki_sshd; limactl delete -f locki 2>/dev/null || true; rm -rf "$TMPDIR_ROOT"; }
 trap cleanup EXIT
 
 VENV="$TMPDIR_ROOT/v"
@@ -244,12 +245,18 @@ TOML
 
 assert_output "dict incus_image runs ubuntu" "Ubuntu" locki x --new cat /etc/os-release
 
-# Export Ubuntu image to test local file + glob
+# Export Ubuntu image to test local file + glob (split format: metadata + .root)
 LIMACTL=$(python -c 'from locki.utils import limactl; print(limactl())')
-UBUNTU_FP=$("$LIMACTL" shell --start locki -- sudo incus config get "$UBUNTU_SB" volatile.base_image)
-"$LIMACTL" shell --start locki -- sudo incus image export "$UBUNTU_FP" /tmp/locki-e2e-ubuntu-img >/dev/null
-"$LIMACTL" copy locki:/tmp/locki-e2e-ubuntu-img.tar.xz "$TMPDIR_ROOT/ubuntu-img.tar.xz"
-"$LIMACTL" shell --start locki -- sudo rm -f /tmp/locki-e2e-ubuntu-img.tar.xz >/dev/null
+UBUNTU_FP=$("$LIMACTL" shell --start --workdir=/ locki -- sudo incus config get "$UBUNTU_SB" volatile.base_image)
+"$LIMACTL" shell --start --workdir=/ locki -- sudo bash -c "
+  set -e
+  incus image export '$UBUNTU_FP' /tmp/locki-e2e-ubuntu-img
+  # Delete cached image so re-import from local file doesn't conflict
+  incus image delete '$UBUNTU_FP'
+" >/dev/null
+"$LIMACTL" copy locki:/tmp/locki-e2e-ubuntu-img "$TMPDIR_ROOT/ubuntu-img.tar.xz"
+"$LIMACTL" copy locki:/tmp/locki-e2e-ubuntu-img.root "$TMPDIR_ROOT/ubuntu-img.tar.xz.root" 2>/dev/null || true
+"$LIMACTL" shell --start --workdir=/ locki -- sudo rm -f /tmp/locki-e2e-ubuntu-img /tmp/locki-e2e-ubuntu-img.root >/dev/null
 
 # Local file via string (no glob)
 cat > "$REPO/locki.toml" << TOML
@@ -258,7 +265,7 @@ TOML
 
 assert_output "local file string incus_image works" "Ubuntu" locki x --new cat /etc/os-release
 
-# Glob with single match
+# Glob with single match (pattern excludes the .root companion)
 cat > "$REPO/locki.toml" << TOML
 incus_image = "../ubuntu-img*.tar.xz"
 TOML
@@ -320,7 +327,7 @@ assert_fail  "port < 1024 rejected" locki port-forward -m "$LOGIN" 80
 echo
 echo "Testing locki new..."
 
-NEW_PATH=$(locki new -n 2>/dev/null)
+NEW_PATH=$(locki new 2>/dev/null)
 assert_ok    "locki new creates worktree dir" test -d "$NEW_PATH"
 assert_output "worktree dir uses <repo>-locki-<id> format" "/r-locki-" echo "$NEW_PATH"
 
