@@ -38,7 +38,9 @@ class LockiConfig(pydantic.BaseModel):
     def get_incus_image(self, repo: pathlib.Path) -> str:
         if isinstance(self.incus_image, dict):
             if _arch() not in self.incus_image:
-                fail(f"No incus_image configured for architecture '{_arch()}'. Available: {', '.join(self.incus_image)}")
+                fail(
+                    f"No incus_image configured for architecture '{_arch()}'. Available: {', '.join(self.incus_image)}"
+                )
             return self.incus_image[_arch()]
 
         matches = sorted(repo.glob(self.incus_image))

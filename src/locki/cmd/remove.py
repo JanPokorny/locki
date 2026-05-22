@@ -96,8 +96,12 @@ def _remove_sandbox(sandbox: SandboxInfo, *, branches: bool) -> None:
 @click.command()
 @click.option("--match", "-m", default=None, help="Select by sandbox id or branch name (prefix match).")
 @click.option("--interactive", "-i", is_flag=True, default=False, help="Use interactive picker.")
-@click.option("--force", "-f", is_flag=True, default=False, help="Remove despite having uncommited changes. (May lose work!)")
-@click.option("--branches", "-b", is_flag=True, default=False, help="Also delete all git branches belonging to this sandbox.")
+@click.option(
+    "--force", "-f", is_flag=True, default=False, help="Remove despite having uncommited changes. (May lose work!)"
+)
+@click.option(
+    "--branches", "-b", is_flag=True, default=False, help="Also delete all git branches belonging to this sandbox."
+)
 @click.option(
     "--merged", "-M", is_flag=True, default=False, help="Remove all clean sandboxes whose branch is merged into trunk."
 )

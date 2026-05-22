@@ -1,5 +1,3 @@
-from locki.runes import WARNING
-from json import JSONDecodeError
 import base64
 import contextlib
 import getpass
@@ -14,13 +12,14 @@ import subprocess
 import sys
 import tempfile
 import time
+from json import JSONDecodeError
 
 import click
 
 from locki.cmd.new import create_sandbox_worktree
 from locki.config import load_config
 from locki.paths import LIMA, PACKAGE_DATA, PID_FILE, PORT_FILE, RUNTIME, SANDBOX_HOME, WORKTREES
-from locki.runes import EXIT, INFO, SPINNER
+from locki.runes import EXIT, INFO, SPINNER, WARNING
 from locki.utils import (
     SandboxInfo,
     deep_merge,
@@ -240,8 +239,11 @@ def exec_cmd(ctx, match, interactive, create, id_file):
         suffix = f"#locki-{sandbox.wt_id}"
         for meta_dir, wt_path in [
             (sandbox.meta_path, sandbox.wt_path),
-            *((sandbox.include_meta_path(i.name), sandbox.include_wt_path(i.name))
-              for i in sandbox.include if sandbox.include_wt_path(i.name).exists() and sandbox.include_meta_path(i.name).exists()),
+            *(
+                (sandbox.include_meta_path(i.name), sandbox.include_wt_path(i.name))
+                for i in sandbox.include
+                if sandbox.include_wt_path(i.name).exists() and sandbox.include_meta_path(i.name).exists()
+            ),
         ]:
             branch = live_branch(meta_dir)
             if branch.startswith("(") or branch.endswith(suffix):
@@ -271,10 +273,7 @@ def exec_cmd(ctx, match, interactive, create, id_file):
 
         local_path = sandbox.repo / incus_image
         with file_lock("image", "Waiting for another image import"):
-            if local_path.is_file():
-                image_ref = import_local_incus_image(local_path)
-            else:
-                image_ref = incus_image
+            image_ref = import_local_incus_image(local_path) if local_path.is_file() else incus_image
 
             run_in_vm(
                 ["incus", "init", image_ref, sandbox.wt_id],
@@ -315,7 +314,12 @@ def exec_cmd(ctx, match, interactive, create, id_file):
             (PACKAGE_DATA / "container-setup.sh")
             .read_bytes()
             .replace(b"__AGENTS_MD_B64__", base64.b64encode((PACKAGE_DATA / "AGENTS.md").read_bytes()))
-            .replace(b"__LIBATOMIC_B64__", base64.b64encode((PACKAGE_DATA / "libatomic.so.1").read_bytes()) if (PACKAGE_DATA / "libatomic.so.1").is_file() else b"")
+            .replace(
+                b"__LIBATOMIC_B64__",
+                base64.b64encode((PACKAGE_DATA / "libatomic.so.1").read_bytes())
+                if (PACKAGE_DATA / "libatomic.so.1").is_file()
+                else b"",
+            )
         )
         env_flags = [flag for k, v in CONTAINER_ENV.items() for flag in ("--env", f"{k}={v}")]
         run_in_vm(
