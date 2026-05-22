@@ -68,7 +68,8 @@ EOF
 ## locki-command-real-or-autoinstalled: resolve binary outside /opt/locki/bin/high (low shims still reachable)
 cat > /opt/locki/bin/high/locki-command-real-or-autoinstalled << 'EOF'
 #!/bin/sh
-PATH="${PATH#*/opt/locki/bin/high:}" command -v "$1" || exit 1
+_mise="${MISE_INSTALL_PATH:-/usr/local/bin/mise}"
+"$_mise" which "$1" 2>/dev/null || PATH=$(printf '%s' "${PATH#*/opt/locki/bin/high:}" | tr ':' '\n' | grep -v '/mise/shims' | paste -sd:) command -v "$1" || exit 1
 EOF
 
 ## Command bridge (git, gh, locki → SSH proxy to host)
@@ -105,7 +106,7 @@ for bin in node npm npx; do
 #!/bin/bash
 set -eo pipefail
 if ! locki-command-real node >/dev/null 2>&1; then
-  /opt/locki/bin/high/locki-auto-install nodejs env MISE_AUTO_INSTALL=false MISE_NO_HOOKS=true mise use -g node >/dev/null 2>&1
+  /opt/locki/bin/high/locki-auto-install nodejs sh -c 'export MISE_AUTO_INSTALL=false MISE_NO_HOOKS=true; mise use -g node && mise install node' >/dev/null 2>&1
 fi
 exec "\$(locki-command-real-or-autoinstalled $bin)" "\$@"
 EOF
@@ -177,8 +178,8 @@ for pair in \
 #!/bin/bash
 set -eo pipefail
 if ! locki-command-real $bin >/dev/null 2>&1; then
-  locki-command-real node >/dev/null 2>&1 || /opt/locki/bin/high/locki-auto-install nodejs env MISE_AUTO_INSTALL=false MISE_NO_HOOKS=true mise use -g node >/dev/null 2>&1
-  /opt/locki/bin/high/locki-auto-install $pkg env MISE_AUTO_INSTALL=false MISE_NO_HOOKS=true mise use -g npm:$pkg
+  locki-command-real node >/dev/null 2>&1 || /opt/locki/bin/high/locki-auto-install nodejs sh -c 'export MISE_AUTO_INSTALL=false MISE_NO_HOOKS=true; mise use -g node && mise install node' >/dev/null 2>&1
+  /opt/locki/bin/high/locki-auto-install $pkg sh -c 'export MISE_AUTO_INSTALL=false MISE_NO_HOOKS=true; mise use -g npm:$pkg && mise install npm:$pkg'
 fi
 exec "\$(locki-command-real $bin)" "\$@"
 EOF
@@ -224,7 +225,7 @@ for pair in \
 #!/bin/bash
 set -eo pipefail
 if ! locki-command-real $bin >/dev/null 2>&1; then
-  /opt/locki/bin/high/locki-auto-install $pkg env MISE_AUTO_INSTALL=false MISE_NO_HOOKS=true mise use -g $pkg
+  /opt/locki/bin/high/locki-auto-install $pkg sh -c 'export MISE_AUTO_INSTALL=false MISE_NO_HOOKS=true; mise use -g $pkg && mise install $pkg'
 fi
 exec "\$(locki-command-real $bin)" "\$@"
 EOF
