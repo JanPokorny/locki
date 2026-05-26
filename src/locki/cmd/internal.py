@@ -504,7 +504,7 @@ def internal_cleanup() -> None:
 
     try:
         last_active = json.loads(LAST_ACTIVE_FILE.read_text())
-    except FileNotFoundError, json.JSONDecodeError:
+    except (FileNotFoundError, json.JSONDecodeError):
         last_active = {}
 
     worktrees_root = WORKTREES.resolve()
@@ -549,7 +549,7 @@ def internal_cleanup() -> None:
 
     try:
         idle_since = float(VM_IDLE_SINCE_FILE.read_text())
-    except FileNotFoundError, ValueError:
+    except (FileNotFoundError, ValueError):
         idle_since = now
         VM_IDLE_SINCE_FILE.write_text(str(now))
     if now - idle_since >= VM_IDLE_TIMEOUT:
