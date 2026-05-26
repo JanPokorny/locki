@@ -107,7 +107,7 @@ def spinner(text: str, print_success: bool = True):
                 sys.stderr.flush()
         if print_success:
             click.echo(
-                f"\r{SUCCESS} {text.replace('ing ', 'ed ', count=1)}{_duration()} ",
+                f"\r{SUCCESS} {text.replace('ing ', 'ed ', 1)}{_duration()} ",
                 err=True,
             )
     except BaseException:
@@ -344,7 +344,7 @@ def live_branch(meta_dir: pathlib.Path) -> str:
     """
     try:
         wt_id = meta_dir.resolve().relative_to(WORKTREES_META.resolve()).parts[0][-8:]
-    except ValueError, IndexError:
+    except (ValueError, IndexError):
         wt_id = meta_dir.name[-8:]
     try:
         gitdir_line = (meta_dir / ".git").read_text().strip()
