@@ -391,8 +391,8 @@ class _RuleGroup:
     value_flag_keys: frozenset[str]
 
 
-_GIT_TRANSPARENT_BOOL = {"--no-optional-locks"}
-_GIT_TRANSPARENT_CONFIG = {"log.showsignature", "core.quotepath"}
+_GIT_TRANSPARENT_BOOL = {"--no-optional-locks", "--no-pager"}
+_GIT_TRANSPARENT_CONFIG = {"log.showsignature", "core.quotepath", "protocol.file.allow"}
 
 
 def _strip_git_transparent(argv: list[str]) -> list[str]:

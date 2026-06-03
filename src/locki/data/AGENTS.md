@@ -18,41 +18,49 @@ Some commands execute on the host using a command bridge. This lets you execute 
 git -v/--version
 git add (--all | <file> ...)
 git blame <file>
-git branch (<name>#locki-<wt-id> [<start-point> | --move | --delete [--force]] | --show-current | -r/--remotes [--contains <ref>])
+git branch (<name>#locki-<wt-id> [<start-point> | --move | --delete [--force]] | --show-current | [-a/--all | -r/--remotes] [-v/--verbose] [--contains <ref>] [--merged [<ref>]] [--no-merged [<ref>]])
 git cat-file -t/--type <ref>
 git check-ignore <file> ...
 git cherry-pick (--continue | --abort | --skip)
 git cherry-pick [--no-commit] [--gpg-sign] <ref> ...
-git commit (-m/--message=<msg> [-s/--signoff] | -C/--reuse-message=<sha> | --amend --no-edit [-s/--signoff]) [--amend [--no-edit]] [--gpg-sign]
+git commit (-m/--message=<msg> [-s/--signoff] | -C/--reuse-message=<sha> [-s/--signoff] | --amend --no-edit [-s/--signoff]) [--amend [--no-edit]] [--allow-empty] [--gpg-sign]
 git config [--get] [--local] <key>
-git diff [--staged | --cached] [--name-only] [--stat] [--name-status] [--diff-filter=<filter>] [<ref> [<ref>]] [<file> ...]
+git count-objects [-v/--verbose]
+git describe [--tags] [--always] [--abbrev=<n>] [<ref>]
+git diff [--staged | --cached] [--name-only] [--stat] [--name-status] [--diff-filter=<filter>] [-U/--unified=<n>] [-w/--ignore-all-space] [--ignore-space-change] [<ref> [<ref>]] [<file> ...]
 git fetch [--prune] [<remote>] [<ref> ...]
+git for-each-ref [--format=<fmt>] [--sort=<key>] [<pattern> ...]
 git grep [-l/--files-with-matches] <pattern> [<ref>] [<file> ...]
 git hash-object <file>
-git log [--oneline] [--all] [--graph] [--reverse] [--first-parent] [--format=<fmt>] [--pretty=<fmt>] [-n/--max-count=<n>] [--name-only] [--name-status] [--diff-filter=<filter>] [--since=<date>] [--grep=<pattern>] [--author=<author>] [--ancestry-path] [--not] [<ref>] [<file> ...]
-git ls-files [--error-unmatch] [--recurse-submodules] [<path> ...]
+git log [--oneline] [--all] [--graph] [--reverse] [--first-parent] [--stat] [-p/--patch] [--follow] [--no-merges] [--merges] [--decorate] [--format=<fmt>] [--pretty=<fmt>] [-n/--max-count=<n>] [--name-only] [--name-status] [--diff-filter=<filter>] [--since=<date>] [--grep=<pattern>] [--author=<author>] [--ancestry-path] [--not] [<ref>] [<file> ...]
+git ls-files [--error-unmatch] [--recurse-submodules] [--others] [--exclude-standard] [<path> ...]
+git ls-remote [<remote>]
 git merge (--continue | --abort | --skip)
 git merge <ref>
+git merge-base [--is-ancestor] <ref> <ref>
 git mv <file> <file>
-git merge-base <ref> <ref>
 git pull [--rebase] [--ff-only]
 git push [-u/--set-upstream] [--force-with-lease] [<remote>] [<name>#locki-<wt-id>]
 git rebase (--continue | --abort | --skip)
 git rebase <ref>
 git reflog [--all]
+git remote (-v/--verbose | get-url <remote>)
 git reset [--hard] <ref>
-git remote get-url <remote>
 git restore [--staged] [--source=<ref>] <file> ...
-git rm [-q/--quiet] <file> ...
-git rev-parse [--show-cdup] [--show-toplevel] [--git-dir] [--git-common-dir] [--is-inside-work-tree] [--abbrev-ref] [--short] [--verify] [<arg> ...]
-git show [<ref>] [--stat] [--name-only] [--name-status] [--no-patch] [--format=<fmt>] [--pretty=<fmt>] [<file> ...]
-git stash [push] [-m/--message=<text>#locki-<wt-id>]
+git rev-list [--count] [--ancestry-path] [<ref>] [<ref>]
+git rev-parse [-q/--quiet] [--show-cdup] [--show-toplevel] [--git-dir] [--git-common-dir] [--is-inside-work-tree] [--abbrev-ref] [--short] [--verify] [<arg> ...]
+git rm [-q/--quiet] [-f/--force] <file> ...
+git shortlog [-s/--summary] [-n/--numbered] [<ref>] [<ref>]
+git show [<ref>] [--stat] [--name-only] [--name-status] [--no-patch] [--quiet] [--diff-filter=<filter>] [--format=<fmt>] [--pretty=<fmt>] [<file> ...]
+git stash [push] [-m/--message=<text>#locki-<wt-id>] [<file> ...]
 git stash (pop | drop) [<owned-stash-ref>]
 git stash apply [<stash-ref>]
 git stash list
-git status [-s/--short] [-b/--branch] [-u/--untracked-files=<mode>] [--porcelain] [--ignore-submodules] [<file> ...]
+git stash show [<stash-ref>]
+git status [-s/--short] [-b/--branch] [-u/--untracked-files=<mode>] [--porcelain] [--ignore-submodules] [--ahead-behind] [<file> ...]
 git symbolic-ref <ref>
 git switch ([--create | --force-create] <name>#locki-<wt-id> [<start-point>] | --detach <ref>)
+git tag [-l/--list] [<pattern>]
 ```
 
 `<wt-id>` is the 8-char slug in worktree directory name: `.../locki/worktrees/<repo-name>-locki-<wt-id>`. Branches you create, modify, or switch to must be named matching this pattern: `<name>#locki-<wt-id>`. You may read from any ref. `<owned-stash-ref>` is a stash whose message contains `#locki-<wt-id>` -- only those can be popped or dropped; any stash can be applied.
@@ -84,12 +92,17 @@ Finish:
 gh -v/--version
 gh api (repos/<owner>/<repo>/pulls/<number>/comments | repos/<owner>/<repo>/pulls/<number>/reviews | repos/<owner>/<repo>/dependabot/alerts | repos/<owner>/<repo>/dependabot/alerts/<number> | repos/<owner>/<repo>/code-scanning/alerts | repos/<owner>/<repo>/code-scanning/alerts/<number> | repos/<owner>/<repo>/secret-scanning/alerts | repos/<owner>/<repo>/secret-scanning/alerts/<number>) [-q/--jq=<expr>]
 gh auth status
-gh issue (view [<number>] [--comments] [--json=<fields>] [-q/--jq=<expr>] | list [-L/--limit=<n>] [-s/--state=<state>] [-S/--search=<query>] [--json=<fields>] [-q/--jq=<expr>])
-gh pr (view [<number>] [--comments] [--json=<fields>] | list [-L/--limit=<n>] [-s/--state=<state>] [-S/--search=<query>] | diff [<number>] [--name-only] [--patch] [--stat] | status | checks [<number>])
+gh issue (view [<number>] [--comments] [--json=<fields>] [-q/--jq=<expr>] | list [-L/--limit=<n>] [-s/--state=<state>] [-S/--search=<query>] [-l/--label=<l>] [--author=<a>] [--json=<fields>] [-q/--jq=<expr>])
+gh issue comment <number> -b/--body=<b>
+gh label list [-L/--limit=<n>]
+gh pr (view [<number>] [--comments] [--json=<fields>] [-q/--jq=<expr>] | list [-L/--limit=<n>] [-s/--state=<state>] [-S/--search=<query>] | diff [<number>] [--name-only] [--patch] [--stat] | status | checks [<number>])
 gh pr comment <number> -b/--body=<b>
 gh pr create -t/--title=<t> [-b/--body=<b>] [-B/--base=<b>] [-H/--head=<h>] [-d/--draft] [-f/--fill] [-r/--reviewer=<r>] [-l/--label=<l>] [-a/--assignee=<a>]
 gh pr edit [<number>] [-t/--title=<t>] [-b/--body=<b>] [--add-label=<l>] [--add-reviewer=<r>] [--add-assignee=<a>]
-gh run (view [<number>] [-j/--job=<number>] [--log] [--log-failed] | list [-L/--limit=<n>])
+gh pr review <number> (--approve | --comment | --request-changes) [-b/--body=<b>]
+gh release (list [-L/--limit=<n>] | view [<tag>])
+gh repo view [--json=<fields>] [-q/--jq=<expr>]
+gh run (view [<number>] [-j/--job=<number>] [--log] [--log-failed] | list [-L/--limit=<n>] [-w/--workflow=<name>] [--json=<fields>] [-q/--jq=<expr>])
 ```
 
 `<owner>/<repo>` may only be the current repo.
