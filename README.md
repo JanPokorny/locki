@@ -217,7 +217,7 @@ Locki may not provide perfect security, however we believe it works better than 
 
 ## License
 
-Copyright 2026 Jan Pokorný and [contributors](./graphs/contributors)
+Copyright 2026 Jan Pokorný and [contributors](../../graphs/contributors)
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
