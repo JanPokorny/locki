@@ -39,7 +39,7 @@ from locki.paths import (
     WORKTREES,
     WORKTREES_META,
 )
-from locki.utils import AliasGroup, limactl, vm_status
+from locki.utils import LIMA_ENV, AliasGroup, limactl, vm_status
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +59,7 @@ def _incus(args: list[str]) -> subprocess.CompletedProcess[str]:
         [limactl(), "shell", "--tty=false", "locki", "--", "sudo", "incus", *args],
         capture_output=True,
         text=True,
+        env={**os.environ, **LIMA_ENV},
     )
 
 
@@ -554,7 +555,7 @@ def internal_cleanup() -> None:
         VM_IDLE_SINCE_FILE.write_text(str(now))
     if now - idle_since >= VM_IDLE_TIMEOUT:
         logger.info("No running containers for %.0fs — stopping VM.", now - idle_since)
-        subprocess.run([limactl(), "stop", "locki"], capture_output=True)
+        subprocess.run([limactl(), "stop", "locki"], capture_output=True, env={**os.environ, **LIMA_ENV})
         VM_IDLE_SINCE_FILE.unlink(missing_ok=True)
         sys.exit(1)
 

@@ -21,6 +21,7 @@ from locki.config import load_config
 from locki.paths import LIMA, PACKAGE_DATA, PID_FILE, PORT_FILE, RUNTIME, SANDBOX_HOME, WORKTREES
 from locki.runes import EXIT, INFO, SPINNER, WARNING
 from locki.utils import (
+    LIMA_ENV,
     SandboxInfo,
     deep_merge,
     fail,
@@ -100,6 +101,7 @@ def import_local_incus_image(local_path: pathlib.Path) -> str:
     run_command(
         [limactl(), "copy", str(local_path.resolve()), f"locki:{vm_path}"],
         "Copying image into VM",
+        env=LIMA_ENV,
         cwd="/",
         print_success=False,
     )
@@ -109,6 +111,7 @@ def import_local_incus_image(local_path: pathlib.Path) -> str:
         run_command(
             [limactl(), "copy", str(rootfs_local.resolve()), f"locki:{vm_rootfs}"],
             "Copying rootfs into VM",
+            env=LIMA_ENV,
             cwd="/",
             print_success=False,
         )
@@ -217,6 +220,7 @@ def exec_cmd(ctx, match, interactive, create, id_file):
             run_command(
                 [limactl(), "--tty=false", "create", lima_yaml, "--mount-writable", "--name=locki"],
                 "Preparing VM",
+                env=LIMA_ENV,
                 cwd="/",
                 check=False,
                 print_success=False,
@@ -226,6 +230,7 @@ def exec_cmd(ctx, match, interactive, create, id_file):
         run_command(
             [limactl(), "--tty=false", "start", "locki"],
             "Starting VM",
+            env=LIMA_ENV,
             cwd="/",
             check=False,
         )
@@ -363,8 +368,6 @@ def exec_cmd(ctx, match, interactive, create, id_file):
 
     forwarded_env = {"TERM", "COLORTERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION", "LANG", "SSH_TTY"}
 
-    os.environ["LIMA_SHELLENV_ALLOW"] = ",".join(forwarded_env)
-
     result = subprocess.run(
         [
             limactl(),
@@ -392,6 +395,7 @@ def exec_cmd(ctx, match, interactive, create, id_file):
                 ]
             ),
         ],
+        env={**os.environ, **LIMA_ENV, "LIMA_SHELLENV_ALLOW": ",".join(forwarded_env)},
     )
 
     click.echo()

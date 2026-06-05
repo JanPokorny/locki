@@ -4,7 +4,17 @@ import sys
 import click
 
 from locki.paths import WORKTREES, WORKTREES_META
-from locki.utils import AliasGroup, format_table, limactl, live_branch, pretty_path, run_command, run_in_vm, vm_status
+from locki.utils import (
+    LIMA_ENV,
+    AliasGroup,
+    format_table,
+    limactl,
+    live_branch,
+    pretty_path,
+    run_command,
+    run_in_vm,
+    vm_status,
+)
 
 
 @click.group(cls=AliasGroup, help="Manage the Locki VM.")
@@ -63,6 +73,7 @@ def vm_stop_cmd():
     run_command(
         [limactl(), "stop", "locki"],
         "Stopping VM",
+        env=LIMA_ENV,
         cwd="/",
     )
 
@@ -81,5 +92,6 @@ def vm_delete_cmd(yes):
     run_command(
         [limactl(), "delete", "-f", "locki"],
         "Deleting VM",
+        env=LIMA_ENV,
         cwd="/",
     )

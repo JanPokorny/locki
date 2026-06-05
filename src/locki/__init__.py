@@ -1,4 +1,3 @@
-import os
 from importlib.metadata import version
 
 import click
@@ -15,10 +14,7 @@ from locki.cmd.remove import remove_cmd
 from locki.cmd.setup import setup_cmd
 from locki.cmd.vm import vm_app
 from locki.logging import setup_logging
-from locki.paths import LIMA
 from locki.utils import AliasGroup
-
-os.environ["LIMA_HOME"] = str(LIMA)  # limactl reads this; set early so every subprocess inherits it
 
 setup_logging()
 

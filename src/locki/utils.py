@@ -19,7 +19,7 @@ from InquirerPy import inquirer
 from InquirerPy.base.control import Choice
 
 from locki.logging import print_log_tail
-from locki.paths import HOME, PACKAGE_DATA, RUNTIME, WORKTREES, WORKTREES_META
+from locki.paths import HOME, LIMA, PACKAGE_DATA, RUNTIME, WORKTREES, WORKTREES_META
 from locki.runes import ERROR, FUTHARK, SUCCESS
 
 logger = logging.getLogger(__name__)
@@ -155,6 +155,9 @@ def run_command(
             raise
 
 
+LIMA_ENV = {"LIMA_HOME": str(LIMA)}
+
+
 @functools.cache
 def limactl() -> str:
     bundled = PACKAGE_DATA / "bin" / "limactl"
@@ -172,6 +175,7 @@ def vm_status() -> str | None:
         [limactl(), "list", "--json"],
         capture_output=True,
         text=True,
+        env={**os.environ, **LIMA_ENV},
     )
     for line in result.stdout.splitlines():
         try:
@@ -195,7 +199,7 @@ def run_in_vm(
     return run_command(
         [limactl(), "shell", "--start", "--preserve-env", "--tty=false", "locki", "--", "sudo", "-E", *command],
         message,
-        env=env,
+        env={**LIMA_ENV, **(env or {})},
         cwd="/",
         input=input,
         check=check,
