@@ -3,10 +3,13 @@ import sys
 
 import click
 
+from locki.cmd.internal import list_incus_containers
 from locki.paths import WORKTREES, WORKTREES_META
+from locki.runes import INFO, WARNING
 from locki.utils import (
     LIMA_ENV,
     AliasGroup,
+    fail,
     format_table,
     limactl,
     live_branch,
@@ -95,3 +98,48 @@ def vm_delete_cmd(yes):
         env=LIMA_ENV,
         cwd="/",
     )
+
+
+_PRUNE_SCRIPT = r"""
+set -eu
+SHARED=/var/cache/locki/containerd-content/blobs/sha256
+[ -d "$SHARED" ] || { echo "0 0"; exit 0; }
+
+REFERENCED=$(mktemp)
+trap 'rm -f "$REFERENCED"' EXIT
+
+for ctr_name in $(incus list --format=csv --columns=n,s | awk -F, '$2~/RUNNING/{print $1}'); do
+  incus exec "$ctr_name" -- ctr -n moby content ls -q 2>/dev/null \
+    | sed 's/^sha256://' >> "$REFERENCED" || true
+  incus exec "$ctr_name" -- k3s ctr --address /run/k3s/containerd/containerd.sock \
+    -n k8s.io content ls -q 2>/dev/null \
+    | sed 's/^sha256://' >> "$REFERENCED" || true
+done
+sort -u -o "$REFERENCED" "$REFERENCED"
+
+REMOVED=0 FREED=0
+for blob in "$SHARED"/*; do
+  [ -f "$blob" ] || continue
+  grep -qxF "$(basename "$blob")" "$REFERENCED" && continue
+  FREED=$((FREED + $(stat -c%s "$blob" 2>/dev/null || echo 0)))
+  REMOVED=$((REMOVED + 1))
+  rm -f "$blob"
+done
+echo "$REMOVED $FREED"
+"""
+
+
+@vm_app.command("prune", help="Remove unreferenced container image blobs from shared cache.")
+def vm_prune_cmd():
+    if vm_status() != "Running":
+        fail("VM is not running.")
+
+    stopped = [name for name, status in list_incus_containers() if status != "RUNNING"]
+    if stopped:
+        click.echo(f"{WARNING} {len(stopped)} stopped container(s) cannot be queried.", err=True)
+
+    result = run_in_vm(["bash", "-c", _PRUNE_SCRIPT], "Pruning shared containerd blobs")
+
+    parts = result.stdout.decode().strip().splitlines()[-1].split()
+    removed, freed = int(parts[0]), int(parts[1])
+    click.echo(f"{INFO} Removed {removed} blob(s) ({freed / (1024 * 1024):.1f} MiB).", err=True)

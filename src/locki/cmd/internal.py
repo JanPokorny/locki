@@ -54,7 +54,7 @@ CLIENT_KEY = SANDBOX_HOME / ".ssh" / "id_locki"
 AUTHORIZED_KEYS_FILE = STATE / "ssh" / "authorized_keys"
 
 
-def _incus(args: list[str]) -> subprocess.CompletedProcess[str]:
+def incus_exec(args: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [limactl(), "shell", "--tty=false", "locki", "--", "sudo", "incus", *args],
         capture_output=True,
@@ -63,10 +63,10 @@ def _incus(args: list[str]) -> subprocess.CompletedProcess[str]:
     )
 
 
-def _list_containers() -> list[tuple[str, str]]:
+def list_incus_containers() -> list[tuple[str, str]]:
     """Return (name, status) for every container."""
     pairs: list[tuple[str, str]] = []
-    for line in _incus(["list", "--format=csv", "--columns=n,s"]).stdout.splitlines():
+    for line in incus_exec(["list", "--format=csv", "--columns=n,s"]).stdout.splitlines():
         name, _, status = line.partition(",")
         if name := name.strip():
             pairs.append((name, status.strip()))
@@ -509,19 +509,19 @@ def internal_cleanup() -> None:
         last_active = {}
 
     worktrees_root = WORKTREES.resolve()
-    for name, _ in _list_containers():
-        r = _incus(["config", "device", "get", name, "worktree", "source"])
+    for name, _ in list_incus_containers():
+        r = incus_exec(["config", "device", "get", name, "worktree", "source"])
         if r.returncode != 0 or not r.stdout.strip():
             continue
         src = pathlib.Path(r.stdout.strip()).resolve()
         if src.is_relative_to(worktrees_root) and not src.exists():
             logger.info("Deleting orphaned container %r (worktree %s is gone).", name, src)
-            _incus(["delete", "--force", name])
+            incus_exec(["delete", "--force", name])
             last_active.pop(name, None)
 
-    running = {name for name, status in _list_containers() if status == "RUNNING"}
+    running = {name for name, status in list_incus_containers() if status == "RUNNING"}
     active: set[str] = set()
-    ops = _incus(["operation", "list", "--format=json"])
+    ops = incus_exec(["operation", "list", "--format=json"])
     if ops.returncode == 0 and ops.stdout.strip():
         with contextlib.suppress(json.JSONDecodeError):
             for op in json.loads(ops.stdout):
@@ -537,7 +537,7 @@ def internal_cleanup() -> None:
             last_active[name] = now
         elif now - last_active[name] >= IDLE_TIMEOUT:
             logger.info("Stopping idle container %r (idle %.0fs).", name, now - last_active[name])
-            if _incus(["stop", name]).returncode == 0:
+            if incus_exec(["stop", name]).returncode == 0:
                 stopped.add(name)
             last_active.pop(name, None)
     last_active = {n: t for n, t in last_active.items() if n in running}

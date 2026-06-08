@@ -287,7 +287,26 @@ cat > /opt/locki/bin/low/docker << 'EOF'
 #!/bin/bash
 set -eo pipefail
 if ! locki-command-real docker >/dev/null 2>&1; then
-  /opt/locki/bin/high/locki-auto-install docker sh -c 'if command -v dnf >/dev/null 2>&1; then dnf install -yq moby-engine docker-compose docker-buildx docker-buildkit; else echo "Error: unsupported distro, install Docker manually (https://get.docker.com/)"; exit 1; fi && systemctl enable --now docker'
+  /opt/locki/bin/high/locki-auto-install docker sh -c '
+    if command -v dnf >/dev/null 2>&1; then
+      dnf install -yq moby-engine docker-compose docker-buildx docker-buildkit
+    else
+      echo "Error: unsupported distro, install Docker manually (https://get.docker.com/)"
+      exit 1
+    fi
+    # Point system containerd content store at shared location and disable GC.
+    systemctl stop containerd docker 2>/dev/null || true
+    mkdir -p /var/lib/containerd
+    rm -rf /var/lib/containerd/io.containerd.content.v1.content
+    ln -s /var/cache/locki/containerd-content /var/lib/containerd/io.containerd.content.v1.content
+    cat >> /etc/containerd/config.toml << CTRD
+[plugins."io.containerd.gc.v1.scheduler"]
+  mutation_threshold = 0
+  schedule_delay = "0s"
+  startup_delay = "0s"
+CTRD
+    systemctl enable --now containerd docker
+  '
 fi
 exec "$(locki-command-real docker)" "$@"
 EOF
@@ -309,6 +328,23 @@ if command -v dnf >/dev/null 2>&1; then
 fi
 
 ln -sfn /var/cache/locki $HOME/.cache
+
+# MARK: Containerd content sharing
+## Shared blob store across containers; per-daemon GC disabled (use `locki vm prune`).
+
+mkdir -p /var/cache/locki/containerd-content/blobs/sha256
+
+## k3s (pre-create so symlink is in place before k3s first starts)
+mkdir -p /var/lib/rancher/k3s/agent/containerd
+rm -rf /var/lib/rancher/k3s/agent/containerd/io.containerd.content.v1.content
+ln -s /var/cache/locki/containerd-content /var/lib/rancher/k3s/agent/containerd/io.containerd.content.v1.content
+mkdir -p /var/lib/rancher/k3s/agent/etc/containerd/config-v3.toml.d
+cat > /var/lib/rancher/k3s/agent/etc/containerd/config-v3.toml.d/00-locki-shared-gc.toml << 'CTRD'
+[plugins."io.containerd.gc.v1.scheduler"]
+  mutation_threshold = 0
+  schedule_delay = "0s"
+  startup_delay = "0s"
+CTRD
 
 # MARK: Networking
 
