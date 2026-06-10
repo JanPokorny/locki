@@ -12,7 +12,6 @@ import subprocess
 import sys
 import tempfile
 import time
-from json import JSONDecodeError
 
 import click
 
@@ -194,7 +193,7 @@ def exec_cmd(ctx, match, interactive, create, id_file):
         try:
             existing = json.loads(path.read_text()) if path.exists() else {}
             path.write_text(json.dumps(deep_merge(existing, updates), indent=2))
-        except JSONDecodeError:
+        except json.JSONDecodeError:
             click.echo(f"{WARNING} Invalid JSON data found in {path}, not updating it.")
 
     with file_lock("vm", "Waiting for VM to start"):

@@ -3,9 +3,8 @@ import sys
 
 import click
 
-from locki.cmd.internal import list_incus_containers
 from locki.paths import WORKTREES, WORKTREES_META
-from locki.runes import INFO, WARNING
+from locki.runes import INFO
 from locki.utils import (
     LIMA_ENV,
     AliasGroup,
@@ -102,44 +101,30 @@ def vm_delete_cmd(yes):
 
 _PRUNE_SCRIPT = r"""
 set -eu
-SHARED=/var/cache/locki/containerd-content/blobs/sha256
-[ -d "$SHARED" ] || { echo "0 0"; exit 0; }
+CACHE=/var/cache/locki/registry-cache
+[ -d "$CACHE" ] || { echo "0"; exit 0; }
 
-REFERENCED=$(mktemp)
-trap 'rm -f "$REFERENCED"' EXIT
-
-for ctr_name in $(incus list --format=csv --columns=n,s | awk -F, '$2~/RUNNING/{print $1}'); do
-  incus exec "$ctr_name" -- ctr -n moby content ls -q 2>/dev/null \
-    | sed 's/^sha256://' >> "$REFERENCED" || true
-  incus exec "$ctr_name" -- k3s ctr --address /run/k3s/containerd/containerd.sock \
-    -n k8s.io content ls -q 2>/dev/null \
-    | sed 's/^sha256://' >> "$REFERENCED" || true
+BEFORE=$(du -sb "$CACHE" 2>/dev/null | cut -f1 || echo 0)
+for reg in docker ghcr gcr quay redhat; do
+  cfg="/etc/locki/registry-${reg}.yml"
+  [ -f "$cfg" ] || continue
+  systemctl stop "locki-registry@${reg}.service" 2>/dev/null || true
+  /usr/bin/registry garbage-collect "$cfg" --delete-untagged 2>&1 || true
+  systemctl start "locki-registry@${reg}.service" 2>/dev/null || true
 done
-sort -u -o "$REFERENCED" "$REFERENCED"
-
-REMOVED=0 FREED=0
-for blob in "$SHARED"/*; do
-  [ -f "$blob" ] || continue
-  grep -qxF "$(basename "$blob")" "$REFERENCED" && continue
-  FREED=$((FREED + $(stat -c%s "$blob" 2>/dev/null || echo 0)))
-  REMOVED=$((REMOVED + 1))
-  rm -f "$blob"
-done
-echo "$REMOVED $FREED"
+AFTER=$(du -sb "$CACHE" 2>/dev/null | cut -f1 || echo 0)
+FREED=$((BEFORE - AFTER))
+[ "$FREED" -lt 0 ] && FREED=0
+echo "$FREED"
 """
 
 
-@vm_app.command("prune", help="Remove unreferenced container image blobs from shared cache.")
+@vm_app.command("prune", help="Garbage-collect the pull-through registry cache.")
 def vm_prune_cmd():
     if vm_status() != "Running":
         fail("VM is not running.")
 
-    stopped = [name for name, status in list_incus_containers() if status != "RUNNING"]
-    if stopped:
-        click.echo(f"{WARNING} {len(stopped)} stopped container(s) cannot be queried.", err=True)
+    result = run_in_vm(["bash", "-c", _PRUNE_SCRIPT], "Pruning registry cache")
 
-    result = run_in_vm(["bash", "-c", _PRUNE_SCRIPT], "Pruning shared containerd blobs")
-
-    parts = result.stdout.decode().strip().splitlines()[-1].split()
-    removed, freed = int(parts[0]), int(parts[1])
-    click.echo(f"{INFO} Removed {removed} blob(s) ({freed / (1024 * 1024):.1f} MiB).", err=True)
+    freed = int(result.stdout.decode().strip().splitlines()[-1])
+    click.echo(f"{INFO} Freed {freed / (1024 * 1024):.1f} MiB from registry cache.", err=True)

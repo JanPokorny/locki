@@ -294,17 +294,6 @@ if ! locki-command-real docker >/dev/null 2>&1; then
       echo "Error: unsupported distro, install Docker manually (https://get.docker.com/)"
       exit 1
     fi
-    # Point system containerd content store at shared location and disable GC.
-    systemctl stop containerd docker 2>/dev/null || true
-    mkdir -p /var/lib/containerd
-    rm -rf /var/lib/containerd/io.containerd.content.v1.content
-    ln -s /var/cache/locki/containerd-content /var/lib/containerd/io.containerd.content.v1.content
-    cat >> /etc/containerd/config.toml << CTRD
-[plugins."io.containerd.gc.v1.scheduler"]
-  mutation_threshold = 0
-  schedule_delay = "0s"
-  startup_delay = "0s"
-CTRD
     systemctl enable --now containerd docker
   '
 fi
@@ -329,22 +318,52 @@ fi
 
 ln -sfn /var/cache/locki $HOME/.cache
 
-# MARK: Containerd content sharing
-## Shared blob store across containers; per-daemon GC disabled (use `locki vm prune`).
+# MARK: Registry mirrors
+## Pull-through caches on the host VM; each container keeps its own content store.
 
-mkdir -p /var/cache/locki/containerd-content/blobs/sha256
+for entry in \
+  "docker.io:5000:https://registry-1.docker.io" \
+  "mirror.gcr.io:5000:https://registry-1.docker.io" \
+  "ghcr.io:5001:https://ghcr.io" \
+  "gcr.io:5002:https://gcr.io" \
+  "quay.io:5003:https://quay.io" \
+  "registry.access.redhat.com:5004:https://registry.access.redhat.com" \
+; do
+  registry="${entry%%:*}"; rest="${entry#*:}"
+  port="${rest%%:*}"; server="${rest#*:}"
+  dir="/etc/containerd/certs.d/$registry"
+  mkdir -p "$dir"
+  cat > "$dir/hosts.toml" << EOF
+server = "$server"
 
-## k3s (pre-create so symlink is in place before k3s first starts)
-mkdir -p /var/lib/rancher/k3s/agent/containerd
-rm -rf /var/lib/rancher/k3s/agent/containerd/io.containerd.content.v1.content
-ln -s /var/cache/locki/containerd-content /var/lib/rancher/k3s/agent/containerd/io.containerd.content.v1.content
-mkdir -p /var/lib/rancher/k3s/agent/etc/containerd/config-v3.toml.d
-cat > /var/lib/rancher/k3s/agent/etc/containerd/config-v3.toml.d/00-locki-shared-gc.toml << 'CTRD'
-[plugins."io.containerd.gc.v1.scheduler"]
-  mutation_threshold = 0
-  schedule_delay = "0s"
-  startup_delay = "0s"
-CTRD
+[host."http://10.99.0.1:$port"]
+  capabilities = ["pull", "resolve"]
+EOF
+done
+
+mkdir -p /etc/rancher/k3s
+
+cat > /etc/rancher/k3s/registries.yaml << 'EOF'
+mirrors:
+  docker.io:
+    endpoint:
+      - "http://10.99.0.1:5000"
+  mirror.gcr.io:
+    endpoint:
+      - "http://10.99.0.1:5000"
+  ghcr.io:
+    endpoint:
+      - "http://10.99.0.1:5001"
+  gcr.io:
+    endpoint:
+      - "http://10.99.0.1:5002"
+  quay.io:
+    endpoint:
+      - "http://10.99.0.1:5003"
+  registry.access.redhat.com:
+    endpoint:
+      - "http://10.99.0.1:5004"
+EOF
 
 # MARK: Networking
 
