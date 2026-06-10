@@ -323,6 +323,43 @@ assert_ok    ":port forward cleaned up" locki port-forward -m "$LOGIN" --clear
 # Reject privileged ports
 assert_fail  "port < 1024 rejected" locki port-forward -m "$LOGIN" 80
 
+# ── registry pull-through cache ──────────────────────────────────────────────
+
+echo
+echo "Testing registry pull-through cache..."
+
+assert_output "docker is podman" "podman" locki x -m "$LOGIN" docker --version
+assert_ok "podman shim works directly" locki x -m "$LOGIN" podman --version
+assert_output "registry mirrors configured" "10.99.0.1:5001" locki x -m "$LOGIN" cat /etc/containers/registries.conf.d/99-locki-mirrors.conf
+assert_ok "docker pull from docker.io" locki x -m "$LOGIN" docker pull -q alpine:3.20
+# Unqualified, non-aliased short name must resolve to docker.io without a TTY prompt
+assert_ok "docker pull with short name" locki x -m "$LOGIN" docker pull -q memcached:1.6-alpine
+assert_ok "docker pull from ghcr.io" locki x -m "$LOGIN" docker pull -q ghcr.io/astral-sh/uv:latest
+assert_ok "docker run works" locki x -m "$LOGIN" docker run --rm alpine:3.20 true
+assert_ok "docker API socket responds" locki x -m "$LOGIN" curl -sf --unix-socket /run/docker.sock http://d/_ping
+# Proxied blobs are committed to the cache asynchronously — allow a moment
+sleep 5
+assert_ok "docker.io pull populates registry cache" "$LIMACTL" shell --start --workdir=/ locki -- \
+    sudo bash -c 'test -n "$(ls -A /var/cache/locki/registry-cache/docker)"'
+assert_ok "ghcr.io pull populates registry cache" "$LIMACTL" shell --start --workdir=/ locki -- \
+    sudo bash -c 'test -n "$(ls -A /var/cache/locki/registry-cache/ghcr)"'
+
+# ── concurrent exec on a new sandbox ─────────────────────────────────────────
+
+echo
+echo "Testing concurrent exec on a new sandbox..."
+
+RACE=$(new_sandbox_id)
+locki x -m "$RACE" echo race-1 >"$TMPDIR_ROOT/race1.out" 2>/dev/null &
+RACE_PID=$!
+race2_out=$(locki x -m "$RACE" echo race-2 2>/dev/null) || true
+wait "$RACE_PID" || true
+if [[ "$(cat "$TMPDIR_ROOT/race1.out")" == *race-1* && "$race2_out" == *race-2* ]]; then
+    pass "concurrent execs on fresh sandbox both succeed"
+else
+    fail "concurrent execs on fresh sandbox both succeed (race1: '$(cat "$TMPDIR_ROOT/race1.out")', race2: '$race2_out')"
+fi
+
 # ── locki new ──────────────────────────────────────────────────────────────
 
 echo

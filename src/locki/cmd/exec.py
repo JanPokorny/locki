@@ -250,78 +250,88 @@ def exec_cmd(ctx, match, interactive, create):
 
     config = load_config(sandbox.repo)
 
-    result = run_in_vm(
-        ["incus", "list", "--format=csv", "--columns=n", sandbox.wt_id],
-        "Checking container",
-        check=False,
-        print_success=False,
-    )
-    if sandbox.wt_id in result.stdout.decode():
-        run_in_vm(
-            ["incus", "start", sandbox.wt_id],
-            "Starting container",
+    with file_lock(f"provision-{sandbox.wt_id}", "Waiting for another sandbox setup"):
+        result = run_in_vm(
+            ["incus", "list", "--format=csv", "--columns=n", sandbox.wt_id],
+            "Checking container",
             check=False,
+            print_success=False,
         )
-    else:
-        incus_image = config.get_incus_image(sandbox.repo)
-
-        local_path = sandbox.repo / incus_image
-        with file_lock("image", "Waiting for another image import"):
-            image_ref = import_local_incus_image(local_path) if local_path.is_file() else incus_image
-
+        if sandbox.wt_id in result.stdout.decode():
             run_in_vm(
-                ["incus", "init", image_ref, sandbox.wt_id],
-                "Creating container",
-                print_success=False,
+                ["incus", "start", sandbox.wt_id],
+                "Starting container",
+                check=False,
             )
+        else:
+            incus_image = config.get_incus_image(sandbox.repo)
 
-            if local_path.is_file():
+            local_path = sandbox.repo / incus_image
+            with file_lock("image", "Waiting for another image import"):
+                image_ref = import_local_incus_image(local_path) if local_path.is_file() else incus_image
+
                 run_in_vm(
-                    ["incus", "image", "delete", image_ref],
-                    "Cleaning up imported image",
-                    check=False,
+                    ["incus", "init", image_ref, sandbox.wt_id],
+                    "Creating container",
                     print_success=False,
                 )
 
-        run_in_vm(
-            [
-                "incus",
-                "config",
-                "device",
-                "add",
-                sandbox.wt_id,
-                "worktree",
-                "disk",
-                f"source={sandbox.wt_path}",
-                f"path={sandbox.wt_path}",
-            ],
-            "Mounting worktree into container",
-            print_success=False,
-        )
+                if local_path.is_file():
+                    run_in_vm(
+                        ["incus", "image", "delete", image_ref],
+                        "Cleaning up imported image",
+                        check=False,
+                        print_success=False,
+                    )
 
-        run_in_vm(
-            ["incus", "start", sandbox.wt_id],
-            "Starting container",
-        )
-
-        setup_script = (
-            (PACKAGE_DATA / "container-setup.sh")
-            .read_bytes()
-            .replace(b"__AGENTS_MD_B64__", base64.b64encode((PACKAGE_DATA / "AGENTS.md").read_bytes()))
-            .replace(
-                b"__LIBATOMIC_B64__",
-                base64.b64encode((PACKAGE_DATA / "libatomic.so.1").read_bytes())
-                if (PACKAGE_DATA / "libatomic.so.1").is_file()
-                else b"",
+            run_in_vm(
+                [
+                    "incus",
+                    "config",
+                    "device",
+                    "add",
+                    sandbox.wt_id,
+                    "worktree",
+                    "disk",
+                    f"source={sandbox.wt_path}",
+                    f"path={sandbox.wt_path}",
+                ],
+                "Mounting worktree into container",
+                print_success=False,
             )
-        )
-        env_flags = [flag for k, v in CONTAINER_ENV.items() for flag in ("--env", f"{k}={v}")]
-        run_in_vm(
-            ["incus", "exec", sandbox.wt_id, *env_flags, "--env", f"LOCKI_WORKTREES_HOME={WORKTREES}", "--", "/bin/sh"],
-            "Configuring container",
-            input=setup_script,
-            print_success=False,
-        )
+
+            run_in_vm(
+                ["incus", "start", sandbox.wt_id],
+                "Starting container",
+            )
+
+            setup_script = (
+                (PACKAGE_DATA / "container-setup.sh")
+                .read_bytes()
+                .replace(b"__AGENTS_MD_B64__", base64.b64encode((PACKAGE_DATA / "AGENTS.md").read_bytes()))
+                .replace(
+                    b"__LIBATOMIC_B64__",
+                    base64.b64encode((PACKAGE_DATA / "libatomic.so.1").read_bytes())
+                    if (PACKAGE_DATA / "libatomic.so.1").is_file()
+                    else b"",
+                )
+            )
+            env_flags = [flag for k, v in CONTAINER_ENV.items() for flag in ("--env", f"{k}={v}")]
+            run_in_vm(
+                [
+                    "incus",
+                    "exec",
+                    sandbox.wt_id,
+                    *env_flags,
+                    "--env",
+                    f"LOCKI_WORKTREES_HOME={WORKTREES}",
+                    "--",
+                    "/bin/sh",
+                ],
+                "Configuring container",
+                input=setup_script,
+                print_success=False,
+            )
 
     # Idempotently start the Locki host daemon (SSH forced-command proxy + periodic cleanup).
     RUNTIME.mkdir(parents=True, exist_ok=True)

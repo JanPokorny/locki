@@ -282,22 +282,24 @@ fi
 exec "$(locki-command-real mise)" "$@"
 EOF
 
-## Docker
-cat > /opt/locki/bin/low/docker << 'EOF'
+## Docker & Podman (docker is podman in disguise — dockerd cannot mirror non-docker.io registries)
+tee /opt/locki/bin/low/docker /opt/locki/bin/low/podman > /dev/null << 'EOF'
 #!/bin/bash
 set -eo pipefail
-if ! locki-command-real docker >/dev/null 2>&1; then
-  /opt/locki/bin/high/locki-auto-install docker sh -c '
+cmd=$(basename "$0")
+if ! locki-command-real "$cmd" >/dev/null 2>&1; then
+  /opt/locki/bin/high/locki-auto-install "$cmd" sh -c '
     if command -v dnf >/dev/null 2>&1; then
-      dnf install -yq moby-engine docker-compose docker-buildx docker-buildkit
+      dnf install -yq podman podman-docker docker-compose
     else
       echo "Error: unsupported distro, install Docker manually (https://get.docker.com/)"
       exit 1
     fi
-    systemctl enable --now containerd docker
+    systemctl enable --now podman.socket
+    systemd-tmpfiles --create /usr/lib/tmpfiles.d/podman-docker.conf || true
   '
 fi
-exec "$(locki-command-real docker)" "$@"
+exec "$(locki-command-real "$cmd")" "$@"
 EOF
 
 chmod +x /opt/locki/bin/low/*
@@ -319,7 +321,14 @@ fi
 ln -sfn /var/cache/locki $HOME/.cache
 
 # MARK: Registry mirrors
-## Pull-through caches on the host VM; each container keeps its own content store.
+
+mkdir -p /etc/containers/registries.conf.d
+touch /etc/containers/nodocker
+# Match docker semantics: unqualified names resolve to docker.io, no interactive short-name prompt.
+cat > /etc/containers/registries.conf.d/99-locki-mirrors.conf << 'EOF'
+unqualified-search-registries = ["docker.io"]
+
+EOF
 
 for entry in \
   "docker.io:5000:https://registry-1.docker.io" \
@@ -338,6 +347,15 @@ server = "$server"
 
 [host."http://10.99.0.1:$port"]
   capabilities = ["pull", "resolve"]
+EOF
+  cat >> /etc/containers/registries.conf.d/99-locki-mirrors.conf << EOF
+[[registry]]
+prefix = "$registry"
+location = "$registry"
+[[registry.mirror]]
+location = "10.99.0.1:$port"
+insecure = true
+
 EOF
 done
 

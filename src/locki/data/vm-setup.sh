@@ -90,6 +90,7 @@ After=network-online.target incus.service
 Wants=network-online.target
 
 [Service]
+Environment=OTEL_TRACES_EXPORTER=none
 ExecStart=/usr/bin/registry serve /etc/locki/registry-%i.yml
 Restart=always
 RestartSec=5
