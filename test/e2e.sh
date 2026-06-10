@@ -343,6 +343,8 @@ assert_ok "docker.io pull populates registry cache" "$LIMACTL" shell --start --w
     sudo bash -c 'test -n "$(ls -A /var/cache/locki/registry-cache/docker)"'
 assert_ok "ghcr.io pull populates registry cache" "$LIMACTL" shell --start --workdir=/ locki -- \
     sudo bash -c 'test -n "$(ls -A /var/cache/locki/registry-cache/ghcr)"'
+assert_ok "registry backend activated by pulls" "$LIMACTL" shell --start --workdir=/ locki -- \
+    sudo systemctl is-active --quiet locki-registry-docker-backend.service
 
 # ── concurrent exec on a new sandbox ─────────────────────────────────────────
 
@@ -460,6 +462,24 @@ assert_fail "removed worktree dir is gone" test -d "$WORKTREE"
 assert_fail "included worktree dir is gone" test -d "$INCLUDE_PATH"
 # repo2 should no longer list the worktree
 assert_fail "include worktree removed from source repo" bash -c "git -C '$REPO2' worktree list | grep -q '$INCLUDE_PATH'"
+
+# ── registry idle shutdown ───────────────────────────────────────────────────
+
+echo
+echo "Testing registry idle shutdown..."
+
+# Pulls last ran in the registry section several minutes ago; the backend should be
+# stopped by now (1min proxy idle timeout). Retry briefly in case the suite ran fast.
+idle_ok=false
+for _ in $(seq 1 24); do
+    if ! "$LIMACTL" shell --start --workdir=/ locki -- sudo systemctl is-active --quiet locki-registry-docker-backend.service; then
+        idle_ok=true; break
+    fi
+    sleep 5
+done
+if $idle_ok; then pass "registry backend stops after idle timeout"; else fail "registry backend stops after idle timeout"; fi
+assert_ok "registry socket stays armed" "$LIMACTL" shell --start --workdir=/ locki -- \
+    sudo systemctl is-active --quiet locki-registry-docker.socket
 
 # ── summary ──────────────────────────────────────────────────────────────────
 

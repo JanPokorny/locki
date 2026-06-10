@@ -123,9 +123,8 @@ BEFORE=$(du -sb "$CACHE" 2>/dev/null | cut -f1 || echo 0)
 for reg in docker ghcr gcr quay redhat; do
   cfg="/etc/locki/registry-${reg}.yml"
   [ -f "$cfg" ] || continue
-  systemctl stop "locki-registry@${reg}.service" 2>/dev/null || true
+  systemctl stop "locki-registry-${reg}.service" "locki-registry-${reg}-backend.service" 2>/dev/null || true
   /usr/bin/registry garbage-collect "$cfg" --delete-untagged 2>&1 || true
-  systemctl start "locki-registry@${reg}.service" 2>/dev/null || true
 done
 AFTER=$(du -sb "$CACHE" 2>/dev/null | cut -f1 || echo 0)
 FREED=$((BEFORE - AFTER))
