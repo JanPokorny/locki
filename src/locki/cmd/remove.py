@@ -13,6 +13,7 @@ from locki.utils import (
     resolve_sandbox,
     run_command,
     run_in_vm,
+    sandbox_options,
 )
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,17 @@ def _is_merged(repo_path: str, trunk: str, branch: str) -> bool:
         return False
     cherry = subprocess.run([*git, "cherry", trunk, squash_commit.stdout.strip()], **devnull)
     return cherry.returncode == 0 and cherry.stdout.strip().startswith("-")
+
+
+def _has_uncommitted_changes(sandbox: SandboxInfo, *, quiet: bool = False) -> bool:
+    return bool(
+        run_command(
+            ["git", "-C", str(sandbox.wt_path), "status", "--porcelain"],
+            "Checking for uncommitted changes",
+            check=False,
+            quiet=quiet,
+        ).stdout.strip()
+    )
 
 
 def _matching_branches(repo: str, wt_id: str) -> list[str]:
@@ -94,8 +106,7 @@ def _remove_sandbox(sandbox: SandboxInfo, *, branches: bool) -> None:
 
 
 @click.command()
-@click.option("--match", "-m", default=None, help="Select by sandbox id or branch name (prefix match).")
-@click.option("--interactive", "-i", is_flag=True, default=False, help="Use interactive picker.")
+@sandbox_options()
 @click.option(
     "--force", "-f", is_flag=True, default=False, help="Remove despite having uncommited changes. (May lose work!)"
 )
@@ -125,10 +136,10 @@ def remove_cmd(match, interactive, force, branches, merged):
             capture_output=True,
             text=True,
         )
-        trunk = (
-            ref.stdout.strip().removeprefix("refs/remotes/origin/")
-            if ref.returncode == 0
-            else next(
+        if ref.returncode == 0:
+            trunk = ref.stdout.strip().removeprefix("refs/remotes/origin/")
+        else:
+            trunk = next(
                 (
                     name
                     for name in ("main", "master")
@@ -140,7 +151,6 @@ def remove_cmd(match, interactive, force, branches, merged):
                 ),
                 None,
             )
-        )
         if not trunk:
             fail("Could not determine the trunk branch.")
 
@@ -148,16 +158,7 @@ def remove_cmd(match, interactive, force, branches, merged):
             s
             for s in all_sandboxes
             if _is_merged(str(s.repo), trunk, s.branch)
-            and (
-                force
-                or not s.wt_path.exists()
-                or not run_command(
-                    ["git", "-C", str(s.wt_path), "status", "--porcelain"],
-                    "Checking for uncommitted changes",
-                    check=False,
-                    quiet=True,
-                ).stdout.strip()
-            )
+            and (force or not s.wt_path.exists() or not _has_uncommitted_changes(s, quiet=True))
         ]
 
         if not targets:
@@ -178,15 +179,7 @@ def remove_cmd(match, interactive, force, branches, merged):
     if not sandbox.wt_path.exists():
         logger.info("Worktree %s no longer on disk; cleaning up metadata.", sandbox.wt_path)
 
-    if (
-        sandbox.wt_path.exists()
-        and not force
-        and run_command(
-            ["git", "-C", str(sandbox.wt_path), "status", "--porcelain"],
-            "Checking for uncommitted changes",
-            check=False,
-        ).stdout.strip()
-    ):
+    if sandbox.wt_path.exists() and not force and _has_uncommitted_changes(sandbox):
         fail(
             f"Worktree for {sandbox.branch} in {sandbox.wt_path} has uncommitted changes. Commit or stash them, or use --force."
         )

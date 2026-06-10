@@ -57,8 +57,9 @@ trap cleanup EXIT
 VENV="$TMPDIR_ROOT/v"
 REPO="$TMPDIR_ROOT/r"
 PROJECT_ROOT="$(cd "$(dirname "$0")/.."; pwd)"
-ID_DIR="$TMPDIR_ROOT/ids"
-mkdir -p "$ID_DIR"
+
+json_field() { yq -r ".$1"; }
+new_sandbox_id() { locki new --json 2>/dev/null | json_field id; }
 
 echo "Setting up venv and installing locki..."
 uv venv "$VENV" --python 3.14
@@ -84,13 +85,13 @@ locki setup --defaults
 echo
 echo "Testing cold start + parallel VM creation..."
 
-cold_start=$(timed locki x --new --id-file "$ID_DIR/auth" echo 1) || true
-AUTH=$(cat "$ID_DIR/auth")
+AUTH=$(new_sandbox_id)
+cold_start=$(timed locki x -m "$AUTH" echo 1) || true
 echo "  cold start: ${cold_start}s"
 
 # branch b in parallel with a (VM already exists, but tests lock waiting)
-assert_output "locki x b runs" "2" locki x --new --id-file "$ID_DIR/login" echo 2
-LOGIN=$(cat "$ID_DIR/login")
+LOGIN=$(new_sandbox_id)
+assert_output "locki x b runs" "2" locki x -m "$LOGIN" echo 2
 
 # ── cache persistence across invocations ─────────────────────────────────────
 
@@ -203,8 +204,8 @@ rm -f "$HOOKS_DIR/commit-msg"
 echo
 echo "Testing warm start..."
 
-warm_start=$(timed locki x --new --id-file "$ID_DIR/release" echo 3) || true
-RELEASE=$(cat "$ID_DIR/release")
+RELEASE=$(new_sandbox_id)
+warm_start=$(timed locki x -m "$RELEASE" echo 3) || true
 echo "  warm start: ${warm_start}s"
 
 # ── hot start (existing container) ───────────────────────────────────────────
@@ -233,8 +234,8 @@ cat > "$REPO/locki.toml" << 'TOML'
 incus_image = "images:ubuntu/24.04"
 TOML
 
-assert_output "string incus_image runs ubuntu" "Ubuntu" locki x --new --id-file "$ID_DIR/ubuntu" cat /etc/os-release
-UBUNTU_SB=$(cat "$ID_DIR/ubuntu")
+UBUNTU_SB=$(new_sandbox_id)
+assert_output "string incus_image runs ubuntu" "Ubuntu" locki x -m "$UBUNTU_SB" cat /etc/os-release
 
 # Legacy dict format (backward compat)
 cat > "$REPO/locki.toml" << 'TOML'
@@ -327,9 +328,14 @@ assert_fail  "port < 1024 rejected" locki port-forward -m "$LOGIN" 80
 echo
 echo "Testing locki new..."
 
-NEW_PATH=$(locki new 2>/dev/null)
+NEW_OUT=$(locki new --json 2>/dev/null)
+NEW_ID=$(printf '%s\n' "$NEW_OUT" | json_field id)
+NEW_PATH=$(printf '%s\n' "$NEW_OUT" | json_field path)
+assert_ok    "locki new --json prints sandbox id" test -n "$NEW_ID"
 assert_ok    "locki new creates worktree dir" test -d "$NEW_PATH"
-assert_output "worktree dir uses <repo>-locki-<id> format" "/r-locki-" echo "$NEW_PATH"
+assert_output "worktree dir uses <repo>-locki-<id> format" "/r-locki-$NEW_ID" echo "$NEW_PATH"
+assert_output "locki new --json prints matching branch" "untitled#locki-$NEW_ID" printf '%s\n' "$(printf '%s\n' "$NEW_OUT" | json_field branch)"
+assert_ok    "locki new keeps stdout empty without --json" test -z "$(locki new 2>/dev/null)"
 
 # ── sandbox creation with --new ─────────────────────────────────────────
 

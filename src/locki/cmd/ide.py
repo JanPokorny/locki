@@ -6,13 +6,11 @@ import click
 from locki.cmd.new import create_sandbox_worktree
 from locki.config import load_config
 from locki.paths import USER_CONFIG
-from locki.utils import cwd_git_repo, fail, resolve_sandbox
+from locki.utils import cwd_git_repo, fail, resolve_sandbox, sandbox_options
 
 
 @click.command("ide")
-@click.option("-m", "--match", default=None, help="Substring match on existing sandbox branch.")
-@click.option("-i", "--interactive", is_flag=True, default=False, help="Force interactive picker.")
-@click.option("-n", "--new", "create", is_flag=True, default=False, help="Create a new sandbox.")
+@sandbox_options(create=True)
 def ide_cmd(match, interactive, create):
     """Open an IDE in a sandbox worktree.
 

@@ -127,32 +127,26 @@ def setup_cmd(defaults: bool, copy_only: bool):
 
     if do_copy:
         backup_suffix = f".{int(time.time())}.backup"
-        for rel in COPY_DIRS:
-            src = HOME / rel
-            if not src.exists():
-                continue
-            dst = SANDBOX_HOME / rel
-            for dirpath, _dirnames, filenames in os.walk(src):
-                rel_dir = pathlib.Path(dirpath).relative_to(src)
-                (dst / rel_dir).mkdir(parents=True, exist_ok=True)
-                for name in filenames:
-                    s = pathlib.Path(dirpath) / name
-                    d = dst / rel_dir / name
-                    with contextlib.suppress(OSError):
-                        if d.exists() or d.is_symlink():
-                            d.rename(d.with_name(d.name + backup_suffix))
-                        if s.is_symlink():
-                            os.symlink(os.readlink(s), d)
-                        else:
-                            shutil.copy2(s, d)
-        for rel in COPY_FILES:
-            src = HOME / rel
-            if src.exists():
-                dst = SANDBOX_HOME / rel
+
+        def copy_with_backup(src: pathlib.Path, dst: pathlib.Path) -> None:
+            with contextlib.suppress(OSError):
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 if dst.exists() or dst.is_symlink():
                     dst.rename(dst.with_name(dst.name + backup_suffix))
-                shutil.copy2(src, dst)
+                if src.is_symlink():
+                    os.symlink(os.readlink(src), dst)
+                else:
+                    shutil.copy2(src, dst)
+
+        for rel in COPY_DIRS:
+            src_root = HOME / rel
+            for dirpath, _dirnames, filenames in os.walk(src_root):
+                for name in filenames:
+                    src = pathlib.Path(dirpath) / name
+                    copy_with_backup(src, SANDBOX_HOME / rel / src.relative_to(src_root))
+        for rel in COPY_FILES:
+            if (HOME / rel).exists():
+                copy_with_backup(HOME / rel, SANDBOX_HOME / rel)
         click.echo(
             f"{SUCCESS} Copied AI config files to sandbox home. Copy again anytime with {click.style('locki setup --copy', fg='green')}.",
             err=True,

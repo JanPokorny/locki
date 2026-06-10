@@ -46,11 +46,9 @@ class AliasGroup(click.Group):
     """Click group that supports pipe-separated command aliases (e.g. 'shell | sh | bash')."""
 
     def get_command(self, ctx, cmd_name):
-        # Direct match first
         rv = super().get_command(ctx, cmd_name)
         if rv is not None:
             return rv
-        # Try alias match
         for name in self.list_commands(ctx):
             if cmd_name in name.split(" | "):
                 return super().get_command(ctx, name)
@@ -58,22 +56,30 @@ class AliasGroup(click.Group):
 
     def format_commands(self, ctx, formatter):
         """Write the commands, showing only the primary name."""
-        commands = []
-        for subcommand in self.list_commands(ctx):
-            cmd = self.get_command(ctx, subcommand)
-            if cmd is None or cmd.hidden:
-                continue
-            primary = subcommand.split(" | ")[0]
-            help_text = cmd.get_short_help_str(limit=formatter.width)
-            commands.append((primary, help_text))
+        commands = [
+            (name.split(" | ")[0], cmd.get_short_help_str(limit=formatter.width))
+            for name in self.list_commands(ctx)
+            if (cmd := self.get_command(ctx, name)) and not cmd.hidden
+        ]
         if commands:
             with formatter.section("Commands"):
                 formatter.write_dl(commands)
 
 
+def sandbox_options(create: bool = False):
+    """Shared `-m/-i[/-n]` sandbox-selection options."""
+
+    def deco(f):
+        if create:
+            f = click.option("-n", "--new", "create", is_flag=True, default=False, help="Create a new sandbox.")(f)
+        f = click.option("-i", "--interactive", is_flag=True, default=False, help="Force interactive picker.")(f)
+        return click.option("-m", "--match", default=None, help="Match a sandbox by id prefix or branch substring.")(f)
+
+    return deco
+
+
 @contextmanager
 def spinner(text: str, print_success: bool = True):
-    is_tty = sys.stderr.isatty()
     stop = threading.Event()
     start = time.time()
 
@@ -90,32 +96,30 @@ def spinner(text: str, print_success: bool = True):
         return click.style(s, dim=True)
 
     thread: threading.Thread | None = None
-    if is_tty:
+    if sys.stderr.isatty():
         thread = threading.Thread(target=_spin, daemon=True)
         thread.start()
-    else:
-        if print_success:
-            sys.stderr.write(f"\n[spinner] {text}")
-            sys.stderr.flush()
+    elif print_success:
+        sys.stderr.write(f"\n[spinner] {text}")
+        sys.stderr.flush()
+
+    def _stop_spinner():
+        if thread:
+            stop.set()
+            thread.join()
+
     try:
         yield
-        if thread:
-            stop.set()
-            thread.join()
-            if not print_success:
-                sys.stderr.write("\r\033[2K")
-                sys.stderr.flush()
-        if print_success:
-            click.echo(
-                f"\r{SUCCESS} {text.replace('ing ', 'ed ', 1)}{_duration()} ",
-                err=True,
-            )
     except BaseException:
-        if thread:
-            stop.set()
-            thread.join()
+        _stop_spinner()
         click.echo(f"\r{ERROR} {text} failed{_duration()}", err=True)
         raise
+    else:
+        _stop_spinner()
+        if print_success:
+            click.echo(f"\r{SUCCESS} {text.replace('ing ', 'ed ', 1)}{_duration()} ", err=True)
+        elif thread:
+            sys.stderr.write("\r\033[2K")
     finally:
         sys.stderr.flush()
 

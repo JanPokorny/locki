@@ -32,6 +32,7 @@ from locki.utils import (
     resolve_sandbox,
     run_command,
     run_in_vm,
+    sandbox_options,
     vm_status,
 )
 
@@ -94,26 +95,20 @@ def import_local_incus_image(local_path: pathlib.Path) -> str:
 
     Supports both unified tarballs and split images (metadata + companion .root file)."""
     tmp_name = f"locki-img-{gen_id()}"
-    vm_path = f"/tmp/{tmp_name}"
-    rootfs_local = local_path.parent / (local_path.name + ".root")
-    vm_files = [vm_path]
-    run_command(
-        [limactl(), "copy", str(local_path.resolve()), f"locki:{vm_path}"],
-        "Copying image into VM",
-        env=LIMA_ENV,
-        cwd="/",
-        print_success=False,
-    )
-    if rootfs_local.is_file():
-        vm_rootfs = f"{vm_path}.root"
-        vm_files.append(vm_rootfs)
+    vm_files = []
+    for suffix in ("", ".root"):
+        src = local_path.parent / (local_path.name + suffix)
+        if suffix and not src.is_file():
+            continue
+        vm_path = f"/tmp/{tmp_name}{suffix}"
         run_command(
-            [limactl(), "copy", str(rootfs_local.resolve()), f"locki:{vm_rootfs}"],
-            "Copying rootfs into VM",
+            [limactl(), "copy", str(src.resolve()), f"locki:{vm_path}"],
+            f"Copying {'rootfs' if suffix else 'image'} into VM",
             env=LIMA_ENV,
             cwd="/",
             print_success=False,
         )
+        vm_files.append(vm_path)
     try:
         run_in_vm(
             ["incus", "image", "import", *vm_files, f"--alias={tmp_name}"],
@@ -135,12 +130,9 @@ def import_local_incus_image(local_path: pathlib.Path) -> str:
     "exec | x",
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True, "allow_interspersed_args": False},
 )
-@click.option("-m", "--match", "match", default=None, help="Substring match on existing sandbox branch.")
-@click.option("-i", "--interactive", "interactive", is_flag=True, default=False, help="Force interactive picker.")
-@click.option("-n", "--new", "create", is_flag=True, default=False, help="Create a new sandbox.")
-@click.option("-f", "--id-file", default=None, type=click.Path(), help="Write the generated sandbox ID to this file.")
+@sandbox_options(create=True)
 @click.pass_context
-def exec_cmd(ctx, match, interactive, create, id_file):
+def exec_cmd(ctx, match, interactive, create):
     """Run a command in the per-branch sandbox container.
 
     \b
@@ -160,8 +152,6 @@ def exec_cmd(ctx, match, interactive, create, id_file):
         interactive=interactive,
         create="force" if create else "allow",
     )
-    if id_file and not sandbox.wt_path.exists():
-        pathlib.Path(id_file).write_text(sandbox.wt_id)
 
     if sys.platform == "linux" and (
         missing := [b for b in [f"qemu-system-{platform.machine()}", "qemu-img"] if not shutil.which(b)]

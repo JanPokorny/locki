@@ -22,6 +22,7 @@ from locki.utils import (
     fail,
     resolve_sandbox,
     run_command,
+    sandbox_options,
     setup_worktree_hooks,
 )
 
@@ -79,8 +80,7 @@ def _setup_include(sandbox: SandboxInfo, repo_b: pathlib.Path, name: str) -> Non
 
 
 @click.command("include")
-@click.option("-m", "--match", default=None, help="Target sandbox branch (substring match).")
-@click.option("-i", "--interactive", is_flag=True, default=False, help="Force interactive sandbox picker.")
+@sandbox_options()
 @click.option("--repo", "repo_path", default=None, type=click.Path(exists=True), help="Local path to repo to include.")
 @click.option(
     "--this",

@@ -6,10 +6,6 @@ requires-python = ">=3.11, <3.15"
 exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for backwards compatibility when using relative exclude-newer values.
 exclude-newer-span = "P7D"
 
-[options.exclude-newer-package]
-kagenti-adk = false
-kagenti-cli = false
-
 [[package]]
 name = "annotated-types"
 version = "0.7.0"

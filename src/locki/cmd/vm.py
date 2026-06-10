@@ -44,21 +44,20 @@ def vm_status_cmd():
 
     rows: list[tuple[str, str, str, str, str]] = []
     for line in result.stdout.decode().splitlines():
-        parts = line.split(",", 1)
-        if len(parts) != 2:
+        wt_id, sep, status = line.partition(",")
+        if not sep:
             continue
-        wt_id = parts[0].strip()
-        status = parts[1].strip().lower()
-        meta_dir = next(WORKTREES_META.glob(f"*{wt_id}"))
-        repo_file = meta_dir / "repo"
-        branch = live_branch(meta_dir) if meta_dir.is_dir() else ""
+        wt_id = wt_id.strip()
+        meta_dir = next(WORKTREES_META.glob(f"*{wt_id}"), None)
+        wt_path = next(WORKTREES.glob(f"*{wt_id}"), None)
+        repo_file = meta_dir / "repo" if meta_dir else None
         rows.append(
             (
                 wt_id,
-                status,
-                pretty_path(pathlib.Path(repo_file.read_text().strip() if repo_file.exists() else "")),
-                branch,
-                pretty_path(next(WORKTREES.glob(f"*{wt_id}"))),
+                status.strip().lower(),
+                pretty_path(pathlib.Path(repo_file.read_text().strip())) if repo_file and repo_file.exists() else "",
+                live_branch(meta_dir) if meta_dir else "",
+                pretty_path(wt_path) if wt_path else "",
             )
         )
 

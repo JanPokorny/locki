@@ -2,7 +2,7 @@ import socket
 
 import click
 
-from locki.utils import fail, resolve_sandbox, run_in_vm
+from locki.utils import fail, resolve_sandbox, run_in_vm, sandbox_options
 
 
 def _parse_port_spec(spec: str) -> tuple[int, int]:
@@ -22,46 +22,39 @@ def _parse_port_spec(spec: str) -> tuple[int, int]:
     raise click.BadParameter(f"Invalid port spec '{spec}'. Use 'port', 'host_port:sandbox_port', or ':sandbox_port'.")
 
 
-def _list_forwards(wt_id: str):
-    """Print all active port forwards for a container."""
+def _forward_devices(wt_id: str) -> list[str]:
+    """Names of all port-forward proxy devices on a container."""
     result = run_in_vm(
-        ["incus", "config", "device", "list", wt_id, "--format=csv"],
+        ["incus", "config", "device", "list", wt_id],
         "Listing devices",
         quiet=True,
     )
-    for line in result.stdout.decode().splitlines():
-        name = line.strip().split(",")[0].strip()
-        if not name.startswith("port-fwd-"):
-            continue
-        listen = (
-            run_in_vm(
-                ["incus", "config", "device", "get", wt_id, name, "listen"],
-                f"Reading {name}",
-                check=False,
-                quiet=True,
-            )
-            .stdout.decode()
-            .strip()
+    return [name for line in result.stdout.decode().splitlines() if (name := line.strip()).startswith("port-fwd-")]
+
+
+def _device_port(wt_id: str, name: str, key: str) -> str:
+    """Last `:`-separated field of a proxy device address, e.g. tcp:0.0.0.0:8080 -> 8080."""
+    value = (
+        run_in_vm(
+            ["incus", "config", "device", "get", wt_id, name, key],
+            f"Reading {name}",
+            check=False,
+            quiet=True,
         )
-        connect = (
-            run_in_vm(
-                ["incus", "config", "device", "get", wt_id, name, "connect"],
-                f"Reading {name}",
-                check=False,
-                quiet=True,
-            )
-            .stdout.decode()
-            .strip()
-        )
-        # listen=tcp:0.0.0.0:8080  connect=tcp:127.0.0.1:3000
-        host_port = listen.rsplit(":", 1)[-1] if listen else "?"
-        sandbox_port = connect.rsplit(":", 1)[-1] if connect else "?"
-        print(f"{host_port}:{sandbox_port}")
+        .stdout.decode()
+        .strip()
+    )
+    return value.rsplit(":", 1)[-1] if value else "?"
+
+
+def _list_forwards(wt_id: str):
+    """Print all active port forwards for a container."""
+    for name in _forward_devices(wt_id):
+        print(f"{_device_port(wt_id, name, 'listen')}:{_device_port(wt_id, name, 'connect')}")
 
 
 @click.command(context_settings={"allow_extra_args": True})
-@click.option("-m", "--match", "match", default=None, help="Sandbox branch (substring match).")
-@click.option("-i", "--interactive", "interactive", is_flag=True, default=False, help="Force interactive picker.")
+@sandbox_options()
 @click.option("--clear", is_flag=True, help="Remove all existing port forwards before adding new ones.")
 @click.option("--list", "list_forwards", is_flag=True, help="List active port forwards.")
 @click.pass_context
@@ -85,18 +78,11 @@ def port_forward_cmd(ctx, match, interactive, clear, list_forwards):
         fail(f"Sandbox is not running. Run {click.style(f'locki x -m {sandbox.wt_id} true', fg='green')} to start it.")
 
     if clear:
-        # Remove all existing port-forward devices
-        result = run_in_vm(
-            ["incus", "config", "device", "list", sandbox.wt_id],
-            "Listing devices",
-        )
-        for line in result.stdout.decode().splitlines():
-            name = line.strip()
-            if name.startswith("port-fwd-"):
-                run_in_vm(
-                    ["incus", "config", "device", "remove", sandbox.wt_id, name],
-                    f"Removing {name}",
-                )
+        for name in _forward_devices(sandbox.wt_id):
+            run_in_vm(
+                ["incus", "config", "device", "remove", sandbox.wt_id, name],
+                f"Removing {name}",
+            )
         if not ctx.args and not list_forwards:
             return
 
