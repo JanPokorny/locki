@@ -1,8 +1,9 @@
+import json
 import socket
 
 import click
 
-from locki.utils import fail, resolve_sandbox, run_in_vm, sandbox_options
+from locki.utils import fail, json_option, resolve_sandbox, run_in_vm, sandbox_options
 
 
 def _parse_port_spec(spec: str) -> tuple[int, int]:
@@ -32,7 +33,7 @@ def _forward_devices(wt_id: str) -> list[str]:
     return [name for line in result.stdout.decode().splitlines() if (name := line.strip()).startswith("port-fwd-")]
 
 
-def _device_port(wt_id: str, name: str, key: str) -> str:
+def _device_port(wt_id: str, name: str, key: str) -> int | str:
     """Last `:`-separated field of a proxy device address, e.g. tcp:0.0.0.0:8080 -> 8080."""
     value = (
         run_in_vm(
@@ -43,22 +44,25 @@ def _device_port(wt_id: str, name: str, key: str) -> str:
         )
         .stdout.decode()
         .strip()
+        .rsplit(":", 1)[-1]
     )
-    return value.rsplit(":", 1)[-1] if value else "?"
+    return int(value) if value.isdigit() else value or "?"
 
 
-def _list_forwards(wt_id: str):
-    """Print all active port forwards for a container."""
-    for name in _forward_devices(wt_id):
-        print(f"{_device_port(wt_id, name, 'listen')}:{_device_port(wt_id, name, 'connect')}")
+def _active_forwards(wt_id: str) -> list[dict]:
+    return [
+        {"host_port": _device_port(wt_id, name, "listen"), "sandbox_port": _device_port(wt_id, name, "connect")}
+        for name in _forward_devices(wt_id)
+    ]
 
 
 @click.command(context_settings={"allow_extra_args": True})
 @sandbox_options()
 @click.option("--clear", is_flag=True, help="Remove all existing port forwards before adding new ones.")
 @click.option("--list", "list_forwards", is_flag=True, help="List active port forwards.")
+@json_option
 @click.pass_context
-def port_forward_cmd(ctx, match, interactive, clear, list_forwards):
+def port_forward_cmd(ctx, match, interactive, clear, list_forwards, as_json):
     """Forward ports from the host to a sandbox."""
     sandbox = resolve_sandbox(match=match, interactive=interactive, create="deny")
 
@@ -84,8 +88,11 @@ def port_forward_cmd(ctx, match, interactive, clear, list_forwards):
                 f"Removing {name}",
             )
         if not ctx.args and not list_forwards:
+            if as_json:
+                click.echo(json.dumps([]))
             return
 
+    added = []
     for spec in ctx.args:
         host_port, sandbox_port = _parse_port_spec(spec)
         if host_port < 1024:
@@ -104,10 +111,19 @@ def port_forward_cmd(ctx, match, interactive, clear, list_forwards):
             ],
             f"Forwarding host port {host_port} -> sandbox port {sandbox_port}",
         )
+        added.append({"host_port": host_port, "sandbox_port": sandbox_port})
 
     if list_forwards:
-        _list_forwards(sandbox.wt_id)
-    elif not ctx.args and not clear:
+        forwards = _active_forwards(sandbox.wt_id)
+        if as_json:
+            click.echo(json.dumps(forwards))
+        else:
+            for f in forwards:
+                print(f"{f['host_port']}:{f['sandbox_port']}")
+    elif ctx.args:
+        if as_json:
+            click.echo(json.dumps(added))
+    elif not clear:
         fail(
             "No ports specified. Usage: locki port-forward [-m <sandbox-name-part>] [--list] [--clear] [port[:port]] ..."
         )

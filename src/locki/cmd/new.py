@@ -9,6 +9,7 @@ from locki.utils import (
     SandboxInfo,
     cwd_git_repo,
     fail,
+    json_option,
     new_sandbox,
     pretty_path,
     run_command,
@@ -45,7 +46,7 @@ def create_sandbox_worktree(sandbox: SandboxInfo) -> None:
 
 
 @click.command("new | n")
-@click.option("--json", "as_json", is_flag=True, default=False, help="Print sandbox info as JSON to stdout.")
+@json_option
 def new_cmd(as_json: bool):
     """Create a new sandbox worktree. Alternatively, pass --new to other Locki commands as a shortcut.
 
@@ -60,7 +61,7 @@ def new_cmd(as_json: bool):
     sandbox = new_sandbox(cwd_repo)
     create_sandbox_worktree(sandbox)
     if as_json:
-        click.echo(json.dumps({"id": sandbox.wt_id, "branch": sandbox.branch, "path": str(sandbox.wt_path)}))
+        click.echo(json.dumps(dict(sandbox)))
         return
     click.echo(f"{SUCCESS} Created sandbox {click.style(sandbox.wt_id, fg='green')}.", err=True)
     click.echo(f"{INFO}    branch: {click.style(sandbox.branch, fg='green')}", err=True)

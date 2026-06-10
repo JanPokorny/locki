@@ -78,6 +78,9 @@ def sandbox_options(create: bool = False):
     return deco
 
 
+json_option = click.option("--json", "as_json", is_flag=True, default=False, help="Print the result as JSON to stdout.")
+
+
 @contextmanager
 def spinner(text: str, print_success: bool = True):
     stop = threading.Event()
@@ -340,6 +343,17 @@ class SandboxInfo:
 
     def include_meta_path(self, name: str) -> pathlib.Path:
         return self.meta_path / "include" / name
+
+    def __iter__(self):
+        return iter(
+            {
+                "id": self.wt_id,
+                "branch": self.branch,
+                "path": str(self.wt_path),
+                "repo": str(self.repo),
+                "include": [{"name": i.name, "repo": str(i.repo), "branch": i.branch} for i in self.include],
+            }.items()
+        )
 
 
 def live_branch(meta_dir: pathlib.Path) -> str:

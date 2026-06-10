@@ -1,3 +1,4 @@
+import json
 import logging
 import shutil
 import subprocess
@@ -9,6 +10,7 @@ from locki.utils import (
     SandboxInfo,
     cwd_git_repo,
     fail,
+    json_option,
     list_sandboxes,
     resolve_sandbox,
     run_command,
@@ -116,7 +118,8 @@ def _remove_sandbox(sandbox: SandboxInfo, *, branches: bool) -> None:
 @click.option(
     "--merged", "-M", is_flag=True, default=False, help="Remove all clean sandboxes whose branch is merged into trunk."
 )
-def remove_cmd(match, interactive, force, branches, merged):
+@json_option
+def remove_cmd(match, interactive, force, branches, merged, as_json):
     """Remove a sandbox. Container and worktree is deleted, branches remain unless --branches is passed."""
     if merged:
         if match or interactive:
@@ -128,6 +131,8 @@ def remove_cmd(match, interactive, force, branches, merged):
 
         if not all_sandboxes:
             click.echo(f"{INFO} No sandboxes to check.", err=True)
+            if as_json:
+                click.echo(json.dumps([]))
             return
 
         repo = all_sandboxes[0].repo
@@ -163,6 +168,8 @@ def remove_cmd(match, interactive, force, branches, merged):
 
         if not targets:
             click.echo(f"{INFO} No merged clean sandboxes to remove.", err=True)
+            if as_json:
+                click.echo(json.dumps([]))
             return
 
         click.echo(f"{INFO} Removing {len(targets)} merged sandbox(es):", err=True)
@@ -172,6 +179,8 @@ def remove_cmd(match, interactive, force, branches, merged):
         for s in targets:
             _remove_sandbox(s, branches=branches)
             click.echo(f"{SUCCESS} Removed {s.branch}", err=True)
+        if as_json:
+            click.echo(json.dumps([dict(s) for s in targets]))
         return
 
     sandbox = resolve_sandbox(match=match, interactive=interactive, create="deny")
@@ -185,3 +194,5 @@ def remove_cmd(match, interactive, force, branches, merged):
         )
 
     _remove_sandbox(sandbox, branches=branches)
+    if as_json:
+        click.echo(json.dumps([dict(sandbox)]))

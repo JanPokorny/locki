@@ -287,8 +287,7 @@ locki x -m "$LOGIN" dnf install -y nmap-ncat
 locki x -m "$LOGIN" bash -c "nohup bash -c 'while true; do echo pf-ok | ncat -l 9111; done' &>/dev/null &"
 
 # Use a random host port to avoid conflicts with the user's main locki VM
-add_output=$(locki port-forward -m "$LOGIN" :9111 2>&1 >/dev/null || true)
-pf_host_port=$(printf '%s\n' "$add_output" | sed -nE 's/.*host port ([0-9]+) -> sandbox port 9111.*/\1/p' | head -1)
+pf_host_port=$(locki port-forward -m "$LOGIN" --json :9111 2>/dev/null | json_field '[0].host_port' || true)
 if [[ -n "$pf_host_port" && "$pf_host_port" -ge 1024 ]]; then
     pass "port-forward assigns host port >= 1024"
 else
@@ -305,14 +304,15 @@ for i in $(seq 1 10); do
 done
 if $pf_ok; then pass "port-forward is reachable"; else fail "port-forward is reachable (timed out after 10s)"; fi
 
+assert_output "port-forward --list --json shows forward" "9111" bash -c "locki port-forward -m '$LOGIN' --list --json 2>/dev/null | yq -r '.[].sandbox_port'"
+
 # Clear all forwards
 assert_ok    "port-forward --clear removes device" locki port-forward -m "$LOGIN" --clear
 sleep 3
 assert_fail  "cleared forward is unreachable" bash -c "nc -4 -w2 127.0.0.1 $pf_host_port"
 
 # Random host port with :sandbox_port syntax (different sandbox port)
-add_output=$(locki port-forward -m "$LOGIN" :9222 2>&1 >/dev/null || true)
-random_host_port=$(printf '%s\n' "$add_output" | sed -nE 's/.*host port ([0-9]+) -> sandbox port 9222.*/\1/p' | head -1)
+random_host_port=$(locki port-forward -m "$LOGIN" --json :9222 2>/dev/null | json_field '[0].host_port' || true)
 if [[ -n "$random_host_port" && "$random_host_port" -ge 1024 ]]; then
     pass ":port assigns random host port >= 1024"
 else
@@ -353,6 +353,8 @@ echo "Testing locki list and outside-git-repo behavior..."
 pushd /tmp >/dev/null
 assert_ok    "locki list works outside git repo" locki list
 assert_output "locki list sees sandboxes outside git repo" "$AUTH" locki list
+assert_output "locki list --json includes sandbox id" "$AUTH" bash -c "locki list --json 2>/dev/null | yq -r '.[].id'"
+assert_output "locki vm status --json reports running" "running" bash -c "locki vm status --json 2>/dev/null | yq -r '.vm'"
 assert_ok    "locki x outside git repo with -m" locki x -m "$AUTH" echo 5
 popd >/dev/null
 
@@ -375,7 +377,8 @@ git -C "$REPO2" push >/dev/null 2>&1
 INCLUDE_NAME="$(basename "$REPO2")"
 INCLUDE_PATH="$WORKTREE_A/.locki/include/$INCLUDE_NAME"
 
-assert_ok    "locki include --repo adds worktree" locki include -m "$AUTH" --repo "$REPO2"
+INCLUDE_OUT=$(locki include -m "$AUTH" --repo "$REPO2" --json 2>/dev/null || true)
+assert_output "locki include --json prints include path" "\"path\": \"$INCLUDE_PATH\"" printf '%s\n' "$INCLUDE_OUT"
 assert_ok    "include folder exists"              test -d "$INCLUDE_PATH"
 assert_ok    "include .git pointer exists"        test -f "$INCLUDE_PATH/.git"
 assert_output "include branch named #locki-<id>"  "untitled#locki-$AUTH" git -C "$INCLUDE_PATH" branch --show-current
@@ -414,7 +417,8 @@ assert_output "branch renamed with locki suffix" "rogue-branch#locki-$LOGIN" git
 echo
 echo "Testing worktree removal..."
 
-assert_ok "locki remove works" locki remove -m "$AUTH" --force
+if REMOVE_OUT=$(locki remove -m "$AUTH" --force --json 2>/dev/null); then pass "locki remove works"; else fail "locki remove works"; fi
+assert_output "locki remove --json reports removed id" "\"id\": \"$AUTH\"" printf '%s\n' "$REMOVE_OUT"
 assert_fail "removed worktree dir is gone" test -d "$WORKTREE"
 assert_fail "included worktree dir is gone" test -d "$INCLUDE_PATH"
 # repo2 should no longer list the worktree

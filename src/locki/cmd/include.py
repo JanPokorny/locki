@@ -9,6 +9,7 @@ included worktrees; ownership is scoped by the parent sandbox's id.
 from __future__ import annotations
 
 import contextlib
+import json
 import pathlib
 import subprocess
 
@@ -20,6 +21,7 @@ from locki.utils import (
     SandboxInfo,
     cwd_git_repo,
     fail,
+    json_option,
     resolve_sandbox,
     run_command,
     sandbox_options,
@@ -89,7 +91,8 @@ def _setup_include(sandbox: SandboxInfo, repo_b: pathlib.Path, name: str) -> Non
     default=False,
     help="Include cwd's repo into a sandbox from another repo (flips match scope).",
 )
-def include_cmd(match, interactive, repo_path, this_flag):
+@json_option
+def include_cmd(match, interactive, repo_path, this_flag, as_json):
     """Include another repo's worktree in an existing Locki sandbox.
 
     \b
@@ -136,6 +139,18 @@ def include_cmd(match, interactive, repo_path, this_flag):
         err=True,
     )
     _setup_include(sandbox, repo_b, name)
+    if as_json:
+        click.echo(
+            json.dumps(
+                {
+                    "id": sandbox.wt_id,
+                    "name": name,
+                    "repo": str(repo_b),
+                    "path": str(sandbox.include_wt_path(name)),
+                }
+            )
+        )
+        return
     click.echo(
         f"{SUCCESS} Included at {click.style(str(sandbox.include_wt_path(name).relative_to(WORKTREES)), fg='cyan')}.",
         err=True,

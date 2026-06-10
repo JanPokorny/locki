@@ -1,3 +1,4 @@
+import json
 import pathlib
 import sys
 
@@ -10,6 +11,7 @@ from locki.utils import (
     AliasGroup,
     fail,
     format_table,
+    json_option,
     limactl,
     live_branch,
     pretty_path,
@@ -25,46 +27,60 @@ def vm_app():
 
 
 @vm_app.command("status | st", help="Show VM and sandbox status.")
-def vm_status_cmd():
+@json_option
+def vm_status_cmd(as_json):
     status = (vm_status() or "none").lower()
-    click.echo(f"VM: {status}")
 
+    sandboxes: list[dict] = []
+    if status == "running":
+        try:
+            result = run_in_vm(
+                ["incus", "list", "--format=csv", "--columns=n,s"],
+                "Listing containers",
+                check=False,
+                quiet=True,
+            )
+        except Exception:
+            result = None
+        for line in result.stdout.decode().splitlines() if result else []:
+            wt_id, sep, container_status = line.partition(",")
+            if not sep:
+                continue
+            wt_id = wt_id.strip()
+            meta_dir = next(WORKTREES_META.glob(f"*{wt_id}"), None)
+            wt_path = next(WORKTREES.glob(f"*{wt_id}"), None)
+            repo_file = meta_dir / "repo" if meta_dir else None
+            sandboxes.append(
+                {
+                    "id": wt_id,
+                    "status": container_status.strip().lower(),
+                    "repo": repo_file.read_text().strip() if repo_file and repo_file.exists() else "",
+                    "branch": live_branch(meta_dir) if meta_dir else "",
+                    "worktree": str(wt_path) if wt_path else "",
+                }
+            )
+
+    if as_json:
+        click.echo(json.dumps({"vm": status, "sandboxes": sandboxes}))
+        return
+
+    click.echo(f"VM: {status}")
     if status != "running":
         return
-
-    try:
-        result = run_in_vm(
-            ["incus", "list", "--format=csv", "--columns=n,s"],
-            "Listing containers",
-            check=False,
-            quiet=True,
-        )
-    except Exception:
-        return
-
-    rows: list[tuple[str, str, str, str, str]] = []
-    for line in result.stdout.decode().splitlines():
-        wt_id, sep, status = line.partition(",")
-        if not sep:
-            continue
-        wt_id = wt_id.strip()
-        meta_dir = next(WORKTREES_META.glob(f"*{wt_id}"), None)
-        wt_path = next(WORKTREES.glob(f"*{wt_id}"), None)
-        repo_file = meta_dir / "repo" if meta_dir else None
-        rows.append(
-            (
-                wt_id,
-                status.strip().lower(),
-                pretty_path(pathlib.Path(repo_file.read_text().strip())) if repo_file and repo_file.exists() else "",
-                live_branch(meta_dir) if meta_dir else "",
-                pretty_path(wt_path) if wt_path else "",
-            )
-        )
-
-    if not rows:
+    if not sandboxes:
         click.echo("No sandboxes.")
         return
 
+    rows = [
+        (
+            s["id"],
+            s["status"],
+            pretty_path(pathlib.Path(s["repo"])) if s["repo"] else "",
+            s["branch"],
+            pretty_path(pathlib.Path(s["worktree"])) if s["worktree"] else "",
+        )
+        for s in sandboxes
+    ]
     headers = ("SANDBOX ID", "STATUS", "REPO", "BRANCH", "WORKTREE")
     click.echo(format_table(headers, sorted(rows, key=lambda r: (r[1], r[2], r[3]))))
 
@@ -119,11 +135,15 @@ echo "$FREED"
 
 
 @vm_app.command("prune", help="Garbage-collect the pull-through registry cache.")
-def vm_prune_cmd():
+@json_option
+def vm_prune_cmd(as_json):
     if vm_status() != "Running":
         fail("VM is not running.")
 
     result = run_in_vm(["bash", "-c", _PRUNE_SCRIPT], "Pruning registry cache")
 
     freed = int(result.stdout.decode().strip().splitlines()[-1])
+    if as_json:
+        click.echo(json.dumps({"freed_bytes": freed}))
+        return
     click.echo(f"{INFO} Freed {freed / (1024 * 1024):.1f} MiB from registry cache.", err=True)
