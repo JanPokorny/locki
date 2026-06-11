@@ -299,24 +299,39 @@ fi
 exec "$(locki-command-real mise)" "$@"
 EOF
 
-## Docker & Podman (docker is podman in disguise — dockerd cannot mirror non-docker.io registries)
-tee /opt/locki/bin/low/docker /opt/locki/bin/low/podman > /dev/null << 'EOF'
+## Docker
+cat > /opt/locki/bin/low/docker << 'EOF'
 #!/bin/bash
 set -eo pipefail
-cmd=$(basename "$0")
-if ! locki-command-real "$cmd" >/dev/null 2>&1; then
-  /opt/locki/bin/high/locki-auto-install "$cmd" sh -c '
+if ! locki-command-real docker >/dev/null 2>&1; then
+  /opt/locki/bin/high/locki-auto-install docker sh -c '
     if command -v dnf >/dev/null 2>&1; then
-      dnf install -yq podman podman-docker docker-compose
+      dnf install -yq moby-engine docker-compose docker-buildx docker-buildkit
     else
       echo "Error: unsupported distro, install Docker manually (https://get.docker.com/)"
       exit 1
     fi
-    systemctl enable --now podman.socket
-    systemd-tmpfiles --create /usr/lib/tmpfiles.d/podman-docker.conf || true
+    systemctl enable --now containerd docker
   '
 fi
-exec "$(locki-command-real "$cmd")" "$@"
+exec "$(locki-command-real docker)" "$@"
+EOF
+
+## Podman
+cat > /opt/locki/bin/low/podman << 'EOF'
+#!/bin/bash
+set -eo pipefail
+if ! locki-command-real podman >/dev/null 2>&1; then
+  /opt/locki/bin/high/locki-auto-install podman sh -c '
+    if command -v dnf >/dev/null 2>&1; then
+      dnf install -yq podman
+    else
+      echo "Error: unsupported distro, install Podman manually"
+      exit 1
+    fi
+  '
+fi
+exec "$(locki-command-real podman)" "$@"
 EOF
 
 chmod +x /opt/locki/bin/low/*
@@ -337,68 +352,6 @@ fi
 
 ln -sfn /var/cache/locki $HOME/.cache
 
-# MARK: Registry mirrors
-
-mkdir -p /etc/containers/registries.conf.d
-touch /etc/containers/nodocker
-# Match docker semantics: unqualified names resolve to docker.io, no interactive short-name prompt.
-cat > /etc/containers/registries.conf.d/99-locki-mirrors.conf << 'EOF'
-unqualified-search-registries = ["docker.io"]
-
-EOF
-
-for entry in \
-  "docker.io:5000:https://registry-1.docker.io" \
-  "mirror.gcr.io:5000:https://registry-1.docker.io" \
-  "ghcr.io:5001:https://ghcr.io" \
-  "gcr.io:5002:https://gcr.io" \
-  "quay.io:5003:https://quay.io" \
-  "registry.access.redhat.com:5004:https://registry.access.redhat.com" \
-; do
-  registry="${entry%%:*}"; rest="${entry#*:}"
-  port="${rest%%:*}"; server="${rest#*:}"
-  dir="/etc/containerd/certs.d/$registry"
-  mkdir -p "$dir"
-  cat > "$dir/hosts.toml" << EOF
-server = "$server"
-
-[host."http://10.99.0.1:$port"]
-  capabilities = ["pull", "resolve"]
-EOF
-  cat >> /etc/containers/registries.conf.d/99-locki-mirrors.conf << EOF
-[[registry]]
-prefix = "$registry"
-location = "$registry"
-[[registry.mirror]]
-location = "10.99.0.1:$port"
-insecure = true
-
-EOF
-done
-
-mkdir -p /etc/rancher/k3s
-
-cat > /etc/rancher/k3s/registries.yaml << 'EOF'
-mirrors:
-  docker.io:
-    endpoint:
-      - "http://10.99.0.1:5000"
-  mirror.gcr.io:
-    endpoint:
-      - "http://10.99.0.1:5000"
-  ghcr.io:
-    endpoint:
-      - "http://10.99.0.1:5001"
-  gcr.io:
-    endpoint:
-      - "http://10.99.0.1:5002"
-  quay.io:
-    endpoint:
-      - "http://10.99.0.1:5003"
-  registry.access.redhat.com:
-    endpoint:
-      - "http://10.99.0.1:5004"
-EOF
 
 # MARK: Networking
 
@@ -408,3 +361,31 @@ echo '192.168.5.2 host.lima.internal' >> /etc/hosts
 
 ## network is not available for a short while, wait for it
 timeout 30s sh -c 'while ! ping -c1 -W1 connectivitycheck.gstatic.com >/dev/null 2>&1; do sleep 1; done'
+
+## Transparent registry caching: registry domains resolve to the VM, where Caddy
+## impersonates them (TLS via the Locki CA) in front of pull-through caches.
+## Works for any client that uses the system trust store: docker, podman,
+## containerd, k3s, nerdctl, skopeo, helm... Skipped (direct, uncached registry
+## access) when the CA can't be fetched or installed, e.g. on an older VM.
+ca_tmp=$(mktemp)
+ca_url=http://10.99.0.1/locki-ca.crt
+if { command -v curl >/dev/null 2>&1 && curl -fsS --retry 3 -o "$ca_tmp" "$ca_url"; } \
+  || { command -v wget >/dev/null 2>&1 && wget -qO "$ca_tmp" "$ca_url"; } \
+  || { command -v python3 >/dev/null 2>&1 && python3 -c "from urllib.request import urlretrieve; urlretrieve('$ca_url', '$ca_tmp')"; }; then
+  ca_installed=""
+  if command -v update-ca-trust >/dev/null 2>&1; then
+    mkdir -p /etc/pki/ca-trust/source/anchors
+    cp "$ca_tmp" /etc/pki/ca-trust/source/anchors/locki-ca.crt
+    update-ca-trust
+    ca_installed=1
+  elif command -v update-ca-certificates >/dev/null 2>&1; then
+    mkdir -p /usr/local/share/ca-certificates
+    cp "$ca_tmp" /usr/local/share/ca-certificates/locki-ca.crt
+    update-ca-certificates
+    ca_installed=1
+  fi
+  if [ -n "$ca_installed" ]; then
+    echo '10.99.0.1 registry-1.docker.io mirror.gcr.io gcr.io ghcr.io quay.io registry.access.redhat.com' >> /etc/hosts
+  fi
+fi
+rm -f "$ca_tmp"

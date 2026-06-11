@@ -127,3 +127,84 @@ EOF
     systemctl enable --now "locki-registry-${reg}.socket"
   done
 fi
+
+if ! command -v caddy >/dev/null 2>&1; then
+  dnf install -y --setopt install_weak_deps=False caddy openssl
+
+  mkdir -p /etc/locki
+  openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 3650 \
+    -subj "/CN=Locki Registry CA" -keyout /etc/locki/ca.key -out /etc/locki/ca.crt
+  chgrp caddy /etc/locki/ca.key
+  chmod 640 /etc/locki/ca.key
+
+  cat > /etc/caddy/Caddyfile << '__LOCKI_EOF__'
+{
+	skip_install_trust
+	pki {
+		ca locki {
+			name "Locki Registry CA"
+			root {
+				cert /etc/locki/ca.crt
+				key /etc/locki/ca.key
+			}
+		}
+	}
+}
+
+http://10.99.0.1 {
+	handle /locki-ca.crt {
+		root * /etc/locki
+		rewrite * /ca.crt
+		file_server
+	}
+	handle {
+		respond 404
+	}
+}
+__LOCKI_EOF__
+
+  for entry in \
+    "registry-1.docker.io:5000" \
+    "mirror.gcr.io:5000" \
+    "ghcr.io:5001" \
+    "gcr.io:5002" \
+    "quay.io:5003" \
+    "registry.access.redhat.com:5004" \
+  ; do
+    domain="${entry%:*}"; port="${entry#*:}"
+    ## keepalive off: idle Caddy connections would keep the socket-activated
+    ## mirror backends alive past their idle timeout.
+    cat >> /etc/caddy/Caddyfile << __LOCKI_EOF__
+
+https://$domain {
+	tls {
+		issuer internal {
+			ca locki
+		}
+	}
+	@mirrorable {
+		method GET HEAD
+		path /v2/*
+		not header Authorization *
+	}
+	handle @mirrorable {
+		reverse_proxy 10.99.0.1:$port {
+			transport http {
+				keepalive off
+			}
+			@miss status 401 403 404 429 500 502 503 504
+			handle_response @miss {
+				reverse_proxy https://$domain
+			}
+		}
+	}
+	handle {
+		reverse_proxy https://$domain
+	}
+}
+__LOCKI_EOF__
+  done
+
+  caddy validate --config /etc/caddy/Caddyfile
+  systemctl enable --now caddy
+fi

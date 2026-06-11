@@ -333,12 +333,11 @@ assert_fail  "port < 1024 rejected" locki port-forward -m "$LOGIN" 80
 echo
 echo "Testing registry pull-through cache..."
 
-assert_output "docker is podman" "podman" locki x -m "$LOGIN" docker --version
+assert_output "registry domains point at VM" "10.99.0.1 registry-1.docker.io" locki x -m "$LOGIN" grep ghcr.io /etc/hosts
+assert_ok "Locki CA trusted for hijacked registry TLS" locki x -m "$LOGIN" curl -sf https://ghcr.io/v2/
+assert_output "docker is real docker" "Docker version" locki x -m "$LOGIN" docker --version
 assert_ok "podman shim works directly" locki x -m "$LOGIN" podman --version
-assert_output "registry mirrors configured" "10.99.0.1:5001" locki x -m "$LOGIN" cat /etc/containers/registries.conf.d/99-locki-mirrors.conf
 assert_ok "docker pull from docker.io" locki x -m "$LOGIN" docker pull -q alpine:3.20
-# Unqualified, non-aliased short name must resolve to docker.io without a TTY prompt
-assert_ok "docker pull with short name" locki x -m "$LOGIN" docker pull -q memcached:1.6-alpine
 assert_ok "docker pull from ghcr.io" locki x -m "$LOGIN" docker pull -q ghcr.io/astral-sh/uv:latest
 assert_ok "docker run works" locki x -m "$LOGIN" docker run --rm alpine:3.20 true
 assert_ok "docker API socket responds" locki x -m "$LOGIN" curl -sf --unix-socket /run/docker.sock http://d/_ping
