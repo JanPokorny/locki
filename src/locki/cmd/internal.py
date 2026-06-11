@@ -22,7 +22,7 @@ import sys
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass
-from functools import cache, cached_property
+from functools import cached_property
 
 import asyncssh
 import click
@@ -484,11 +484,6 @@ class Ruleset:
         return f'Allowed forms of "{" ".join(prefix)}" are:\n{lines}'
 
 
-@cache
-def _ruleset() -> Ruleset:
-    return Ruleset.from_markdown((PACKAGE_DATA / "AGENTS.md").read_text())
-
-
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 
@@ -655,12 +650,9 @@ def internal_command_bridge() -> None:
     if not cmd:
         sys.exit("No command specified.")
     try:
-        parts = shlex.split(cmd)
-    except ValueError as e:
-        sys.exit(f"Failed to parse command: {e}")
-    if len(parts) < 2:
+        cwd_str, exe, *argv = shlex.split(cmd)
+    except (ValueError, AssertionError):
         sys.exit("Usage: <cwd> <exe> [args...]")
-    cwd_str, *argv = parts
 
     cwd = pathlib.Path(cwd_str).resolve()
     wt_root = WORKTREES.resolve()
@@ -682,35 +674,30 @@ def internal_command_bridge() -> None:
         if p == sandbox_root:
             sys.exit(f"No worktree .git found at or above {str(cwd)!r}")
         p = p.parent
-    rel = p.relative_to(wt_root).parts
-    if len(rel) == 1:
-        meta_git = WORKTREES_META / wt_dir / ".git"
-    elif len(rel) == 4 and rel[1] == ".locki" and rel[2] == "include":
-        meta_git = WORKTREES_META / wt_dir / "include" / rel[3] / ".git"
-    else:
-        sys.exit(f"Unexpected worktree layout: {'/'.join(rel)!r}")
+    match p.relative_to(wt_root).parts:
+        case [wt_dir_] if wt_dir_ == wt_dir:
+            meta_git = WORKTREES_META / wt_dir / ".git"
+        case [wt_dir_, ".locki", "include", included_wt_dir] if wt_dir_ == wt_dir:
+            meta_git = WORKTREES_META / wt_dir / "include" / included_wt_dir / ".git"
+        case _:
+            sys.exit(f"Unexpected worktree layout: {p}")
     if not meta_git.exists():
         sys.exit(f"Missing worktree metadata: {meta_git}")
     (p / ".git").write_text(meta_git.read_text())
 
-    if not argv:
-        sys.exit("Empty command.")
-
-    exe = pathlib.Path(argv[0]).name
-    # chdir first so `gh repo view` and `git stash list` run inside the worktree.
     os.chdir(str(cwd))
 
-    ruleset = _ruleset()
-    error = ruleset.check([exe, *argv[1:]], wt_id)
-    if error:
+    if error := Ruleset.from_markdown((PACKAGE_DATA / "AGENTS.md").read_text()).check([exe, *argv], wt_id):
         with contextlib.suppress(OSError):
             DENIED_LOG.parent.mkdir(parents=True, exist_ok=True)
             with DENIED_LOG.open("a") as fh:
-                fh.write(f"{datetime.datetime.now().isoformat(timespec='seconds')}\t{wt_id}\t{shlex.join(argv)}\n")
+                fh.write(
+                    f"{datetime.datetime.now().isoformat(timespec='seconds')}\t{wt_id}\t{shlex.join([exe, *argv])}\n"
+                )
         sys.exit(error)
 
     if exe == "locki":
-        os.execvp(sys.executable, [sys.executable, "-m", "locki", *argv[1:]])
+        os.execvp(sys.executable, [sys.executable, "-m", "locki", *argv])
     if exe == "git":
         os.environ["GIT_EDITOR"] = "true"
-    os.execvp(exe, [exe, *argv[1:]])
+    os.execvp(exe, [exe, *argv])
