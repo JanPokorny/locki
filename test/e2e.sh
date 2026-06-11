@@ -49,9 +49,14 @@ export XDG_DATA_HOME="$TMPDIR_ROOT/xdg/data"
 export XDG_STATE_HOME="$TMPDIR_ROOT/xdg/state"
 export XDG_RUNTIME_DIR="$TMPDIR_ROOT/xdg/run"
 export LIMA_HOME="$XDG_STATE_HOME/locki/lima"
-kill_locki_sshd() { local pf="$XDG_RUNTIME_DIR/locki/sshd.pid"; [ -f "$pf" ] && kill "$(cat "$pf")" 2>/dev/null || true; }
-kill_locki_sshd
-cleanup() { kill_locki_sshd; limactl delete -f locki 2>/dev/null || true; rm -rf "$TMPDIR_ROOT"; }
+kill_locki_pids() {
+    local pf
+    for pf in "$XDG_RUNTIME_DIR/locki/sshd.pid" "$XDG_RUNTIME_DIR/locki/daemon.pid"; do
+        [ -f "$pf" ] && kill "$(cat "$pf")" 2>/dev/null || true
+    done
+}
+kill_locki_pids
+cleanup() { kill_locki_pids; limactl delete -f locki 2>/dev/null || true; rm -rf "$TMPDIR_ROOT"; }
 trap cleanup EXIT
 
 VENV="$TMPDIR_ROOT/v"
