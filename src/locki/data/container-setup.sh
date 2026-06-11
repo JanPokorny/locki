@@ -163,9 +163,26 @@ chmod +x /opt/locki/bin/high/*
 
 mkdir -p /opt/locki/bin/low
 
+## Claude Code: official RPM repo on dnf distros, npm fallback elsewhere
+cat > /opt/locki/bin/low/claude << 'EOF'
+#!/bin/bash
+set -eo pipefail
+if ! locki-command-real claude >/dev/null 2>&1; then
+  if command -v dnf >/dev/null 2>&1; then
+    /opt/locki/bin/high/locki-auto-install claude-code sh -c '
+      printf "[claude-code]\nname=Claude Code\nbaseurl=https://downloads.claude.ai/claude-code/rpm/latest\nenabled=1\ngpgcheck=1\ngpgkey=https://downloads.claude.ai/keys/claude-code.asc\n" > /etc/yum.repos.d/claude-code.repo
+      dnf install -yq claude-code
+    '
+  else
+    locki-command-real node >/dev/null 2>&1 || /opt/locki/bin/high/locki-auto-install nodejs sh -c 'export MISE_AUTO_INSTALL=false MISE_NO_HOOKS=true; mise use -g node && mise install node' >/dev/null 2>&1
+    /opt/locki/bin/high/locki-auto-install @anthropic-ai/claude-code sh -c 'export MISE_AUTO_INSTALL=false MISE_NO_HOOKS=true; mise use -g npm:@anthropic-ai/claude-code && mise install npm:@anthropic-ai/claude-code'
+  fi
+fi
+exec "$(locki-command-real claude)" "$@"
+EOF
+
 ## NPM packages
 for pair in \
-  "@anthropic-ai/claude-code=claude" \
   "@google/gemini-cli=gemini" \
   "@mariozechner/pi-coding-agent=pi" \
   "@openai/codex=codex" \
