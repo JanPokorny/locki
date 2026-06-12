@@ -120,12 +120,8 @@ CACHE=/var/cache/locki/registry-cache
 [ -d "$CACHE" ] || { echo "0"; exit 0; }
 
 BEFORE=$(du -sb "$CACHE" 2>/dev/null | cut -f1 || echo 0)
-for reg in docker ghcr gcr quay redhat; do
-  cfg="/etc/locki/registry-${reg}.yml"
-  [ -f "$cfg" ] || continue
-  systemctl stop "locki-registry-${reg}.service" "locki-registry-${reg}-backend.service" 2>/dev/null || true
-  /usr/bin/registry garbage-collect "$cfg" --delete-untagged 2>&1 || true
-done
+find "$CACHE" -mindepth 1 -delete 2>/dev/null || true
+systemctl restart nginx 2>/dev/null || true
 AFTER=$(du -sb "$CACHE" 2>/dev/null | cut -f1 || echo 0)
 FREED=$((BEFORE - AFTER))
 [ "$FREED" -lt 0 ] && FREED=0
@@ -133,7 +129,7 @@ echo "$FREED"
 """
 
 
-@vm_app.command("prune", help="Garbage-collect the pull-through registry cache.")
+@vm_app.command("prune", help="Clear the registry cache.")
 @json_option
 def vm_prune_cmd(as_json):
     if vm_status() != "Running":

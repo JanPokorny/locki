@@ -334,7 +334,7 @@ echo
 echo "Testing registry pull-through cache..."
 
 assert_output "registry domains point at VM" "10.99.0.1 registry-1.docker.io" locki x -m "$LOGIN" grep ghcr.io /etc/hosts
-assert_ok "Locki CA trusted for hijacked registry TLS" locki x -m "$LOGIN" curl -sf https://ghcr.io/v2/
+assert_ok "Locki CA trusted for hijacked registry TLS" locki x -m "$LOGIN" curl -sS -o /dev/null https://ghcr.io/v2/
 assert_output "docker is real docker" "Docker version" locki x -m "$LOGIN" docker --version
 assert_ok "podman shim works directly" locki x -m "$LOGIN" podman --version
 assert_ok "docker pull from docker.io" locki x -m "$LOGIN" docker pull -q alpine:3.20
@@ -343,12 +343,10 @@ assert_ok "docker run works" locki x -m "$LOGIN" docker run --rm alpine:3.20 tru
 assert_ok "docker API socket responds" locki x -m "$LOGIN" curl -sf --unix-socket /run/docker.sock http://d/_ping
 # Proxied blobs are committed to the cache asynchronously — allow a moment
 sleep 5
-assert_ok "docker.io pull populates registry cache" "$LIMACTL" shell --start --workdir=/ locki -- \
-    sudo bash -c 'test -n "$(ls -A /var/cache/locki/registry-cache/docker)"'
-assert_ok "ghcr.io pull populates registry cache" "$LIMACTL" shell --start --workdir=/ locki -- \
-    sudo bash -c 'test -n "$(ls -A /var/cache/locki/registry-cache/ghcr)"'
-assert_ok "registry backend activated by pulls" "$LIMACTL" shell --start --workdir=/ locki -- \
-    sudo systemctl is-active --quiet locki-registry-docker-backend.service
+assert_ok "nginx registry proxy is active" "$LIMACTL" shell --start --workdir=/ locki -- \
+    sudo systemctl is-active --quiet nginx
+assert_ok "pulls populate the registry cache" "$LIMACTL" shell --start --workdir=/ locki -- \
+    sudo bash -c 'test -n "$(ls -A /var/cache/locki/registry-cache)"'
 
 # ── concurrent exec on a new sandbox ─────────────────────────────────────────
 
@@ -467,23 +465,24 @@ assert_fail "included worktree dir is gone" test -d "$INCLUDE_PATH"
 # repo2 should no longer list the worktree
 assert_fail "include worktree removed from source repo" bash -c "git -C '$REPO2' worktree list | grep -q '$INCLUDE_PATH'"
 
-# ── registry idle shutdown ───────────────────────────────────────────────────
+# ── registry cache hits across sandboxes ─────────────────────────────────────
 
 echo
-echo "Testing registry idle shutdown..."
+echo "Testing registry cache hits across sandboxes..."
 
-# Pulls last ran in the registry section several minutes ago; the backend should be
-# stopped by now (1min proxy idle timeout). Retry briefly in case the suite ran fast.
-idle_ok=false
-for _ in $(seq 1 24); do
-    if ! "$LIMACTL" shell --start --workdir=/ locki -- sudo systemctl is-active --quiet locki-registry-docker-backend.service; then
-        idle_ok=true; break
-    fi
-    sleep 5
-done
-if $idle_ok; then pass "registry backend stops after idle timeout"; else fail "registry backend stops after idle timeout"; fi
-assert_ok "registry socket stays armed" "$LIMACTL" shell --start --workdir=/ locki -- \
-    sudo systemctl is-active --quiet locki-registry-docker.socket
+cache_size() { "$LIMACTL" shell --start --workdir=/ locki -- \
+    sudo bash -c 'du -sb /var/cache/locki/registry-cache 2>/dev/null | cut -f1'; }
+
+size_before=$(cache_size)
+HIT_SB=$(new_sandbox_id)
+assert_ok "second sandbox pulls cached image" locki x -m "$HIT_SB" docker pull -q alpine:3.20
+sleep 3
+size_after=$(cache_size)
+if [[ -n "$size_before" && -n "$size_after" && "$size_after" -le "$((size_before + 65536))" ]]; then
+    pass "cached layers served without re-download (${size_before}B -> ${size_after}B)"
+else
+    fail "cached layers served without re-download (${size_before}B -> ${size_after}B)"
+fi
 
 # ── summary ──────────────────────────────────────────────────────────────────
 

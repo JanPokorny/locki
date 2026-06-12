@@ -52,159 +52,134 @@ profiles:
 __LOCKI_EOF__
 fi
 
-if ! test -f /usr/bin/registry; then
-  dnf install -y --setopt install_weak_deps=False docker-distribution
+if ! command -v nginx >/dev/null 2>&1; then
+  dnf install -y --setopt install_weak_deps=False nginx openssl
 
   mkdir -p /etc/locki /var/cache/locki/registry-cache
-  for entry in \
-    "docker:5000:https://registry-1.docker.io" \
-    "ghcr:5001:https://ghcr.io" \
-    "gcr:5002:https://gcr.io" \
-    "quay:5003:https://quay.io" \
-    "redhat:5004:https://registry.access.redhat.com" \
-  ; do
-    name="${entry%%:*}"; rest="${entry#*:}"
-    port="${rest%%:*}"; url="${rest#*:}"
-    mkdir -p "/var/cache/locki/registry-cache/$name"
-    cat > "/etc/locki/registry-${name}.yml" << EOF
-version: 0.1
-log:
-  level: warn
-storage:
-  filesystem:
-    rootdirectory: /var/cache/locki/registry-cache/$name
-  delete:
-    enabled: true
-http:
-  addr: 10.99.0.1:1$port
-proxy:
-  remoteurl: $url
-  ttl: 168h
-EOF
 
-    cat > "/etc/systemd/system/locki-registry-${name}.socket" << EOF
+  if ! test -f /etc/locki/ca.crt; then
+    openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 3650 \
+      -subj "/CN=Locki Registry CA" -keyout /etc/locki/ca.key -out /etc/locki/ca.crt
+  fi
+  sans="DNS:registry-1.docker.io,DNS:mirror.gcr.io,DNS:ghcr.io,DNS:gcr.io,DNS:quay.io,DNS:registry.access.redhat.com"
+  openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
+    -keyout /etc/locki/registry.key -subj "/CN=Locki Registry" \
+    -addext "subjectAltName=$sans" -addext "extendedKeyUsage=serverAuth" \
+    -out /etc/locki/registry.csr
+  openssl x509 -req -in /etc/locki/registry.csr -CA /etc/locki/ca.crt -CAkey /etc/locki/ca.key \
+    -CAcreateserial -days 3650 -copy_extensions copyall -out /etc/locki/registry.crt
+  rm -f /etc/locki/registry.csr
+  chgrp nginx /etc/locki/ca.key /etc/locki/registry.key
+  chmod 640 /etc/locki/ca.key /etc/locki/registry.key
+
+  resolvers=$(awk '/^nameserver/ && $2 !~ /:/ {print $2}' /etc/resolv.conf | paste -sd' ')
+  [ -n "$resolvers" ] || resolvers="1.1.1.1 8.8.8.8"
+
+  cat > /etc/nginx/nginx.conf << '__LOCKI_NGINX__'
+user nginx;
+worker_processes auto;
+error_log /var/log/nginx/error.log warn;
+pid /run/nginx.pid;
+
+events {
+	worker_connections 4096;
+}
+
+http {
+	access_log off;
+	server_tokens off;
+
+	proxy_cache_path /var/cache/locki/registry-cache levels=1:2 keys_zone=registry:64m inactive=365d max_size=20g use_temp_path=off;
+
+	resolver __RESOLVERS__ ipv6=off valid=300s;
+	resolver_timeout 10s;
+
+	proxy_http_version 1.1;
+	proxy_ssl_server_name on;
+	proxy_read_timeout 300s;
+	proxy_max_temp_file_size 8192m;
+
+	server {
+		listen 10.99.0.1:80;
+		location = /locki-ca.crt {
+			default_type application/x-x509-ca-cert;
+			alias /etc/locki/ca.crt;
+		}
+		location / { return 404; }
+	}
+
+	server {
+		listen 10.99.0.1:443 ssl;
+		http2 on;
+		server_name registry-1.docker.io mirror.gcr.io ghcr.io gcr.io quay.io registry.access.redhat.com;
+
+		ssl_certificate     /etc/locki/registry.crt;
+		ssl_certificate_key /etc/locki/registry.key;
+
+		location ~ "^/v2/.+/blobs/(sha256:[0-9a-f]{64})$" {
+			set $cache_key "blob:$1";
+			proxy_set_header Host $host;
+			proxy_pass https://$host;
+			proxy_cache registry;
+			proxy_cache_key $cache_key;
+			proxy_cache_valid 200 365d;
+			proxy_cache_lock on;
+			proxy_cache_lock_timeout 120s;
+			proxy_cache_use_stale error timeout updating;
+			proxy_ignore_headers Cache-Control Expires Set-Cookie X-Accel-Expires Vary;
+			proxy_intercept_errors on;
+			error_page 301 302 307 = @follow_redirect;
+			add_header X-Locki-Cache $upstream_cache_status always;
+		}
+
+		location ~ "^/v2/.+/manifests/sha256:[0-9a-f]{64}$" {
+			proxy_set_header Host $host;
+			proxy_pass https://$host;
+			proxy_cache registry;
+			proxy_cache_key "manifest:$host:$request_uri";
+			proxy_cache_valid 200 365d;
+			proxy_cache_lock on;
+			proxy_ignore_headers Cache-Control Expires Set-Cookie X-Accel-Expires Vary;
+			add_header X-Locki-Cache $upstream_cache_status always;
+		}
+
+		location / {
+			proxy_set_header Host $host;
+			proxy_pass https://$host;
+		}
+
+		location @follow_redirect {
+			set $redirect_target $upstream_http_location;
+			if ($redirect_target !~ "^https?://") {
+				set $redirect_target "https://$host$upstream_http_location";
+			}
+			proxy_set_header Authorization "";
+			proxy_pass $redirect_target;
+			proxy_cache registry;
+			proxy_cache_key $cache_key;
+			proxy_cache_valid 200 365d;
+			proxy_cache_lock on;
+			proxy_cache_lock_timeout 120s;
+			proxy_ignore_headers Cache-Control Expires Set-Cookie X-Accel-Expires Vary;
+			add_header X-Locki-Cache $upstream_cache_status always;
+		}
+	}
+}
+__LOCKI_NGINX__
+  sed -i "s|__RESOLVERS__|$resolvers|" /etc/nginx/nginx.conf
+
+  setsebool -P httpd_can_network_connect 1 || true
+  chcon -R -t httpd_cache_t /var/cache/locki/registry-cache 2>/dev/null || true
+  echo 'net.ipv4.ip_nonlocal_bind=1' > /etc/sysctl.d/99-locki.conf
+  sysctl -w net.ipv4.ip_nonlocal_bind=1 || true
+  mkdir -p /etc/systemd/system/nginx.service.d
+  cat > /etc/systemd/system/nginx.service.d/locki.conf << 'EOF'
 [Unit]
-Description=Locki registry mirror socket ($name)
-
-[Socket]
-ListenStream=10.99.0.1:$port
-FreeBind=true
-
-[Install]
-WantedBy=sockets.target
+After=incus.service network-online.target
+Wants=network-online.target
 EOF
 
-    cat > "/etc/systemd/system/locki-registry-${name}.service" << EOF
-[Unit]
-Description=Locki registry mirror proxy ($name)
-Requires=locki-registry-${name}-backend.service
-After=locki-registry-${name}-backend.service
-
-[Service]
-ExecStart=/usr/lib/systemd/systemd-socket-proxyd --exit-idle-time=1min 10.99.0.1:1$port
-EOF
-
-    ## ExecStartPost blocks until the registry accepts connections, so the proxy never
-    ## races a backend that is still starting up.
-    cat > "/etc/systemd/system/locki-registry-${name}-backend.service" << EOF
-[Unit]
-Description=Locki registry mirror ($name)
-StopWhenUnneeded=true
-
-[Service]
-Environment=OTEL_TRACES_EXPORTER=none GOMEMLIMIT=64MiB
-ExecStart=/usr/bin/registry serve /etc/locki/registry-${name}.yml
-ExecStartPost=/usr/bin/bash -c 'for _ in {1..100}; do (exec 3<>/dev/tcp/10.99.0.1/1$port) 2>/dev/null && exit 0; sleep 0.1; done; exit 1'
-Restart=on-failure
-RestartSec=2
-EOF
-  done
-
-  setsebool -P systemd_socket_proxyd_bind_any=1 systemd_socket_proxyd_connect_any=1 || true
-
+  nginx -t
   systemctl daemon-reload
-  for reg in docker ghcr gcr quay redhat; do
-    systemctl enable --now "locki-registry-${reg}.socket"
-  done
-fi
-
-if ! command -v caddy >/dev/null 2>&1; then
-  dnf install -y --setopt install_weak_deps=False caddy openssl
-
-  mkdir -p /etc/locki
-  openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 3650 \
-    -subj "/CN=Locki Registry CA" -keyout /etc/locki/ca.key -out /etc/locki/ca.crt
-  chgrp caddy /etc/locki/ca.key
-  chmod 640 /etc/locki/ca.key
-
-  cat > /etc/caddy/Caddyfile << '__LOCKI_EOF__'
-{
-	skip_install_trust
-	pki {
-		ca locki {
-			name "Locki Registry CA"
-			root {
-				cert /etc/locki/ca.crt
-				key /etc/locki/ca.key
-			}
-		}
-	}
-}
-
-http://10.99.0.1 {
-	handle /locki-ca.crt {
-		root * /etc/locki
-		rewrite * /ca.crt
-		file_server
-	}
-	handle {
-		respond 404
-	}
-}
-__LOCKI_EOF__
-
-  for entry in \
-    "registry-1.docker.io:5000" \
-    "mirror.gcr.io:5000" \
-    "ghcr.io:5001" \
-    "gcr.io:5002" \
-    "quay.io:5003" \
-    "registry.access.redhat.com:5004" \
-  ; do
-    domain="${entry%:*}"; port="${entry#*:}"
-    ## keepalive off: idle Caddy connections would keep the socket-activated
-    ## mirror backends alive past their idle timeout.
-    cat >> /etc/caddy/Caddyfile << __LOCKI_EOF__
-
-https://$domain {
-	tls {
-		issuer internal {
-			ca locki
-		}
-	}
-	@mirrorable {
-		method GET HEAD
-		path /v2/*
-		not header Authorization *
-	}
-	handle @mirrorable {
-		reverse_proxy 10.99.0.1:$port {
-			transport http {
-				keepalive off
-			}
-			@miss status 401 403 404 429 500 502 503 504
-			handle_response @miss {
-				reverse_proxy https://$domain
-			}
-		}
-	}
-	handle {
-		reverse_proxy https://$domain
-	}
-}
-__LOCKI_EOF__
-  done
-
-  caddy validate --config /etc/caddy/Caddyfile
-  systemctl enable --now caddy
+  systemctl enable --now nginx
 fi

@@ -324,7 +324,7 @@ set -eo pipefail
 if ! locki-command-real podman >/dev/null 2>&1; then
   /opt/locki/bin/high/locki-auto-install podman sh -c '
     if command -v dnf >/dev/null 2>&1; then
-      dnf install -yq podman
+      dnf install -yq podman crun
     else
       echo "Error: unsupported distro, install Podman manually"
       exit 1
