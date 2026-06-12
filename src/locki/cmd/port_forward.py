@@ -98,6 +98,12 @@ def port_forward_cmd(ctx, match, interactive, clear, list_forwards, as_json):
         if host_port < 1024:
             fail(f"Host port {host_port} is not allowed (must be >= 1024).")
         run_in_vm(
+            ["incus", "config", "device", "remove", sandbox.wt_id, f"port-fwd-{host_port}"],
+            f"Removing existing forward on host port {host_port}",
+            check=False,
+            quiet=True,
+        )
+        run_in_vm(
             [
                 "incus",
                 "config",

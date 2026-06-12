@@ -323,6 +323,7 @@ if [[ -n "$random_host_port" && "$random_host_port" -ge 1024 ]]; then
 else
     fail ":port assigns random host port >= 1024 (got '$random_host_port')"
 fi
+assert_ok    "re-forwarding the same host port is idempotent" locki port-forward -m "$LOGIN" "$random_host_port:9222"
 assert_ok    ":port forward cleaned up" locki port-forward -m "$LOGIN" --clear
 
 # Reject privileged ports
