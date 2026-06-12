@@ -396,17 +396,18 @@ def exec_cmd(ctx, match, interactive, create):
         env={**os.environ, **LIMA_ENV, "LIMA_SHELLENV_ALLOW": ",".join(forwarded_env)},
     )
 
-    click.echo()
-    click.echo(f"{EXIT} Exited Locki sandbox.", err=True)
-    click.echo(f"{INFO} Return to this sandbox:", err=True)
+    clear = "\r\033[2K" if sys.stderr.isatty() else ""
+    click.echo(clear, err=True)
+    click.echo(f"{clear}{EXIT} Exited Locki sandbox.", err=True)
+    click.echo(f"{clear}{INFO} Return to this sandbox:", err=True)
     click.echo(
-        f"{INFO}      via AI: {click.style(f'locki ai -m {sandbox.wt_id}', fg='green')}"
+        f"{clear}{INFO}      via AI: {click.style(f'locki ai -m {sandbox.wt_id}', fg='green')}"
         f" (or just {click.style('locki ai', fg='green')} and find it in the list)",
         err=True,
     )
     click.echo(
-        f"{INFO}   via shell: {click.style(f'locki x -m {sandbox.wt_id}', fg='green')}",
+        f"{clear}{INFO}   via shell: {click.style(f'locki x -m {sandbox.wt_id}', fg='green')}",
         err=True,
     )
-    click.echo(f"{INFO}     on disk: {click.style(pretty_path(sandbox.wt_path), fg='green')}", err=True)
+    click.echo(f"{clear}{INFO}     on disk: {click.style(pretty_path(sandbox.wt_path), fg='green')}", err=True)
     raise SystemExit(result.returncode)
