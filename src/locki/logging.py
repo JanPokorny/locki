@@ -37,8 +37,13 @@ def setup_logging():
     file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
     root.addHandler(file_handler)
 
-    # Clean up old log files, keep the 20 most recent
-    log_files = sorted(LOG.glob("*.log"), key=lambda f: f.stat().st_mtime, reverse=True)
+    def _mtime(f):
+        try:
+            return f.stat().st_mtime
+        except OSError:
+            return 0.0
+
+    log_files = sorted(LOG.glob("*.log"), key=_mtime, reverse=True)
     for old_log in log_files[20:]:
         old_log.unlink(missing_ok=True)
 

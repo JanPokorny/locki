@@ -47,9 +47,9 @@ cat > /opt/locki/bin/high/locki-auto-install << 'EOF'
 name="$1"
 shift
 log="/var/log/locki/install/${name}.log"
-mkdir -p $(dirname "$log")
+mkdir -p "$(dirname "$log")" /var/cache/locki
 printf '\033[1;35mᚠ\033[0m Installing %s...\n' "$name" >&2
-if "$@" >>"$log" 2>&1; then
+if { flock 9; "$@" >>"$log" 2>&1; } 9>/var/cache/locki/.install.lock; then
   printf '\033[1;32mᛝ\033[0m Installed %s\n' "$name" >&2
 else
   printf '\033[1;31mᛞ\033[0m Failed to install %s, see log at \033[33m%s\033[0m\n' "$name" "$log" >&2
@@ -314,24 +314,26 @@ if ! locki-command-real docker >/dev/null 2>&1; then
     systemctl enable --now containerd docker
   '
 fi
-exec "$(locki-command-real docker)" "$@"
-EOF
+_real=$(locki-command-real docker)
 
-## Podman
-cat > /opt/locki/bin/low/podman << 'EOF'
-#!/bin/bash
-set -eo pipefail
-if ! locki-command-real podman >/dev/null 2>&1; then
-  /opt/locki/bin/high/locki-auto-install podman sh -c '
-    if command -v dnf >/dev/null 2>&1; then
-      dnf install -yq podman crun
-    else
-      echo "Error: unsupported distro, install Podman manually"
-      exit 1
-    fi
-  '
+sock=/var/cache/locki/buildkit.sock
+is_build=
+case "${1:-}" in
+  build) is_build=1 ;;
+  buildx) [ "${2:-}" = build ] && is_build=1 ;;
+  image) [ "${2:-}" = build ] && is_build=1 ;;
+esac
+if [ -n "$is_build" ] && [ -S "$sock" ]; then
+  for a in "$@"; do case "$a" in --builder|--builder=*) exec "$_real" "$@" ;; esac; done
+  [ -f "${HOME:-/root}/.docker/buildx/instances/locki" ] \
+    || "$_real" buildx create --name locki --driver remote "unix://$sock" >/dev/null 2>&1 || true
+  case "$1" in build) shift ;; *) shift 2 ;; esac
+  has_output=
+  for a in "$@"; do case "$a" in --load|--push|--output*|-o*) has_output=1 ;; esac; done
+  set -- buildx build --builder locki "$@"
+  [ -z "$has_output" ] && set -- "$@" --load
 fi
-exec "$(locki-command-real podman)" "$@"
+exec "$_real" "$@"
 EOF
 
 chmod +x /opt/locki/bin/low/*
@@ -362,11 +364,7 @@ echo '192.168.5.2 host.lima.internal' >> /etc/hosts
 ## network is not available for a short while, wait for it
 timeout 30s sh -c 'while ! ping -c1 -W1 connectivitycheck.gstatic.com >/dev/null 2>&1; do sleep 1; done'
 
-## Transparent registry caching: registry domains resolve to the VM, where Caddy
-## impersonates them (TLS via the Locki CA) in front of pull-through caches.
-## Works for any client that uses the system trust store: docker, podman,
-## containerd, k3s, nerdctl, skopeo, helm... Skipped (direct, uncached registry
-## access) when the CA can't be fetched or installed, e.g. on an older VM.
+## transparent container image registry caching
 ca_tmp=$(mktemp)
 ca_url=http://10.99.0.1/locki-ca.crt
 if { command -v curl >/dev/null 2>&1 && curl -fsS --retry 3 -o "$ca_tmp" "$ca_url"; } \

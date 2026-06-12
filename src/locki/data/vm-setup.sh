@@ -183,3 +183,35 @@ EOF
   systemctl daemon-reload
   systemctl enable --now nginx
 fi
+
+if ! command -v buildkitd >/dev/null 2>&1; then
+  dnf install -y --setopt install_weak_deps=False docker-buildkit runc
+  mkdir -p /etc/buildkit /var/cache/locki/buildkit
+  cat > /etc/buildkit/buildkitd.toml << 'EOF'
+root = "/var/cache/locki/buildkit"
+[worker.oci]
+  enabled = true
+  gc = true
+  [[worker.oci.gcpolicy]]
+    all = true
+    maxUsedSpace = "20GB"
+EOF
+
+  cat > /etc/systemd/system/locki-buildkit.service << 'EOF'
+[Unit]
+Description=Locki shared BuildKit daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/buildkitd --addr unix:///var/cache/locki/buildkit.sock --config /etc/buildkit/buildkitd.toml
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  systemctl daemon-reload
+  systemctl enable --now locki-buildkit
+fi

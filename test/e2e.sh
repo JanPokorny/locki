@@ -336,7 +336,6 @@ echo "Testing registry pull-through cache..."
 assert_output "registry domains point at VM" "10.99.0.1 registry-1.docker.io" locki x -m "$LOGIN" grep ghcr.io /etc/hosts
 assert_ok "Locki CA trusted for hijacked registry TLS" locki x -m "$LOGIN" curl -sS -o /dev/null https://ghcr.io/v2/
 assert_output "docker is real docker" "Docker version" locki x -m "$LOGIN" docker --version
-assert_ok "podman shim works directly" locki x -m "$LOGIN" podman --version
 assert_ok "docker pull from docker.io" locki x -m "$LOGIN" docker pull -q alpine:3.20
 assert_ok "docker pull from ghcr.io" locki x -m "$LOGIN" docker pull -q ghcr.io/astral-sh/uv:latest
 assert_ok "docker run works" locki x -m "$LOGIN" docker run --rm alpine:3.20 true
@@ -483,6 +482,31 @@ if [[ -n "$size_before" && -n "$size_after" && "$size_after" -le "$((size_before
 else
     fail "cached layers served without re-download (${size_before}B -> ${size_after}B)"
 fi
+
+# ── shared build cache across sandboxes ──────────────────────────────────────
+
+echo
+echo "Testing shared build cache across sandboxes..."
+
+BUILD_A=$(new_sandbox_id)
+BUILD_B=$(new_sandbox_id)
+# Identical context bytes in the shared cache dir -> identical buildkit cache key.
+locki x -m "$BUILD_A" bash -c 'mkdir -p /var/cache/locki/locki-buildtest && printf "FROM alpine:3.20\nRUN echo locki-shared-cache > /marker && sleep 2\n" > /var/cache/locki/locki-buildtest/Dockerfile'
+
+assert_ok "build in sandbox A" locki x -m "$BUILD_A" docker build -t locki-buildtest /var/cache/locki/locki-buildtest
+# --load put the image into A's own dockerd
+assert_output "built image runs in A (--load worked)" "locki-shared-cache" locki x -m "$BUILD_A" docker run --rm locki-buildtest cat /marker
+
+# Same context in B must reuse A's RUN layer from the shared buildkitd cache.
+b_out=$(locki x -m "$BUILD_B" docker build -t locki-buildtest /var/cache/locki/locki-buildtest 2>&1) || true
+if echo "$b_out" | grep -qi 'CACHED'; then
+    pass "sandbox B reuses sandbox A's build cache (CACHED)"
+else
+    fail "sandbox B reuses sandbox A's build cache (no CACHED in output)"
+fi
+assert_output "built image runs in B" "locki-shared-cache" locki x -m "$BUILD_B" docker run --rm locki-buildtest cat /marker
+assert_ok "shared buildkitd is active on VM" "$LIMACTL" shell --start --workdir=/ locki -- \
+    sudo systemctl is-active --quiet locki-buildkit
 
 # ── summary ──────────────────────────────────────────────────────────────────
 
