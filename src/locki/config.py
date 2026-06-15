@@ -30,6 +30,9 @@ _ARCH_HINTS: dict[str, list[str]] = {
 }
 
 
+_USER_ONLY_KEYS = frozenset({"ide_command"})
+
+
 class LockiConfig(pydantic.BaseModel):
     incus_image: str | dict[str, str] = "images:fedora/43"
     ai_command: str = ""
@@ -75,6 +78,11 @@ def load_config(git_root: pathlib.Path | None, *, skip_auto_setup: bool = False)
                     repo_data = tomllib.load(f)
             except tomllib.TOMLDecodeError as e:
                 fail(f"Invalid repo config {repo_config_path}: {e}")
+            for key in _USER_ONLY_KEYS & repo_data.keys():
+                logger.warning(
+                    "Ignoring '%s' in repo config %s: it may only be set in user config.", key, repo_config_path
+                )
+                del repo_data[key]
 
     merged = deep_merge(user_data, repo_data)
     try:

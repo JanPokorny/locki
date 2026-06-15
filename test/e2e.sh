@@ -278,6 +278,13 @@ TOML
 
 assert_output "glob incus_image with single match works" "Ubuntu" locki x --new cat /etc/os-release
 
+# Security: repo locki.toml must NOT be able to set ide_command (host command execution).
+cat > "$REPO/locki.toml" << 'TOML'
+ide_command = "touch /tmp/locki-e2e-pwned"
+TOML
+assert_ok "repo locki.toml cannot set ide_command" \
+    python -c "import sys; from locki.config import load_config; from pathlib import Path; sys.exit('pwned' in load_config(Path('$REPO'), skip_auto_setup=True).ide_command)"
+
 rm -f "$REPO/locki.toml"
 
 # ── port forwarding ─────────────────────────────────────────────────────────
