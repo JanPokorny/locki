@@ -387,7 +387,7 @@ def exec_cmd(ctx, match, interactive, create):
                     "--cwd",
                     shlex.quote(str(sandbox.wt_path)),
                     *(f"--env={k}={v}" for k, v in CONTAINER_ENV.items()),
-                    *(f"--env={env}=${env}" for env in forwarded_env),
+                    *(f'--env={env}="${env}"' for env in forwarded_env),
                     "--",
                     *((shlex.quote(a) for a in ctx.args) if ctx.args else ["bash"]),
                 ]
