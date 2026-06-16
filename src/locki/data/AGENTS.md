@@ -28,7 +28,7 @@ git config [--get] [--local] <key>
 git count-objects [-v/--verbose]
 git describe [--tags] [--always] [--abbrev=<n>] [<ref>]
 git diff [--staged | --cached] [--name-only] [--stat] [--name-status] [--diff-filter=<filter>] [-U/--unified=<n>] [-w/--ignore-all-space] [--ignore-space-change] [<ref> [<ref>]] [<file> ...]
-git fetch [--prune] [<remote>] [<ref> ...]
+git fetch [--prune] [<remote> [<ref> ...]]
 git for-each-ref [--format=<fmt>] [--sort=<key>] [<pattern> ...]
 git grep [-l/--files-with-matches] <pattern> [<ref>] [<file> ...]
 git hash-object <file>
@@ -40,7 +40,7 @@ git merge <ref>
 git merge-base [--is-ancestor] <ref> <ref>
 git mv <file> <file>
 git pull [--rebase] [--ff-only]
-git push [-u/--set-upstream] [--force-with-lease] [<remote>] [<name>#locki-<wt-id>]
+git push [-u/--set-upstream] [--force-with-lease] [<remote> [<name>#locki-<wt-id>]]
 git rebase (--continue | --abort | --skip)
 git rebase <ref>
 git reflog [--all]

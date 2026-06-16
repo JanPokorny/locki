@@ -203,6 +203,11 @@ class Context:
         result = subprocess.run(["git", "stash", "list"], capture_output=True, text=True)
         return [line.split(":", 1)[0] for line in result.stdout.splitlines() if tag in line]
 
+    @cached_property
+    def remotes(self) -> list[str]:
+        result = subprocess.run(["git", "remote"], capture_output=True, text=True)
+        return result.stdout.split()
+
     def compound(self, parts: list[str | PlaceholderRule]) -> re.Pattern[str]:
         """Build a `re.fullmatch`-ready pattern from literal strings and placeholders."""
         buf: list[str] = []
@@ -219,6 +224,9 @@ class Context:
                 case PlaceholderRule("owned-stash-ref"):
                     refs = self.owned_stash_refs
                     buf.append("(?:" + "|".join(re.escape(r) for r in refs) + ")" if refs else r"(?!)")
+                case PlaceholderRule("remote"):
+                    remotes = self.remotes
+                    buf.append("(?:" + "|".join(re.escape(r) for r in remotes) + ")" if remotes else r"(?!)")
                 case PlaceholderRule("number"):
                     buf.append(r"\d+")
                 case _:

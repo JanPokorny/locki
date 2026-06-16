@@ -163,6 +163,16 @@ assert_fail  "stash push without suffix"        locki x -m "$AUTH" git stash pus
 assert_fail  "stash pop without ref"            locki x -m "$AUTH" git stash pop
 assert_fail  "stash pop of non-owned ref"       locki x -m "$AUTH" git stash pop 'stash@{99}'
 
+# Remote position must be a configured remote name — a transport-helper URL
+# (ext::/fd::) in any repository slot is rejected, so it can never reach git's
+# protocol.ext machinery even on a host that enables it.
+assert_ok    "ls-remote of configured remote"   locki x -m "$AUTH" git ls-remote origin
+assert_fail  "fetch ext:: remote blocked"       locki x -m "$AUTH" git fetch 'ext::sh -c id'
+assert_fail  "ls-remote ext:: blocked"          locki x -m "$AUTH" git ls-remote 'ext::sh -c id'
+assert_fail  "push ext:: remote blocked"        locki x -m "$AUTH" git push "ext::sh -c id#locki-$AUTH"
+assert_fail  "fetch fd:: remote blocked"        locki x -m "$AUTH" git fetch 'fd::7'
+assert_fail  "remote get-url ext:: blocked"     locki x -m "$AUTH" git remote get-url 'ext::sh -c id'
+
 # ── git commit from sandbox ─────────────────────────────────────────────────
 
 echo
