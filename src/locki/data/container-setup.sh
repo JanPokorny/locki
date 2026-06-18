@@ -49,7 +49,7 @@ shift
 log="/var/log/locki/install/${name}.log"
 mkdir -p "$(dirname "$log")" /var/cache/locki
 printf '\033[1;35mᚠ\033[0m Installing %s...\n' "$name" >&2
-if { flock 9; "$@" >>"$log" 2>&1; } 9>/var/cache/locki/.install.lock; then
+if flock -o /var/cache/locki/.install.lock "$@" >>"$log" 2>&1; then
   printf '\033[1;32mᛝ\033[0m Installed %s\n' "$name" >&2
 else
   printf '\033[1;31mᛞ\033[0m Failed to install %s, see log at \033[33m%s\033[0m\n' "$name" "$log" >&2
@@ -323,6 +323,9 @@ case "${1:-}" in
   buildx) [ "${2:-}" = build ] && is_build=1 ;;
   image) [ "${2:-}" = build ] && is_build=1 ;;
 esac
+
+timeout 60 sh -c 'until "$0" info >/dev/null 2>&1; do sleep 0.5; done' "$_real" || true
+
 if [ -n "$is_build" ] && [ -S "$sock" ]; then
   for a in "$@"; do case "$a" in --builder|--builder=*) exec "$_real" "$@" ;; esac; done
   [ -f "${HOME:-/root}/.docker/buildx/instances/locki" ] \

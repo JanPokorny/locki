@@ -526,6 +526,37 @@ assert_output "built image runs in B" "locki-shared-cache" locki x -m "$BUILD_B"
 assert_ok "shared buildkitd is active on VM" "$LIMACTL" shell --start --workdir=/ locki -- \
     sudo systemctl is-active --quiet locki-buildkit
 
+# ── concurrent first-time docker builds (install race) ───────────────────────
+# Regression: in a fresh sandbox, a `docker build` that arrives while a sibling
+# is still installing docker could see the freshly-placed binary, skip the
+# install lock, and race ahead with the legacy builder against a dead socket
+# (no buildx plugin / no daemon yet). The docker shim must barrier on the
+# install lock and wait for the daemon before building.
+
+echo
+echo "Testing concurrent first-time docker builds..."
+
+DRACE=$(new_sandbox_id)
+locki x -m "$DRACE" bash -c 'mkdir -p /var/cache/locki/locki-racetest && printf "FROM alpine:3.20\nRUN echo race-built > /marker\n" > /var/cache/locki/locki-racetest/Dockerfile'
+
+# Fire the first build (triggers the install), then two more while it is in
+# flight — these should hit the binary-present path and block on the barrier.
+locki x -m "$DRACE" docker build -t locki-racetest1 /var/cache/locki/locki-racetest >"$TMPDIR_ROOT/drace1.out" 2>&1 &
+drace_pids="$!"
+for i in 2 3; do
+    locki x -m "$DRACE" docker build -t "locki-racetest$i" /var/cache/locki/locki-racetest >"$TMPDIR_ROOT/drace$i.out" 2>&1 &
+    drace_pids="$drace_pids $!"
+done
+drace_fail=0
+for p in $drace_pids; do wait "$p" || drace_fail=1; done
+
+if [[ $drace_fail -eq 0 ]] && ! grep -qiE 'legacy builder|failed to connect to the docker API' "$TMPDIR_ROOT"/drace*.out; then
+    pass "concurrent first-time builds avoid legacy-builder/dead-socket race"
+else
+    fail "concurrent first-time builds avoid legacy-builder/dead-socket race"
+    cat "$TMPDIR_ROOT"/drace*.out >&2
+fi
+
 # ── summary ──────────────────────────────────────────────────────────────────
 
 echo
