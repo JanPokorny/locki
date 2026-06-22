@@ -341,6 +341,8 @@ if ! locki-command-real docker >/dev/null 2>&1; then
 fi
 _real=$(locki-command-real docker)
 
+[ -n "${LOCKI_INSTALLING:-}" ] || flock /var/cache/locki/.install.lock true 2>/dev/null || true
+
 sock=/var/cache/locki/buildkit.sock
 is_build=
 case "${1:-}" in
