@@ -386,6 +386,7 @@ def exec_cmd(ctx, match, interactive, create):
                     shlex.quote(sandbox.wt_id),
                     "--cwd",
                     shlex.quote(str(sandbox.wt_path)),
+                    f"--env=LOCKI_WORKTREES_HOME={WORKTREES}",
                     *(f"--env={k}={v}" for k, v in CONTAINER_ENV.items()),
                     *(f'--env={env}="${env}"' for env in forwarded_env),
                     "--",
