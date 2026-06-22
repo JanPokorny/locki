@@ -20,6 +20,20 @@ assert_fail() {
     if "$@" >/dev/null 2>&1; then fail "$desc"; else pass "$desc"; fi
 }
 
+# Passes if the command was NOT rejected by the command-bridge filter. The
+# command may still fail for unrelated reasons (e.g. git's own validation when
+# there is no merge conflict) — we only assert the bridge let it through.
+assert_not_blocked() {
+    local desc="$1"; shift
+    local out
+    out=$("$@" 2>&1) || true
+    if [[ "$out" == *"Allowed forms of"* || "$out" == *"not allowed"* ]]; then
+        fail "$desc (blocked by bridge: $out)"
+    else
+        pass "$desc"
+    fi
+}
+
 assert_output() {
     local desc="$1" expected="$2"; shift 2
     local actual stderr_file
@@ -137,9 +151,29 @@ assert_ok    "git status works"              locki x -m "$AUTH" git status
 assert_ok    "git log works"                 locki x -m "$AUTH" git log --oneline
 assert_ok    "git diff works"                locki x -m "$AUTH" git diff
 assert_ok    "git show works"                locki x -m "$AUTH" git show
-assert_fail  "git checkout is blocked"       locki x -m "$AUTH" git checkout main
+assert_fail  "git checkout <branch> is blocked" locki x -m "$AUTH" git checkout main
+assert_fail  "git checkout -b is blocked"    locki x -m "$AUTH" git checkout -b rogue
+assert_not_blocked "git checkout --ours <file> allowed"  locki x -m "$AUTH" git checkout --ours README.md
+assert_not_blocked "git checkout --theirs <file> allowed" locki x -m "$AUTH" git checkout --theirs README.md
 assert_fail  "git reset --hard (no ref) is blocked" locki x -m "$AUTH" git reset --hard
 assert_ok    "git reset <ref> --hard works"  locki x -m "$AUTH" git reset HEAD --hard
+
+# Newly-allowed read-only forms (previously rejected for missing a flag).
+assert_ok    "git ls-tree works"             locki x -m "$AUTH" git ls-tree -r --name-only HEAD
+assert_ok    "git symbolic-ref -q works"     locki x -m "$AUTH" git symbolic-ref -q HEAD
+assert_ok    "git branch --list works"       locki x -m "$AUTH" git branch --list 'main*'
+assert_ok    "git show --oneline -s works"   locki x -m "$AUTH" git show -s --oneline
+
+# `git clone` from a worktree cwd runs locally (not bridged): it creates a fresh
+# repo elsewhere and never touches the worktree's host-linked .git. If it were
+# bridged it would be rejected (clone is not in the filter).
+# `git clone` from a worktree cwd runs locally (not bridged) and auto-installs git
+# on demand if the base image lacks it. git from a non-worktree cwd (the `cd /tmp`
+# subshell) also runs locally — verifying LOCKI_WORKTREES_HOME gating at runtime.
+assert_ok "git clone runs locally from worktree cwd" locki x -m "$AUTH" sh -c '
+  (cd /tmp && rm -rf clone-src && git init -q clone-src)
+  rm -rf /tmp/clone-dst && git clone -q /tmp/clone-src /tmp/clone-dst && test -d /tmp/clone-dst/.git
+'
 
 # Short-flag handling: registered aliases work in both `-x val` and `-xval` forms;
 # unregistered shorts are rejected.
@@ -157,6 +191,15 @@ assert_fail  "--message does not pair with --amend" locki x -m "$AUTH" git commi
 # `-c alias=...`, `--git-dir=...`, etc.
 assert_fail  "git -c config override blocked"   locki x -m "$AUTH" git -c alias.st=status status
 assert_fail  "git --git-dir blocked"            locki x -m "$AUTH" git --git-dir=/tmp/evil status
+
+# Strict -c / -C allowlist: display-only or feature-disabling config is stripped
+# and passes; a code-executing value (custom hooksPath / fsmonitor command) or an
+# arbitrary -C directory is rejected.
+assert_ok    "git -c core.hooksPath=/dev/null ok" locki x -m "$AUTH" git -c core.hooksPath=/dev/null log --oneline
+assert_fail  "git -c core.hooksPath=<dir> blocked" locki x -m "$AUTH" git -c core.hooksPath=/tmp/evil log
+assert_fail  "git -c core.fsmonitor=<cmd> blocked" locki x -m "$AUTH" git -c core.fsmonitor=evil.sh status
+assert_ok    "git -C . allowed"                 locki x -m "$AUTH" git -C . status
+assert_fail  "git -C <other dir> blocked"       locki x -m "$AUTH" git -C /etc status
 
 # Stash: message must carry the sandbox suffix; pop/drop require an owned ref.
 assert_fail  "stash push without suffix"        locki x -m "$AUTH" git stash push -m plain
@@ -555,6 +598,23 @@ if [[ $drace_fail -eq 0 ]] && ! grep -qiE 'legacy builder|failed to connect to t
 else
     fail "concurrent first-time builds avoid legacy-builder/dead-socket race"
     cat "$TMPDIR_ROOT"/drace*.out >&2
+fi
+
+# ── nested auto-install must not deadlock (reentrant lock) ───────────────────
+# Regression: a shim's install command can invoke another shim that auto-installs
+# (e.g. `mise use` -> install mise), re-entering locki-auto-install. flock is not
+# reentrant, so without an outermost-only lock the nested call deadlocks on the
+# lock its own ancestor holds — freezing installs in *every* sandbox (shared cache).
+echo
+echo "Testing nested auto-install does not deadlock..."
+
+LRENT=$(new_sandbox_id)
+if locki x -m "$LRENT" timeout 30 sh -c \
+    '/opt/locki/bin/high/locki-auto-install outer sh -c "/opt/locki/bin/high/locki-auto-install inner true"' \
+    >/dev/null 2>&1; then
+    pass "nested auto-install completes without deadlock"
+else
+    fail "nested auto-install deadlocked or errored (re-entrant lock broken)"
 fi
 
 # ── summary ──────────────────────────────────────────────────────────────────

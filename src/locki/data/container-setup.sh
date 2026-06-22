@@ -49,11 +49,18 @@ shift
 log="/var/log/locki/install/${name}.log"
 mkdir -p "$(dirname "$log")" /var/cache/locki
 printf '\033[1;35mᚠ\033[0m Installing %s...\n' "$name" >&2
-if flock -o /var/cache/locki/.install.lock "$@" >>"$log" 2>&1; then
+# Always log; mirror to the terminal too when stderr is a TTY (user-run), stay silent for agents (no TTY).
+[ -t 2 ] && tty_out=/dev/stderr || tty_out=/dev/null
+# flock is not reentrant: an install command may invoke another shim that auto-installs (e.g. mise),
+# which would deadlock on the lock its own ancestor holds. Take the lock only at the outermost call.
+[ -n "${LOCKI_INSTALLING:-}" ] || set -- flock -o /var/cache/locki/.install.lock env LOCKI_INSTALLING=1 "$@"
+{ "$@" 2>&1; echo "$?" > "$log.rc"; } | tee -a "$log" > "$tty_out"
+rc=$(cat "$log.rc"); rm -f "$log.rc"
+if [ "$rc" = 0 ]; then
   printf '\033[1;32mᛝ\033[0m Installed %s\n' "$name" >&2
 else
   printf '\033[1;31mᛞ\033[0m Failed to install %s, see log at \033[33m%s\033[0m\n' "$name" "$log" >&2
-  tail -n 30 "$log" >&2
+  [ -t 2 ] || tail -n 30 "$log" >&2
   exit 1
 fi
 EOF
@@ -79,13 +86,31 @@ tee /opt/locki/bin/high/git /opt/locki/bin/high/gh /opt/locki/bin/high/locki > /
 cmd=$(basename "$0")
 cwd=$(pwd)
 case "$cwd" in "$LOCKI_WORKTREES_HOME"/*)
-  set -- "$cwd" "$cmd" "$@"
-  q=""
-  for arg in "$@"; do
-    q="${q:+$q }'$(printf '%s' "$arg" | sed "s/'/'\\\\''/g")'"
-  done
-  exec ssh -F /root/.ssh/locki-ssh-config locki-proxy -- "$q"
+  bridge=1
+  if [ "$cmd" = git ]; then
+    skip=0
+    for arg in "$@"; do
+      if [ "$skip" = 1 ]; then skip=0; continue; fi
+      case "$arg" in
+        -c|-C|--git-dir|--work-tree|--namespace) skip=1 ;;
+        clone) bridge=0; break ;;
+        -*) : ;;
+        *) break ;;
+      esac
+    done
+  fi
+  if [ "$bridge" = 1 ]; then
+    set -- "$cwd" "$cmd" "$@"
+    q=""
+    for arg in "$@"; do
+      q="${q:+$q }'$(printf '%s' "$arg" | sed "s/'/'\\\\''/g")'"
+    done
+    exec ssh -F /root/.ssh/locki-ssh-config locki-proxy -- "$q"
+  fi
 esac
+if [ "$cmd" = git ] && ! locki-command-real git >/dev/null 2>&1; then
+  /opt/locki/bin/high/locki-auto-install git sh -c 'if command -v dnf >/dev/null 2>&1; then dnf install -yq git; elif command -v apt-get >/dev/null 2>&1; then apt-get update -qq && apt-get install -yqq git; elif command -v apk >/dev/null 2>&1; then apk add --no-cache git; fi'
+fi
 exec "$(locki-command-real-or-autoinstalled "$cmd")" "$@"
 EOF
 
