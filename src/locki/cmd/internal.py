@@ -267,7 +267,7 @@ flag: FLAG
 compound: COMPOUND
 
 ELLIPSIS: "..."
-FLAG.2:   /(?:-[a-zA-Z]\/)?--[a-z][\w-]*(?:=(?:<[^>]+>|[^<>\s()\[\]|])+)?/
+FLAG.2:   /(?:-[a-zA-Z]\/)?--[a-z][\w-]*(?:=(?:<[^>]+>|[^<>\s()\[\]|])+)?|-[a-zA-Z](?:=(?:<[^>]+>|[^<>\s()\[\]|])+)?/
 COMPOUND: /(?:<[^>]+>|[^<>\s()\[\]|])+/
 
 %ignore /\s+/
@@ -296,8 +296,13 @@ class _ASTBuilder(Transformer):
         tok = str(c[0])
         short: str | None = None
         if tok.startswith("-") and not tok.startswith("--"):
-            short = tok[:2]
-            tok = tok[3:]
+            if tok[2:3] == "/":  # paired short+long, e.g. "-s/--short"
+                short = tok[:2]
+                tok = tok[3:]
+            else:  # short-only flag, e.g. "-r" or "-L=<range>"
+                name, sep, value_text = tok.partition("=")
+                value = ArgRule(value=_compound_parts(value_text)) if sep == "=" else None
+                return FlagRule(short_name=name, long_name=name, value=value)
         name, sep, value_text = tok.partition("=")
         value = ArgRule(value=_compound_parts(value_text)) if sep == "=" else None
         return FlagRule(short_name=short, long_name=name, value=value)
@@ -401,7 +406,15 @@ class _RuleGroup:
 
 
 _GIT_TRANSPARENT_BOOL = {"--no-optional-locks", "--no-pager"}
-_GIT_TRANSPARENT_CONFIG = {"log.showsignature", "core.quotepath", "protocol.file.allow"}
+# None = any value allowed
+_GIT_TRANSPARENT_CONFIG: dict[str, set[str] | None] = {
+    "log.showsignature": None,
+    "core.quotepath": None,
+    "protocol.file.allow": {"user", "never", "always"},
+    "core.fsmonitor": {""},
+    "core.pager": {""},
+    "core.hookspath": {"/dev/null"},
+}
 
 
 def _strip_git_transparent(argv: list[str]) -> list[str]:
@@ -414,11 +427,13 @@ def _strip_git_transparent(argv: list[str]) -> list[str]:
         if argv[i] in _GIT_TRANSPARENT_BOOL:
             i += 1
         elif argv[i] == "-c" and i + 1 < len(argv):
-            key = argv[i + 1].partition("=")[0].lower()
-            if key in _GIT_TRANSPARENT_CONFIG:
-                i += 2
-            else:
+            key, _, value = argv[i + 1].partition("=")
+            allowed = _GIT_TRANSPARENT_CONFIG.get(key.lower(), ...)
+            if allowed is ... or (allowed is not None and value not in allowed):
                 break
+            i += 2
+        elif argv[i] == "-C" and i + 1 < len(argv) and argv[i + 1] == ".":
+            i += 2
         else:
             break
     out.extend(argv[i:])

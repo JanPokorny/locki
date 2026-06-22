@@ -17,9 +17,10 @@ Some commands execute on the host using a command bridge. This lets you execute 
 ```locki-bridged-command-filter
 git -v/--version
 git add (--all | <file> ...)
-git blame <file>
-git branch (<name>#locki-<wt-id> [<start-point> | --move | --delete [--force]] | --show-current | [-a/--all | -r/--remotes] [-v/--verbose] [--contains <ref>] [--merged [<ref>]] [--no-merged [<ref>]])
+git blame [-L=<range>] <file>
+git branch (<name>#locki-<wt-id> [<start-point> | --move | --delete [--force]] | --show-current | [-l/--list] [-a/--all | -r/--remotes] [-v/--verbose] [--contains <ref>] [--merged [<ref>]] [--no-merged [<ref>]] [<pattern>])
 git cat-file -t/--type <ref>
+git checkout (--ours | --theirs) <file> ...
 git check-ignore <file> ...
 git cherry-pick (--continue | --abort | --skip)
 git cherry-pick [--no-commit] [--gpg-sign] <ref> ...
@@ -27,14 +28,15 @@ git commit (-m/--message=<msg> [-s/--signoff] | -C/--reuse-message=<sha> [-s/--s
 git config [--get] [--local] <key>
 git count-objects [-v/--verbose]
 git describe [--tags] [--always] [--abbrev=<n>] [<ref>]
-git diff [--staged | --cached] [--name-only] [--stat] [--name-status] [--diff-filter=<filter>] [-U/--unified=<n>] [-w/--ignore-all-space] [--ignore-space-change] [<ref> [<ref>]] [<file> ...]
+git diff [--staged | --cached] [--name-only] [--stat] [--numstat] [--name-status] [--exit-code] [--diff-filter=<filter>] [-U/--unified=<n>] [-w/--ignore-all-space] [--ignore-space-change] [<ref> [<ref>]] [<file> ...]
 git fetch [--prune] [<remote> [<ref> ...]]
 git for-each-ref [--format=<fmt>] [--sort=<key>] [<pattern> ...]
 git grep [-l/--files-with-matches] <pattern> [<ref>] [<file> ...]
 git hash-object <file>
-git log [--oneline] [--all] [--graph] [--reverse] [--first-parent] [--stat] [-p/--patch] [--follow] [--no-merges] [--merges] [--decorate] [--format=<fmt>] [--pretty=<fmt>] [-n/--max-count=<n>] [--name-only] [--name-status] [--diff-filter=<filter>] [--since=<date>] [--grep=<pattern>] [--author=<author>] [--ancestry-path] [--not] [<ref>] [<file> ...]
+git log [--oneline] [--all] [--graph] [--reverse] [--first-parent] [--stat] [-p/--patch] [--follow] [--no-merges] [--merges] [--decorate] [--left-right] [-S=<string>] [-G=<regex>] [--format=<fmt>] [--pretty=<fmt>] [-n/--max-count=<n>] [--name-only] [--name-status] [--diff-filter=<filter>] [--since=<date>] [--grep=<pattern>] [--author=<author>] [--ancestry-path] [--not] [<ref>] [<file> ...]
 git ls-files [--error-unmatch] [--recurse-submodules] [--others] [--exclude-standard] [<path> ...]
 git ls-remote [<remote>]
+git ls-tree [-r] [-d] [-l/--long] [--name-only] [--name-status] [--abbrev=<n>] <ref> [<file> ...]
 git merge (--continue | --abort | --skip)
 git merge <ref>
 git merge-base [--is-ancestor] <ref> <ref>
@@ -48,19 +50,19 @@ git remote (-v/--verbose | get-url <remote>)
 git reset [--hard] <ref>
 git restore [--staged] [--source=<ref>] <file> ...
 git rev-list [--count] [--ancestry-path] [<ref>] [<ref>]
-git rev-parse [-q/--quiet] [--show-cdup] [--show-toplevel] [--git-dir] [--git-common-dir] [--is-inside-work-tree] [--abbrev-ref] [--short] [--verify] [<arg> ...]
+git rev-parse [-q/--quiet] [--show-cdup] [--show-toplevel] [--git-dir] [--git-common-dir] [--is-inside-work-tree] [--abbrev-ref] [--symbolic-full-name] [--short] [--verify] [<arg> ...]
 git rm [-q/--quiet] [-f/--force] <file> ...
 git shortlog [-s/--summary] [-n/--numbered] [<ref>] [<ref>]
-git show [<ref>] [--stat] [--name-only] [--name-status] [--no-patch] [--quiet] [--diff-filter=<filter>] [--format=<fmt>] [--pretty=<fmt>] [<file> ...]
+git show [<ref>] [--stat] [--oneline] [--name-only] [--name-status] [-s/--no-patch] [-q/--quiet] [--diff-filter=<filter>] [--format=<fmt>] [--pretty=<fmt>] [<file> ...]
 git stash [push] [-m/--message=<text>#locki-<wt-id>] [<file> ...]
 git stash (pop | drop) [<owned-stash-ref>]
 git stash apply [<stash-ref>]
 git stash list
 git stash show [<stash-ref>]
 git status [-s/--short] [-b/--branch] [-u/--untracked-files=<mode>] [--porcelain] [--ignore-submodules] [--ahead-behind] [<file> ...]
-git symbolic-ref <ref>
+git symbolic-ref [-q/--quiet] <ref>
 git switch ([--create | --force-create] <name>#locki-<wt-id> [<start-point>] | --detach <ref>)
-git tag [-l/--list] [<pattern>]
+git tag [-l/--list] [--sort=<key>] [<pattern>]
 ```
 
 `<wt-id>` is the 8-char slug in worktree directory name: `.../locki/worktrees/<repo-name>-locki-<wt-id>`. Branches you create, modify, or switch to must be named matching this pattern: `<name>#locki-<wt-id>`. You may read from any ref. `<owned-stash-ref>` is a stash whose message contains `#locki-<wt-id>` -- only those can be popped or dropped; any stash can be applied.
@@ -90,7 +92,7 @@ Finish:
 
 ```locki-bridged-command-filter
 gh -v/--version
-gh api (repos/<owner>/<repo>/pulls/<number>/comments | repos/<owner>/<repo>/pulls/<number>/reviews | repos/<owner>/<repo>/dependabot/alerts | repos/<owner>/<repo>/dependabot/alerts/<number> | repos/<owner>/<repo>/code-scanning/alerts | repos/<owner>/<repo>/code-scanning/alerts/<number> | repos/<owner>/<repo>/secret-scanning/alerts | repos/<owner>/<repo>/secret-scanning/alerts/<number>) [-q/--jq=<expr>]
+gh api (repos/<owner>/<repo>/pulls/<number>/comments | repos/<owner>/<repo>/pulls/<number>/reviews | repos/<owner>/<repo>/dependabot/alerts | repos/<owner>/<repo>/dependabot/alerts/<number> | repos/<owner>/<repo>/code-scanning/alerts | repos/<owner>/<repo>/code-scanning/alerts/<number> | repos/<owner>/<repo>/secret-scanning/alerts | repos/<owner>/<repo>/secret-scanning/alerts/<number>) [-X/--method=GET] [-q/--jq=<expr>]
 gh auth status
 gh issue (view [<number>] [--comments] [--json=<fields>] [-q/--jq=<expr>] | list [-L/--limit=<n>] [-s/--state=<state>] [-S/--search=<query>] [-l/--label=<l>] [--author=<a>] [--json=<fields>] [-q/--jq=<expr>])
 gh issue comment <number> -b/--body=<b>
@@ -131,6 +133,8 @@ Perform always when starting a conversation.
 1. Check project metadata (`mise.toml`, `.tool-versions`, `.nvmrc`, `pyproject.toml`, etc.), CI definitions (`.github/workflows/*.yaml`, etc.) or docs (`README.md`, `CONTRIBUTING.md`, `*.md`, `docs/*`, etc.) to determine needed tools and their versions, and setup commands. If there is `mise.toml`, run `mise install` to set up all tools. Otherwise manually enable specific tool versions using e.g.: `mise use -g python@3.12.1`, `mise use -g node@22`, `mise use -g jq`, falling back to OS package manager if `mise` does not have the tool (`dnf` by default, unless running on a custom image).
 
 2. Check current branch name using `git branch --show-current`. If it is `untitled#locki-<wt-id>`, rename using `git branch <new-name>#locki-<wt-id> --move`. Pick `<new-name>` based on the task at hand.
+
+IMPORTANT: The user identifies the sandboxes by the branch name. Do not start anything while the branch is `untitled#locki-<wt-id>` -- always rename first!
 
 3. Perform project-specific install steps (`uv sync`, `npm install`, etc.)
   - Python: If project uses `uv` or `poetry`, use that. If not clear (e.g. just raw `requirements.txt`), use `uv venv --python=<version>` + `uv pip ...`. If you need to use real `pip`, use `uv venv --python=<version> --seed` + `.venv/bin/pip ...`.
