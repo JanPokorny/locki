@@ -185,47 +185,48 @@ def exec_cmd(ctx, match, interactive, create):
         except json.JSONDecodeError:
             click.echo(f"{WARNING} Invalid JSON data found in {path}, not updating it.")
 
-    with file_lock("vm", "Waiting for VM to start"):
-        vm_setup = (PACKAGE_DATA / "vm-setup.sh").read_text()
-        lima_config = json.dumps(
-            {
-                "minimumLimaVersion": "2.0.0",
-                "base": ["template:fedora"],
-                "memory": f"{os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES') // (1024**3)}GiB",
-                "cpus": os.cpu_count(),
-                "disk": "200GiB",
-                "containerd": {"system": False, "user": False},
-                "mounts": [
-                    {"location": str(WORKTREES), "writable": True},
-                    {"location": str(SANDBOX_HOME), "mountPoint": "/root/.locki/home", "writable": True},
-                ],
-                "provision": [{"mode": "system", "script": vm_setup}],
-            }
-        )
-        lima_fd, lima_yaml = tempfile.mkstemp(suffix=".yaml")
-        try:
-            os.write(lima_fd, lima_config.encode())
-            os.close(lima_fd)
+    if vm_status() != "Running":
+        with file_lock("vm", "Waiting for VM to start"):
+            vm_setup = (PACKAGE_DATA / "vm-setup.sh").read_text()
+            lima_config = json.dumps(
+                {
+                    "minimumLimaVersion": "2.0.0",
+                    "base": ["template:fedora"],
+                    "memory": f"{os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES') // (1024**3)}GiB",
+                    "cpus": os.cpu_count(),
+                    "disk": "200GiB",
+                    "containerd": {"system": False, "user": False},
+                    "mounts": [
+                        {"location": str(WORKTREES), "writable": True},
+                        {"location": str(SANDBOX_HOME), "mountPoint": "/root/.locki/home", "writable": True},
+                    ],
+                    "provision": [{"mode": "system", "script": vm_setup}],
+                }
+            )
+            lima_fd, lima_yaml = tempfile.mkstemp(suffix=".yaml")
+            try:
+                os.write(lima_fd, lima_config.encode())
+                os.close(lima_fd)
+                run_command(
+                    [limactl(), "--tty=false", "create", lima_yaml, "--mount-writable", "--name=locki"],
+                    "Preparing VM",
+                    env=LIMA_ENV,
+                    cwd="/",
+                    check=False,
+                    print_success=False,
+                )
+            finally:
+                os.unlink(lima_yaml)
             run_command(
-                [limactl(), "--tty=false", "create", lima_yaml, "--mount-writable", "--name=locki"],
-                "Preparing VM",
+                [limactl(), "--tty=false", "start", "locki"],
+                "Starting VM",
                 env=LIMA_ENV,
                 cwd="/",
                 check=False,
-                print_success=False,
             )
-        finally:
-            os.unlink(lima_yaml)
-        run_command(
-            [limactl(), "--tty=false", "start", "locki"],
-            "Starting VM",
-            env=LIMA_ENV,
-            cwd="/",
-            check=False,
-        )
 
-    if vm_status() != "Running":
-        fail(f"Lima VM failed to start. LIMA_HOME={LIMA}")
+        if vm_status() != "Running":
+            fail(f"Lima VM failed to start. LIMA_HOME={LIMA}")
 
     if not sandbox.wt_path.exists():
         create_sandbox_worktree(sandbox)
@@ -252,17 +253,19 @@ def exec_cmd(ctx, match, interactive, create):
 
     with file_lock(f"provision-{sandbox.wt_id}", "Waiting for another sandbox setup"):
         result = run_in_vm(
-            ["incus", "list", "--format=csv", "--columns=n", sandbox.wt_id],
+            ["incus", "list", "--format=csv", "--columns=ns", sandbox.wt_id],
             "Checking container",
             check=False,
             print_success=False,
         )
-        if sandbox.wt_id in result.stdout.decode():
-            run_in_vm(
-                ["incus", "start", sandbox.wt_id],
-                "Starting container",
-                check=False,
-            )
+        listing = result.stdout.decode()
+        if sandbox.wt_id in listing:
+            if "RUNNING" not in listing:
+                run_in_vm(
+                    ["incus", "start", sandbox.wt_id],
+                    "Starting container",
+                    check=False,
+                )
         else:
             incus_image = config.get_incus_image(sandbox.repo)
 

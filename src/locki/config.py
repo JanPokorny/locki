@@ -1,11 +1,9 @@
+import dataclasses
 import functools
 import logging
 import pathlib
 import platform
 import tomllib
-
-import pydantic
-import tomlkit
 
 from locki.paths import CONFIG, USER_CONFIG
 from locki.utils import deep_merge, fail
@@ -33,10 +31,30 @@ _ARCH_HINTS: dict[str, list[str]] = {
 _USER_ONLY_KEYS = frozenset({"ide_command"})
 
 
-class LockiConfig(pydantic.BaseModel):
+@dataclasses.dataclass
+class LockiConfig:
     incus_image: str | dict[str, str] = "images:fedora/43"
     ai_command: str = ""
     ide_command: str = ""
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "LockiConfig":
+        """Build a config from merged TOML data; unknown keys are ignored."""
+        config = cls()
+        for field in dataclasses.fields(cls):
+            if field.name not in data:
+                continue
+            value = data[field.name]
+            if not isinstance(value, str) and not (
+                field.name == "incus_image"
+                and isinstance(value, dict)
+                and all(isinstance(v, str) for v in value.values())
+            ):
+                fail(
+                    f"Invalid config: '{field.name}' must be a string{' or a table of strings' if field.name == 'incus_image' else ''}."
+                )
+            setattr(config, field.name, value)
+        return config
 
     def get_incus_image(self, repo: pathlib.Path) -> str:
         if isinstance(self.incus_image, dict):
@@ -84,11 +102,7 @@ def load_config(git_root: pathlib.Path | None, *, skip_auto_setup: bool = False)
                 )
                 del repo_data[key]
 
-    merged = deep_merge(user_data, repo_data)
-    try:
-        config = LockiConfig.model_validate(merged)
-    except pydantic.ValidationError as e:
-        fail(f"Invalid config: {e}")
+    config = LockiConfig.from_dict(deep_merge(user_data, repo_data))
 
     if not skip_auto_setup and (not config.ai_command or not config.ide_command):
         from locki.cmd.setup import setup_cmd
@@ -101,6 +115,8 @@ def load_config(git_root: pathlib.Path | None, *, skip_auto_setup: bool = False)
 
 def save_user_config(key: str, value: object) -> None:
     """Write a top-level key in the user config file."""
+    import tomlkit
+
     CONFIG.mkdir(parents=True, exist_ok=True)
     data = tomlkit.loads(USER_CONFIG.read_text()) if USER_CONFIG.exists() else tomlkit.document()
     data[key] = value  # pyrefly: ignore[unsupported-operation] -- tomlkit Item supports subscript at runtime

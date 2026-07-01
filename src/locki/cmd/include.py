@@ -1,31 +1,29 @@
 """`locki include` — add another repo's worktree into an existing sandbox.
 
-The included worktree lives at `<sandbox>/.locki/include/<name>/` and is a
-full git worktree of the other repo, with its own branch `untitled#locki-<sandbox-id>`
-tracked in that repo. Bridged command rules (git, gh, ...) apply identically inside
-included worktrees; ownership is scoped by the parent sandbox's id.
+The included worktree lives at `<sandbox>/.locki/include/<repo>-locki-<sandbox-id>/`
+and is a full git worktree of the other repo, with its own branch
+`untitled#locki-<sandbox-id>` tracked in that repo (reused if it already exists).
+Bridged command rules (git, gh, ...) apply identically inside included worktrees;
+ownership is scoped by the parent sandbox's id.
 """
 
 from __future__ import annotations
 
-import contextlib
 import json
 import pathlib
-import subprocess
 
 import click
 
 from locki.paths import WORKTREES
 from locki.runes import INFO, SPINNER, SUCCESS
 from locki.utils import (
-    SandboxInfo,
+    add_worktree,
     cwd_git_repo,
     fail,
     json_option,
     resolve_sandbox,
     run_command,
     sandbox_options,
-    setup_worktree_hooks,
 )
 
 
@@ -39,46 +37,6 @@ def _validate_repo(path: pathlib.Path) -> pathlib.Path:
     if result.returncode != 0:
         fail(f"Not a git repository: {path}")
     return pathlib.Path(result.stdout.decode().strip()).resolve()
-
-
-def _setup_include(sandbox: SandboxInfo, repo_b: pathlib.Path, name: str) -> None:
-    """Create branch, worktree, meta, hooks, config for an include."""
-    include_wt = sandbox.include_wt_path(name)
-    include_meta = sandbox.include_meta_path(name)
-
-    if include_wt.exists() or include_meta.exists():
-        fail(f"Include {name!r} already exists in sandbox {sandbox.wt_id}.")
-
-    branch = f"untitled#locki-{sandbox.wt_id}"
-
-    # In repo B: create branch from current HEAD, add worktree.
-    # If the branch already exists (e.g. another include of the same sandbox in the
-    # past, cleaned up but branch survived) we reuse it.
-    result = run_command(
-        ["git", "-C", str(repo_b), "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"],
-        "Checking for existing include branch",
-        check=False,
-        quiet=True,
-    )
-    if result.returncode != 0:
-        run_command(
-            ["git", "-C", str(repo_b), "branch", branch],
-            f"Creating branch {click.style(branch, fg='green')} in {repo_b.name}",
-        )
-
-    include_wt.parent.mkdir(parents=True, exist_ok=True)
-    run_command(
-        ["git", "-C", str(repo_b), "worktree", "add", str(include_wt), branch],
-        f"Creating worktree for {click.style(name, fg='green')}",
-    )
-
-    include_meta.mkdir(parents=True, exist_ok=True)
-    (include_meta / ".git").write_text((include_wt / ".git").read_text())
-    (include_meta / "repo").write_text(str(repo_b))
-
-    setup_worktree_hooks(repo_b, include_meta, include_wt)
-    with contextlib.suppress(FileNotFoundError):
-        subprocess.run(["mise", "trust"], cwd=str(include_wt), capture_output=True)
 
 
 @click.command("include")
@@ -128,9 +86,9 @@ def include_cmd(match, interactive, repo_path, this_flag, as_json):
     if sandbox.repo.resolve() == repo_b.resolve():
         fail("Cannot include a sandbox's own primary repo.")
 
-    name = repo_b.name
+    name = f"{repo_b.name}-locki-{sandbox.wt_id}"
     existing = {inc.name for inc in sandbox.include}
-    if name in existing:
+    if name in existing or sandbox.include_wt_path(name).exists() or sandbox.include_meta_path(name).exists():
         fail(f"Include {name!r} already exists in sandbox {sandbox.wt_id}. Remove it first.")
 
     click.echo(
@@ -138,7 +96,7 @@ def include_cmd(match, interactive, repo_path, this_flag, as_json):
         f"{click.style(repo_b.name, fg='green')} in sandbox {click.style(sandbox.wt_id, fg='green')}.",
         err=True,
     )
-    _setup_include(sandbox, repo_b, name)
+    include_wt = add_worktree(repo_b, sandbox.wt_id, parent_name=sandbox.repo.name)
     if as_json:
         click.echo(
             json.dumps(
@@ -146,13 +104,13 @@ def include_cmd(match, interactive, repo_path, this_flag, as_json):
                     "id": sandbox.wt_id,
                     "name": name,
                     "repo": str(repo_b),
-                    "path": str(sandbox.include_wt_path(name)),
+                    "path": str(include_wt),
                 }
             )
         )
         return
     click.echo(
-        f"{SUCCESS} Included at {click.style(str(sandbox.include_wt_path(name).relative_to(WORKTREES)), fg='cyan')}.",
+        f"{SUCCESS} Included at {click.style(str(include_wt.relative_to(WORKTREES)), fg='cyan')}.",
         err=True,
     )
     click.echo(

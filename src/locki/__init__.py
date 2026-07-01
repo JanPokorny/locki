@@ -1,5 +1,3 @@
-from importlib.metadata import version
-
 import click
 
 from locki.cmd.ai import ai_cmd
@@ -24,7 +22,7 @@ setup_logging()
     help="AI sandboxing without the taste of sand, using a managed Lima VM with Incus containers.",
     context_settings={"help_option_names": ["-h", "--help"]},
 )
-@click.version_option(version("locki"), "-v", "--version", prog_name="locki")
+@click.version_option(None, "-v", "--version", package_name="locki", prog_name="locki")
 def app():
     pass
 

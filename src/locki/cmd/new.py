@@ -1,19 +1,17 @@
-import contextlib
 import json
-import subprocess
 
 import click
 
 from locki.runes import INFO, SUCCESS
 from locki.utils import (
     SandboxInfo,
+    add_worktree,
     cwd_git_repo,
     fail,
     json_option,
     new_sandbox,
     pretty_path,
     run_command,
-    setup_worktree_hooks,
 )
 
 
@@ -23,26 +21,11 @@ def create_sandbox_worktree(sandbox: SandboxInfo) -> None:
         "Pruning stale git worktrees",
         print_success=False,
     )
-    sandbox.wt_path.mkdir(parents=True, exist_ok=True)
-    run_command(
-        ["git", "-C", str(sandbox.repo), "branch", sandbox.branch],
-        f"Creating branch {click.style(sandbox.branch, fg='green')}",
-        print_success=False,
-    )
-    run_command(
-        ["git", "-C", str(sandbox.repo), "worktree", "add", str(sandbox.wt_path), sandbox.branch],
-        f"Creating worktree for {click.style(sandbox.branch, fg='green')}",
-    )
+    add_worktree(sandbox.repo, sandbox.wt_id)
     locki_dir = sandbox.wt_path / ".locki"
     locki_dir.mkdir(parents=True, exist_ok=True)
     (locki_dir / ".gitignore").write_text("*\n")
     (locki_dir / "tmp").mkdir(exist_ok=True)
-    sandbox.meta_path.mkdir(parents=True, exist_ok=True)
-    (sandbox.meta_path / ".git").write_text((sandbox.wt_path / ".git").read_text())
-    (sandbox.meta_path / "repo").write_text(str(sandbox.repo))
-    setup_worktree_hooks(sandbox.repo, sandbox.meta_path, sandbox.wt_path)
-    with contextlib.suppress(FileNotFoundError):
-        subprocess.run(["mise", "trust"], cwd=str(sandbox.wt_path), capture_output=True)
 
 
 @click.command("new | n")
