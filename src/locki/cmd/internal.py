@@ -7,7 +7,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import datetime
 import json
@@ -22,11 +21,9 @@ import sys
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass
-from functools import cached_property
+from functools import cache, cached_property
 
-import asyncssh
 import click
-from lark import Lark, Token, Transformer
 
 from locki.paths import (
     DENIED_LOG,
@@ -63,14 +60,15 @@ def incus_exec(args: list[str]) -> subprocess.CompletedProcess[str]:
     )
 
 
-def list_incus_containers() -> list[tuple[str, str]]:
-    """Return (name, status) for every container."""
-    pairs: list[tuple[str, str]] = []
-    for line in incus_exec(["list", "--format=csv", "--columns=n,s"]).stdout.splitlines():
-        name, _, status = line.partition(",")
-        if name := name.strip():
-            pairs.append((name, status.strip()))
-    return pairs
+def list_incus_containers() -> list[dict]:
+    """Parsed `incus list --format=json`: one dict per container (name, status, devices, ...)."""
+    result = incus_exec(["list", "--format=json"])
+    if result.returncode != 0:
+        return []
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return []
 
 
 # ── Command bridge grammar engine ───────────────────────────────────────────────
@@ -274,44 +272,49 @@ COMPOUND: /(?:<[^>]+>|[^<>\s()\[\]|])+/
 """
 
 
-class _ASTBuilder(Transformer):
-    def alt(self, c: list[Rule]) -> Rule:
-        return c[0] if len(c) == 1 else AlternativeRule(alternatives=list(c), optional=False)
+@cache
+def _parser():
+    """Build the grammar parser on first use — importing lark and constructing the
+    LALR tables is too costly to do at module import time."""
+    from lark import Lark, Token, Transformer
 
-    def seq(self, c: list[Rule | Token]) -> SequenceRule:
-        last_repeats = bool(c) and isinstance(c[-1], Token) and c[-1].type == "ELLIPSIS"
-        items = [x for x in c if not isinstance(x, Token)]
-        return SequenceRule(sequence=items, last_repeats=last_repeats)  # pyrefly: ignore
+    class _ASTBuilder(Transformer):
+        def alt(self, c: list[Rule]) -> Rule:
+            return c[0] if len(c) == 1 else AlternativeRule(alternatives=list(c), optional=False)
 
-    def group(self, c: list[Rule]) -> Rule:
-        return c[0]
+        def seq(self, c: list[Rule | Token]) -> SequenceRule:
+            last_repeats = bool(c) and isinstance(c[-1], Token) and c[-1].type == "ELLIPSIS"
+            items = [x for x in c if not isinstance(x, Token)]
+            return SequenceRule(sequence=items, last_repeats=last_repeats)  # pyrefly: ignore
 
-    def opt(self, c: list[Rule]) -> AlternativeRule:
-        inner = c[0]
-        if isinstance(inner, AlternativeRule) and not inner.optional:
-            return AlternativeRule(alternatives=inner.alternatives, optional=True)
-        return AlternativeRule(alternatives=[inner], optional=True)
+        def group(self, c: list[Rule]) -> Rule:
+            return c[0]
 
-    def flag(self, c: list[Token]) -> FlagRule:
-        tok = str(c[0])
-        short: str | None = None
-        if tok.startswith("-") and not tok.startswith("--"):
-            if tok[2:3] == "/":  # paired short+long, e.g. "-s/--short"
-                short = tok[:2]
-                tok = tok[3:]
-            else:  # short-only flag, e.g. "-r" or "-L=<range>"
-                name, sep, value_text = tok.partition("=")
-                value = ArgRule(value=_compound_parts(value_text)) if sep == "=" else None
-                return FlagRule(short_name=name, long_name=name, value=value)
-        name, sep, value_text = tok.partition("=")
-        value = ArgRule(value=_compound_parts(value_text)) if sep == "=" else None
-        return FlagRule(short_name=short, long_name=name, value=value)
+        def opt(self, c: list[Rule]) -> AlternativeRule:
+            inner = c[0]
+            if isinstance(inner, AlternativeRule) and not inner.optional:
+                return AlternativeRule(alternatives=inner.alternatives, optional=True)
+            return AlternativeRule(alternatives=[inner], optional=True)
 
-    def compound(self, c: list[Token]) -> ArgRule:
-        return ArgRule(value=_compound_parts(str(c[0])))
+        def flag(self, c: list[Token]) -> FlagRule:
+            tok = str(c[0])
+            short: str | None = None
+            if tok.startswith("-") and not tok.startswith("--"):
+                if tok[2:3] == "/":  # paired short+long, e.g. "-s/--short"
+                    short = tok[:2]
+                    tok = tok[3:]
+                else:  # short-only flag, e.g. "-r" or "-L=<range>"
+                    name, sep, value_text = tok.partition("=")
+                    value = ArgRule(value=_compound_parts(value_text)) if sep == "=" else None
+                    return FlagRule(short_name=name, long_name=name, value=value)
+            name, sep, value_text = tok.partition("=")
+            value = ArgRule(value=_compound_parts(value_text)) if sep == "=" else None
+            return FlagRule(short_name=short, long_name=name, value=value)
 
+        def compound(self, c: list[Token]) -> ArgRule:
+            return ArgRule(value=_compound_parts(str(c[0])))
 
-_PARSER = Lark(_GRAMMAR, start="alt", parser="lalr", transformer=_ASTBuilder())
+    return Lark(_GRAMMAR, start="alt", parser="lalr", transformer=_ASTBuilder())
 
 
 # ── Ruleset ──────────────────────────────────────────────────────────────────
@@ -456,7 +459,7 @@ class Ruleset:
             elif in_block and line.startswith("```"):
                 in_block = False
             elif in_block and line:
-                rule: Rule = _PARSER.parse(line)  # pyrefly: ignore
+                rule: Rule = _parser().parse(line)  # pyrefly: ignore
                 prefix = _extract_prefix(rule)
                 entry = raw.setdefault(prefix, ([], []))
                 entry[0].append(rule)
@@ -526,18 +529,23 @@ def internal_cleanup() -> None:
     except (FileNotFoundError, json.JSONDecodeError):
         last_active = {}
 
+    containers = list_incus_containers()
+
     worktrees_root = WORKTREES.resolve()
-    for name, _ in list_incus_containers():
-        r = incus_exec(["config", "device", "get", name, "worktree", "source"])
-        if r.returncode != 0 or not r.stdout.strip():
+    deleted: set[str] = set()
+    for container in containers:
+        name = container.get("name", "")
+        source = ((container.get("expanded_devices") or {}).get("worktree") or {}).get("source", "")
+        if not name or not source:
             continue
-        src = pathlib.Path(r.stdout.strip()).resolve()
+        src = pathlib.Path(source).resolve()
         if src.is_relative_to(worktrees_root) and not src.exists():
             logger.info("Deleting orphaned container %r (worktree %s is gone).", name, src)
             incus_exec(["delete", "--force", name])
+            deleted.add(name)
             last_active.pop(name, None)
 
-    running = {name for name, status in list_incus_containers() if status == "RUNNING"}
+    running = {c["name"] for c in containers if c.get("status", "").lower() == "running"} - deleted
     active: set[str] = set()
     ops = incus_exec(["operation", "list", "--format=json"])
     if ops.returncode == 0 and ops.stdout.strip():
@@ -581,6 +589,10 @@ def internal_cleanup() -> None:
 @internal_app.command("daemon")
 def internal_daemon() -> None:
     """Host daemon: SSH forced-command proxy + periodic cleanup."""
+    import asyncio
+
+    import asyncssh
+
     log_file = STATE / "logs" / "daemon.log"
     log_file.parent.mkdir(parents=True, exist_ok=True)
     handler = logging.FileHandler(log_file)

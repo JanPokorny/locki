@@ -12,11 +12,9 @@ import subprocess
 import sys
 import threading
 import time
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager, nullcontext, suppress
 
 import click
-from InquirerPy import inquirer
-from InquirerPy.base.control import Choice
 
 from locki.logging import print_log_tail
 from locki.paths import HOME, LIMA, PACKAGE_DATA, RUNTIME, WORKTREES, WORKTREES_META
@@ -304,6 +302,33 @@ def setup_worktree_hooks(repo: pathlib.Path, meta_dir: pathlib.Path, wt_path: pa
     )
 
 
+def add_worktree(repo: pathlib.Path, branch: str, wt_path: pathlib.Path, meta_path: pathlib.Path, label: str) -> None:
+    """Create *branch* in *repo* (reusing it if it already exists), add a worktree
+    at *wt_path*, and set up trusted metadata plus per-worktree hooks."""
+    exists = run_command(
+        ["git", "-C", str(repo), "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"],
+        "Checking for existing branch",
+        check=False,
+        quiet=True,
+    )
+    if exists.returncode != 0:
+        run_command(
+            ["git", "-C", str(repo), "branch", branch],
+            f"Creating branch {click.style(branch, fg='green')}",
+            print_success=False,
+        )
+    run_command(
+        ["git", "-C", str(repo), "worktree", "add", str(wt_path), branch],
+        f"Creating worktree for {click.style(label, fg='green')}",
+    )
+    meta_path.mkdir(parents=True, exist_ok=True)
+    (meta_path / ".git").write_text((wt_path / ".git").read_text())
+    (meta_path / "repo").write_text(str(repo))
+    setup_worktree_hooks(repo, meta_path, wt_path)
+    with suppress(FileNotFoundError):
+        subprocess.run(["mise", "trust"], cwd=str(wt_path), capture_output=True)
+
+
 def gen_id() -> str:
     return "".join(secrets.choice("abcdefghijklmnopqrstuvwxyz0123456789") for _ in range(8))
 
@@ -421,6 +446,7 @@ def list_sandboxes() -> list[SandboxInfo]:
     return sandboxes
 
 
+@functools.cache
 def cwd_git_repo() -> pathlib.Path | None:
     """Return the git repo relevant to cwd, or None if cwd is outside every repo.
 
@@ -518,6 +544,9 @@ def resolve_sandbox(
     if not sys.stdin.isatty():
         hint = " or --new" if allow_create else ""
         fail(f"No sandbox specified. Use -m <query>{hint} in non-interactive mode.")
+
+    from InquirerPy import inquirer
+    from InquirerPy.base.control import Choice
 
     by_id = {s.wt_id: s for s in all_sandboxes}
     scope_all = cwd_repo is None

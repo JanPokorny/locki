@@ -8,10 +8,8 @@ included worktrees; ownership is scoped by the parent sandbox's id.
 
 from __future__ import annotations
 
-import contextlib
 import json
 import pathlib
-import subprocess
 
 import click
 
@@ -19,13 +17,13 @@ from locki.paths import WORKTREES
 from locki.runes import INFO, SPINNER, SUCCESS
 from locki.utils import (
     SandboxInfo,
+    add_worktree,
     cwd_git_repo,
     fail,
     json_option,
     resolve_sandbox,
     run_command,
     sandbox_options,
-    setup_worktree_hooks,
 )
 
 
@@ -42,43 +40,18 @@ def _validate_repo(path: pathlib.Path) -> pathlib.Path:
 
 
 def _setup_include(sandbox: SandboxInfo, repo_b: pathlib.Path, name: str) -> None:
-    """Create branch, worktree, meta, hooks, config for an include."""
+    """Create branch, worktree, meta, hooks, config for an include.
+
+    If the branch already exists in repo B (e.g. another include of the same sandbox
+    in the past, cleaned up but branch survived) it is reused."""
     include_wt = sandbox.include_wt_path(name)
     include_meta = sandbox.include_meta_path(name)
 
     if include_wt.exists() or include_meta.exists():
         fail(f"Include {name!r} already exists in sandbox {sandbox.wt_id}.")
 
-    branch = f"untitled#locki-{sandbox.wt_id}"
-
-    # In repo B: create branch from current HEAD, add worktree.
-    # If the branch already exists (e.g. another include of the same sandbox in the
-    # past, cleaned up but branch survived) we reuse it.
-    result = run_command(
-        ["git", "-C", str(repo_b), "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"],
-        "Checking for existing include branch",
-        check=False,
-        quiet=True,
-    )
-    if result.returncode != 0:
-        run_command(
-            ["git", "-C", str(repo_b), "branch", branch],
-            f"Creating branch {click.style(branch, fg='green')} in {repo_b.name}",
-        )
-
     include_wt.parent.mkdir(parents=True, exist_ok=True)
-    run_command(
-        ["git", "-C", str(repo_b), "worktree", "add", str(include_wt), branch],
-        f"Creating worktree for {click.style(name, fg='green')}",
-    )
-
-    include_meta.mkdir(parents=True, exist_ok=True)
-    (include_meta / ".git").write_text((include_wt / ".git").read_text())
-    (include_meta / "repo").write_text(str(repo_b))
-
-    setup_worktree_hooks(repo_b, include_meta, include_wt)
-    with contextlib.suppress(FileNotFoundError):
-        subprocess.run(["mise", "trust"], cwd=str(include_wt), capture_output=True)
+    add_worktree(repo_b, f"untitled#locki-{sandbox.wt_id}", include_wt, include_meta, label=name)
 
 
 @click.command("include")

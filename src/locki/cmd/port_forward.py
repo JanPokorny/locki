@@ -23,37 +23,24 @@ def _parse_port_spec(spec: str) -> tuple[int, int]:
     raise click.BadParameter(f"Invalid port spec '{spec}'. Use 'port', 'host_port:sandbox_port', or ':sandbox_port'.")
 
 
-def _forward_devices(wt_id: str) -> list[str]:
-    """Names of all port-forward proxy devices on a container."""
+def _query_container(wt_id: str) -> dict | None:
+    """Fetch the container's status and devices in a single `incus list` roundtrip."""
     result = run_in_vm(
-        ["incus", "config", "device", "list", wt_id],
-        "Listing devices",
-        quiet=True,
+        ["incus", "list", "--format=json", wt_id],
+        "Checking sandbox",
+        check=False,
     )
-    return [name for line in result.stdout.decode().splitlines() if (name := line.strip()).startswith("port-fwd-")]
+    try:
+        containers = json.loads(result.stdout.decode())
+    except json.JSONDecodeError:
+        return None
+    return next((c for c in containers if c.get("name") == wt_id), None)
 
 
-def _device_port(wt_id: str, name: str, key: str) -> int | str:
+def _port(address: str) -> int | str:
     """Last `:`-separated field of a proxy device address, e.g. tcp:0.0.0.0:8080 -> 8080."""
-    value = (
-        run_in_vm(
-            ["incus", "config", "device", "get", wt_id, name, key],
-            f"Reading {name}",
-            check=False,
-            quiet=True,
-        )
-        .stdout.decode()
-        .strip()
-        .rsplit(":", 1)[-1]
-    )
+    value = address.rsplit(":", 1)[-1]
     return int(value) if value.isdigit() else value or "?"
-
-
-def _active_forwards(wt_id: str) -> list[dict]:
-    return [
-        {"host_port": _device_port(wt_id, name, "listen"), "sandbox_port": _device_port(wt_id, name, "connect")}
-        for name in _forward_devices(wt_id)
-    ]
 
 
 @click.command(context_settings={"allow_extra_args": True})
@@ -66,27 +53,22 @@ def port_forward_cmd(ctx, match, interactive, clear, list_forwards, as_json):
     """Forward ports from the host to a sandbox."""
     sandbox = resolve_sandbox(match=match, interactive=interactive, create="deny")
 
-    # Ensure sandbox is running
-    lines = (
-        run_in_vm(
-            ["incus", "list", "--format=csv", "--columns=ns", sandbox.wt_id],
-            "Checking sandbox",
-            check=False,
-        )
-        .stdout.decode()
-        .strip()
-    )
-    if sandbox.wt_id not in lines:
+    container = _query_container(sandbox.wt_id)
+    if container is None:
         fail("Did not match an existing sandbox.")
-    if "RUNNING" not in lines:
+    if container.get("status", "").lower() != "running":
         fail(f"Sandbox is not running. Run {click.style(f'locki x -m {sandbox.wt_id} true', fg='green')} to start it.")
 
+    # Proxy devices on the container, tracked in memory as we mutate them.
+    devices = {name: dev for name, dev in (container.get("devices") or {}).items() if name.startswith("port-fwd-")}
+
     if clear:
-        for name in _forward_devices(sandbox.wt_id):
+        for name in devices:
             run_in_vm(
                 ["incus", "config", "device", "remove", sandbox.wt_id, name],
                 f"Removing {name}",
             )
+        devices = {}
         if not ctx.args and not list_forwards:
             if as_json:
                 click.echo(json.dumps([]))
@@ -97,12 +79,14 @@ def port_forward_cmd(ctx, match, interactive, clear, list_forwards, as_json):
         host_port, sandbox_port = _parse_port_spec(spec)
         if host_port < 1024:
             fail(f"Host port {host_port} is not allowed (must be >= 1024).")
-        run_in_vm(
-            ["incus", "config", "device", "remove", sandbox.wt_id, f"port-fwd-{host_port}"],
-            f"Removing existing forward on host port {host_port}",
-            check=False,
-            quiet=True,
-        )
+        name = f"port-fwd-{host_port}"
+        if name in devices:
+            run_in_vm(
+                ["incus", "config", "device", "remove", sandbox.wt_id, name],
+                f"Removing existing forward on host port {host_port}",
+                check=False,
+                quiet=True,
+            )
         run_in_vm(
             [
                 "incus",
@@ -110,17 +94,21 @@ def port_forward_cmd(ctx, match, interactive, clear, list_forwards, as_json):
                 "device",
                 "add",
                 sandbox.wt_id,
-                f"port-fwd-{host_port}",
+                name,
                 "proxy",
                 f"listen=tcp:0.0.0.0:{host_port}",
                 f"connect=tcp:127.0.0.1:{sandbox_port}",
             ],
             f"Forwarding host port {host_port} -> sandbox port {sandbox_port}",
         )
+        devices[name] = {"listen": f"tcp:0.0.0.0:{host_port}", "connect": f"tcp:127.0.0.1:{sandbox_port}"}
         added.append({"host_port": host_port, "sandbox_port": sandbox_port})
 
     if list_forwards:
-        forwards = _active_forwards(sandbox.wt_id)
+        forwards = [
+            {"host_port": _port(dev.get("listen", "")), "sandbox_port": _port(dev.get("connect", ""))}
+            for dev in devices.values()
+        ]
         if as_json:
             click.echo(json.dumps(forwards))
         else:
