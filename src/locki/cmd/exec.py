@@ -164,7 +164,7 @@ def exec_cmd(ctx, match, interactive, create):
 
     SANDBOX_HOME.mkdir(parents=True, exist_ok=True)
     for path, updates in [
-        (SANDBOX_HOME / ".claude.json", {"projects": {"/": {"hasTrustDialogAccepted": True}}}),
+        (SANDBOX_HOME / ".claude.json", {"projects": {str(sandbox.wt_path): {"hasTrustDialogAccepted": True}}}),
         (
             SANDBOX_HOME / ".claude" / "settings.json",
             {"skipDangerousModePermissionPrompt": True, "permissions": {"defaultMode": "bypassPermissions"}},
@@ -193,6 +193,7 @@ def exec_cmd(ctx, match, interactive, create):
                 "base": ["template:fedora"],
                 "memory": f"{os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES') // (1024**3)}GiB",
                 "cpus": os.cpu_count(),
+                "disk": "200GiB",
                 "containerd": {"system": False, "user": False},
                 "mounts": [
                     {"location": str(WORKTREES), "writable": True},

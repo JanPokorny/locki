@@ -569,6 +569,17 @@ assert_output "built image runs in B" "locki-shared-cache" locki x -m "$BUILD_B"
 assert_ok "shared buildkitd is active on VM" "$LIMACTL" shell --start --workdir=/ locki -- \
     sudo systemctl is-active --quiet locki-buildkit
 
+# ── disk deduplication ───────────────────────────────────────────────────────
+# Pool is directory-backed on the root btrfs (no loop file, no size cap), and the bees
+# daemon continuously dedups the whole fs: incus pool, caches, and per-sandbox dockerds.
+echo
+echo "Testing disk deduplication..."
+
+assert_fail "incus pool is directory-backed (no loop file)" \
+    "$LIMACTL" shell --start --workdir=/ locki -- test -f /var/lib/incus/disks/default.img
+assert_ok "bees dedup daemon is active on VM" "$LIMACTL" shell --start --workdir=/ locki -- \
+    sudo bash -c 'systemctl is-active --quiet "beesd@$(findmnt -no UUID /)"'
+
 # ── concurrent first-time docker builds (install race) ───────────────────────
 # Regression: in a fresh sandbox, a `docker build` that arrives while a sibling
 # is still installing docker could see the freshly-placed binary, skip the

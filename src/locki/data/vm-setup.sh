@@ -7,11 +7,13 @@ if ! command -v incus >/dev/null 2>&1; then
   dnf install -y --setopt install_weak_deps=False incus incus-client btrfs-progs
   systemctl enable --now incus
   mkdir -p /var/cache/locki
+  btrfs subvolume create /var/lib/incus-pool
   incus admin init --preseed << '__LOCKI_EOF__'
 storage_pools:
   - name: default
     driver: btrfs
     config:
+      source: /var/lib/incus-pool
       btrfs.mount_options: compress=zstd:1,noatime
 networks:
   - name: incusbr0
@@ -214,4 +216,15 @@ EOF
 
   systemctl daemon-reload
   systemctl enable --now locki-buildkit
+fi
+
+if ! command -v beesd >/dev/null 2>&1; then
+  dnf install -y --setopt install_weak_deps=False bees
+  uuid=$(findmnt -no UUID /)
+  cat > "/etc/bees/$uuid.conf" << EOF
+UUID=$uuid
+DB_SIZE=268435456
+OPTIONS="--strip-paths --verbose=5"
+EOF
+  systemctl enable --now "beesd@$uuid"
 fi
