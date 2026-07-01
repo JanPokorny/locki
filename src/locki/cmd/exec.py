@@ -1,6 +1,7 @@
 import base64
 import contextlib
 import getpass
+import hashlib
 import json
 import logging
 import os
@@ -25,7 +26,6 @@ from locki.utils import (
     deep_merge,
     fail,
     file_lock,
-    gen_id,
     limactl,
     live_branch,
     pretty_path,
@@ -58,7 +58,7 @@ CONTAINER_ENV = {
     "LEIN_HOME": "/var/cache/locki/lein",
     "MAVEN_OPTS": "-Dmaven.repo.local=/var/cache/locki/maven",
     "MISE_CACHE_DIR": "/var/cache/locki/mise",
-    "MISE_DATA": "/usr/share/mise",
+    "MISE_DATA_DIR": "/usr/share/mise",
     "MISE_GLOBAL_CONFIG_FILE": "/opt/locki/mise.toml",
     "MISE_INSTALL_PATH": "/usr/local/bin/mise",
     "MISE_NODE_VERIFY": "false",
@@ -90,16 +90,40 @@ logger = logging.getLogger(__name__)
 
 
 def import_local_incus_image(local_path: pathlib.Path) -> str:
-    """Copy a local Incus image archive into the VM and import it.
+    """Copy a local Incus image archive into the VM and import it, cached by file identity.
 
-    Supports both unified tarballs and split images (metadata + companion .root file)."""
-    tmp_name = f"locki-img-{gen_id()}"
+    Supports both unified tarballs and split images (metadata + companion .root file).
+    The alias encodes the archive path and the size/mtime of its file(s), so repeat
+    sandbox creations from an unchanged archive skip the copy+import entirely, and a
+    changed archive replaces the previously imported image."""
+    sources = [src for suffix in ("", ".root") if (src := local_path.parent / (local_path.name + suffix)).is_file()]
+    path_hash = hashlib.sha256(str(local_path.resolve()).encode()).hexdigest()[:8]
+    signature = "|".join(f"{src.stat().st_size}:{src.stat().st_mtime_ns}" for src in sources)
+    content_hash = hashlib.sha256(signature.encode()).hexdigest()[:8]
+    alias = f"locki-img-{path_hash}-{content_hash}"
+
+    result = run_in_vm(
+        ["incus", "image", "list", "--format=csv", "--columns=l"],
+        "Checking for cached image",
+        check=False,
+        quiet=True,
+    )
+    cached_aliases = result.stdout.decode().split() if result else []
+    if alias in cached_aliases:
+        return alias
+    for stale in cached_aliases:
+        if stale.startswith(f"locki-img-{path_hash}-"):
+            run_in_vm(
+                ["incus", "image", "delete", stale],
+                "Removing stale cached image",
+                check=False,
+                quiet=True,
+            )
+
     vm_files = []
-    for suffix in ("", ".root"):
-        src = local_path.parent / (local_path.name + suffix)
-        if suffix and not src.is_file():
-            continue
-        vm_path = f"/tmp/{tmp_name}{suffix}"
+    for src in sources:
+        suffix = ".root" if src != local_path else ""
+        vm_path = f"/tmp/{alias}{suffix}"
         run_command(
             [limactl(), "copy", str(src.resolve()), f"locki:{vm_path}"],
             f"Copying {'rootfs' if suffix else 'image'} into VM",
@@ -109,11 +133,29 @@ def import_local_incus_image(local_path: pathlib.Path) -> str:
         )
         vm_files.append(vm_path)
     try:
-        run_in_vm(
-            ["incus", "image", "import", *vm_files, f"--alias={tmp_name}"],
+        result = run_in_vm(
+            ["incus", "image", "import", *vm_files, f"--alias={alias}"],
             "Importing container image",
+            check=False,
             print_success=False,
         )
+        if result.returncode != 0:
+            stderr = result.stderr.decode()
+            if "fingerprint" not in stderr:
+                fail(f"Importing container image failed: {stderr.strip()}")
+            # Same content already imported under another alias (e.g. from another clone
+            # of the repo). The incus fingerprint is the sha256 of the archive (metadata
+            # then rootfs for split images) — compute it and add our alias to that image.
+            digest = hashlib.sha256()
+            for src in sources:
+                with open(src, "rb") as f:
+                    while chunk := f.read(1 << 20):
+                        digest.update(chunk)
+            run_in_vm(
+                ["incus", "image", "alias", "create", alias, digest.hexdigest()[:12]],
+                "Aliasing existing image",
+                print_success=False,
+            )
     finally:
         run_in_vm(
             ["rm", "-f", *vm_files],
@@ -122,7 +164,7 @@ def import_local_incus_image(local_path: pathlib.Path) -> str:
             quiet=True,
             print_success=False,
         )
-    return tmp_name
+    return alias
 
 
 @click.command(
@@ -278,14 +320,6 @@ def exec_cmd(ctx, match, interactive, create):
                     "Creating container",
                     print_success=False,
                 )
-
-                if local_path.is_file():
-                    run_in_vm(
-                        ["incus", "image", "delete", image_ref],
-                        "Cleaning up imported image",
-                        check=False,
-                        print_success=False,
-                    )
 
             run_in_vm(
                 [

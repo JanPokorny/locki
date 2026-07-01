@@ -1,5 +1,6 @@
 import json
 import pathlib
+import shlex
 import sys
 
 import click
@@ -116,29 +117,47 @@ def vm_delete_cmd(yes):
 
 _PRUNE_SCRIPT = r"""
 set -eu
-CACHE=/var/cache/locki/registry-cache
-[ -d "$CACHE" ] || { echo "0"; exit 0; }
+CACHE=/var/cache/locki
+WORKTREES=__WORKTREES__
 
-BEFORE=$(du -sb "$CACHE" 2>/dev/null | cut -f1 || echo 0)
-find "$CACHE" -mindepth 1 -delete 2>/dev/null || true
-systemctl restart nginx 2>/dev/null || true
-AFTER=$(du -sb "$CACHE" 2>/dev/null | cut -f1 || echo 0)
+size() { du -sb "$@" 2>/dev/null | awk '{s+=$1} END {print s+0}'; }
+
+BEFORE=$(size "$CACHE/registry-cache" "$CACHE/uv-venvs" "$CACHE/node-modules")
+
+if [ -d "$CACHE/registry-cache" ]; then
+  find "$CACHE/registry-cache" -mindepth 1 -delete 2>/dev/null || true
+  systemctl restart nginx 2>/dev/null || true
+fi
+
+# Per-sandbox caches are keyed by absolute worktree path; drop entries whose
+# worktree no longer exists (the worktrees dir is mounted in the VM at the host path).
+for base in uv-venvs node-modules; do
+  root="$CACHE/$base$WORKTREES"
+  [ -d "$root" ] || continue
+  for dir in "$root"/*; do
+    [ -e "$dir" ] || continue
+    [ -e "$WORKTREES/$(basename "$dir")" ] || rm -rf "$dir"
+  done
+done
+
+AFTER=$(size "$CACHE/registry-cache" "$CACHE/uv-venvs" "$CACHE/node-modules")
 FREED=$((BEFORE - AFTER))
 [ "$FREED" -lt 0 ] && FREED=0
 echo "$FREED"
 """
 
 
-@vm_app.command("prune", help="Clear the registry cache.")
+@vm_app.command("prune", help="Clear the registry cache and caches of removed sandboxes.")
 @json_option
 def vm_prune_cmd(as_json):
     if vm_status() != "Running":
         fail("VM is not running.")
 
-    result = run_in_vm(["bash", "-c", _PRUNE_SCRIPT], "Pruning registry cache")
+    script = _PRUNE_SCRIPT.replace("__WORKTREES__", shlex.quote(str(WORKTREES)))
+    result = run_in_vm(["bash", "-c", script], "Pruning caches")
 
     freed = int(result.stdout.decode().strip().splitlines()[-1])
     if as_json:
         click.echo(json.dumps({"freed_bytes": freed}))
         return
-    click.echo(f"{INFO} Freed {freed / (1024 * 1024):.1f} MiB from registry cache.", err=True)
+    click.echo(f"{INFO} Freed {freed / (1024 * 1024):.1f} MiB from caches.", err=True)

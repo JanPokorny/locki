@@ -125,6 +125,10 @@ You can open, inspect and interact with websites using agent-browser. When in ne
 
 Preinstalled: `bun`, `docker`, `fd`, `jq`, `k9s`, `kubectl`, `mise`, `node`/`npm`/`npx`, `pnpm`/`pnpx`, `poetry`, `rg`, `uv`/`uvx`, `yarn`, `yq`.
 
+## Docker builds
+
+`docker build` runs on a BuildKit daemon shared between sandboxes, so layers are cached across sandboxes and repeat builds are fast. One behavioral difference: `FROM` / `COPY --from` resolve images from registries, not from images previously built or loaded into this sandbox's Docker daemon. If a build must consume a locally-built image (e.g. `docker build -t base . && docker build .` where the second Dockerfile has `FROM base`), pass `--builder default` to build on the sandbox-local builder instead (correct, but slower and without the shared cache).
+
 
 # Startup checklist
 

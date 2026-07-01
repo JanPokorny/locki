@@ -1,5 +1,6 @@
 import json
 import logging
+import shlex
 import shutil
 import subprocess
 
@@ -84,8 +85,16 @@ def _remove_sandbox(sandbox: SandboxInfo, *, branches: bool) -> None:
                     check=False,
                 )
 
+    # Delete the container and the per-sandbox caches keyed by the worktree path
+    # (uv venvs, node_modules) in one VM roundtrip.
+    wt = shlex.quote(str(sandbox.wt_path))
     run_in_vm(
-        ["incus", "delete", "--force", sandbox.wt_id],
+        [
+            "sh",
+            "-c",
+            f"incus delete --force {shlex.quote(sandbox.wt_id)};"
+            f" rm -rf /var/cache/locki/uv-venvs{wt} /var/cache/locki/node-modules{wt}",
+        ],
         "Removing container",
         check=False,
     )

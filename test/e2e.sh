@@ -274,6 +274,17 @@ echo "Testing hot start..."
 hot_start=$(timed locki x -m "$RELEASE" echo 4) || true
 echo "  hot start: ${hot_start}s"
 
+# ── uv venv redirect ─────────────────────────────────────────────────────────
+# The uv shim must place the project venv on the shared btrfs cache (hardlinks
+# from UV_CACHE_DIR work there) and leave only a symlink in the worktree.
+
+echo
+echo "Testing uv venv redirect to shared cache..."
+
+assert_ok "uv init + sync works" locki x -m "$RELEASE" bash -c 'uv init -q --name uvtest . && uv sync -q'
+assert_output "uv .venv is a symlink into the shared cache" "/var/cache/locki/uv-venvs" \
+    locki x -m "$RELEASE" readlink .venv
+
 # ── container isolation ──────────────────────────────────────────────────────
 
 echo
@@ -407,6 +418,17 @@ assert_ok "nginx registry proxy is active" "$LIMACTL" shell --start --workdir=/ 
     sudo systemctl is-active --quiet nginx
 assert_ok "pulls populate the registry cache" "$LIMACTL" shell --start --workdir=/ locki -- \
     sudo bash -c 'test -n "$(ls -A /var/cache/locki/registry-cache)"'
+
+# ── get.k3s.io + GitHub release asset cache ──────────────────────────────────
+
+echo
+echo "Testing get.k3s.io cache..."
+
+assert_ok "get.k3s.io is intercepted" locki x -m "$LOGIN" grep -q get.k3s.io /etc/hosts
+assert_ok "release asset host is intercepted" locki x -m "$LOGIN" grep -q objects.githubusercontent.com /etc/hosts
+assert_ok "first fetch of the k3s install script" locki x -m "$LOGIN" curl -sSf -o /dev/null https://get.k3s.io/
+assert_output "second fetch is a cache HIT" "HIT" bash -c \
+    "locki x -m '$LOGIN' curl -sSfI https://get.k3s.io/ | grep -i x-locki-cache"
 
 # ── concurrent exec on a new sandbox ─────────────────────────────────────────
 
