@@ -302,9 +302,21 @@ def setup_worktree_hooks(repo: pathlib.Path, meta_dir: pathlib.Path, wt_path: pa
     )
 
 
-def add_worktree(repo: pathlib.Path, branch: str, wt_path: pathlib.Path, meta_path: pathlib.Path, label: str) -> None:
-    """Create *branch* in *repo* (reusing it if it already exists), add a worktree
-    at *wt_path*, and set up trusted metadata plus per-worktree hooks."""
+def add_worktree(repo: pathlib.Path, wt_id: str, parent_name: str | None = None) -> pathlib.Path:
+    """Create the sandbox worktree of *repo* for *wt_id*: the `untitled#locki-<wt-id>`
+    branch (reused if it already exists), the worktree itself, trusted metadata, and
+    per-worktree hooks.  With *parent_name* (the parent sandbox repo's name) the
+    worktree becomes an include inside that sandbox; without it, the primary worktree."""
+    branch = f"untitled#locki-{wt_id}"
+    dir_name = f"{repo.name}-locki-{wt_id}"
+    if parent_name is None:
+        wt_path = WORKTREES / dir_name
+        meta_path = WORKTREES_META / dir_name
+    else:
+        parent_dir = f"{parent_name}-locki-{wt_id}"
+        wt_path = WORKTREES / parent_dir / ".locki" / "include" / dir_name
+        meta_path = WORKTREES_META / parent_dir / "include" / dir_name
+
     exists = run_command(
         ["git", "-C", str(repo), "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"],
         "Checking for existing branch",
@@ -317,9 +329,10 @@ def add_worktree(repo: pathlib.Path, branch: str, wt_path: pathlib.Path, meta_pa
             f"Creating branch {click.style(branch, fg='green')}",
             print_success=False,
         )
+    wt_path.parent.mkdir(parents=True, exist_ok=True)
     run_command(
         ["git", "-C", str(repo), "worktree", "add", str(wt_path), branch],
-        f"Creating worktree for {click.style(label, fg='green')}",
+        f"Creating worktree for {click.style(dir_name, fg='green')}",
     )
     meta_path.mkdir(parents=True, exist_ok=True)
     (meta_path / ".git").write_text((wt_path / ".git").read_text())
@@ -327,6 +340,7 @@ def add_worktree(repo: pathlib.Path, branch: str, wt_path: pathlib.Path, meta_pa
     setup_worktree_hooks(repo, meta_path, wt_path)
     with suppress(FileNotFoundError):
         subprocess.run(["mise", "trust"], cwd=str(wt_path), capture_output=True)
+    return wt_path
 
 
 def gen_id() -> str:

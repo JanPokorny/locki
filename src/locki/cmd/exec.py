@@ -16,7 +16,7 @@ import time
 import click
 
 from locki.cmd.new import create_sandbox_worktree
-from locki.config import LockiConfig, load_config
+from locki.config import load_config
 from locki.paths import LIMA, PACKAGE_DATA, PID_FILE, PORT_FILE, RUNTIME, SANDBOX_HOME, WORKTREES
 from locki.runes import EXIT, INFO, SPINNER, WARNING
 from locki.utils import (
@@ -125,8 +125,43 @@ def import_local_incus_image(local_path: pathlib.Path) -> str:
     return tmp_name
 
 
-def _seed_agent_configs(sandbox: SandboxInfo) -> None:
-    """Merge sandbox-friendly defaults into the AI agents' config files in the sandbox home."""
+@click.command(
+    "exec | x",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True, "allow_interspersed_args": False},
+)
+@sandbox_options(create=True)
+@click.pass_context
+def exec_cmd(ctx, match, interactive, create):
+    """Run a command in the per-branch sandbox container.
+
+    \b
+    Examples:
+      locki x bash                    # current sandbox, or picker / create
+      locki x claude                  # run Claude Code
+      locki x -m feat bash            # match sandbox by substring
+      locki x -i bash                 # force sandbox picker even inside a worktree
+      locki x -n bash                 # create new sandbox
+      locki x bash -c "echo hello"    # run a one-liner
+    """
+    click.echo(f"{SPINNER} Entering a Locki sandbox.", err=True)
+
+    pre_resolved = ctx.obj if isinstance(ctx.obj, SandboxInfo) else None
+    sandbox = pre_resolved or resolve_sandbox(
+        match=match,
+        interactive=interactive,
+        create="force" if create else "allow",
+    )
+
+    if sys.platform == "linux" and (
+        missing := [b for b in [f"qemu-system-{platform.machine()}", "qemu-img"] if not shutil.which(b)]
+    ):
+        fail(
+            f"Locki requires QEMU on Linux, but {', '.join(missing)} not found in PATH. Install QEMU: https://www.qemu.org/download/#linux"
+        )
+
+    LIMA.mkdir(exist_ok=True, parents=True)
+    WORKTREES.mkdir(parents=True, exist_ok=True)
+
     SANDBOX_HOME.mkdir(parents=True, exist_ok=True)
     for path, updates in [
         (SANDBOX_HOME / ".claude.json", {"projects": {str(sandbox.wt_path): {"hasTrustDialogAccepted": True}}}),
@@ -150,160 +185,72 @@ def _seed_agent_configs(sandbox: SandboxInfo) -> None:
         except json.JSONDecodeError:
             click.echo(f"{WARNING} Invalid JSON data found in {path}, not updating it.")
 
-
-def _ensure_vm() -> None:
-    """Create and start the Lima VM if it is not already running."""
-    if sys.platform == "linux" and (
-        missing := [b for b in [f"qemu-system-{platform.machine()}", "qemu-img"] if not shutil.which(b)]
-    ):
-        fail(
-            f"Locki requires QEMU on Linux, but {', '.join(missing)} not found in PATH. Install QEMU: https://www.qemu.org/download/#linux"
-        )
-
-    LIMA.mkdir(exist_ok=True, parents=True)
-    WORKTREES.mkdir(parents=True, exist_ok=True)
-
-    if vm_status() == "Running":
-        return
-
-    with file_lock("vm", "Waiting for VM to start"):
-        vm_setup = (PACKAGE_DATA / "vm-setup.sh").read_text()
-        lima_config = json.dumps(
-            {
-                "minimumLimaVersion": "2.0.0",
-                "base": ["template:fedora"],
-                "memory": f"{os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES') // (1024**3)}GiB",
-                "cpus": os.cpu_count(),
-                "disk": "200GiB",
-                "containerd": {"system": False, "user": False},
-                "mounts": [
-                    {"location": str(WORKTREES), "writable": True},
-                    {"location": str(SANDBOX_HOME), "mountPoint": "/root/.locki/home", "writable": True},
-                ],
-                "provision": [{"mode": "system", "script": vm_setup}],
-            }
-        )
-        lima_fd, lima_yaml = tempfile.mkstemp(suffix=".yaml")
-        try:
-            os.write(lima_fd, lima_config.encode())
-            os.close(lima_fd)
+    if vm_status() != "Running":
+        with file_lock("vm", "Waiting for VM to start"):
+            vm_setup = (PACKAGE_DATA / "vm-setup.sh").read_text()
+            lima_config = json.dumps(
+                {
+                    "minimumLimaVersion": "2.0.0",
+                    "base": ["template:fedora"],
+                    "memory": f"{os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES') // (1024**3)}GiB",
+                    "cpus": os.cpu_count(),
+                    "disk": "200GiB",
+                    "containerd": {"system": False, "user": False},
+                    "mounts": [
+                        {"location": str(WORKTREES), "writable": True},
+                        {"location": str(SANDBOX_HOME), "mountPoint": "/root/.locki/home", "writable": True},
+                    ],
+                    "provision": [{"mode": "system", "script": vm_setup}],
+                }
+            )
+            lima_fd, lima_yaml = tempfile.mkstemp(suffix=".yaml")
+            try:
+                os.write(lima_fd, lima_config.encode())
+                os.close(lima_fd)
+                run_command(
+                    [limactl(), "--tty=false", "create", lima_yaml, "--mount-writable", "--name=locki"],
+                    "Preparing VM",
+                    env=LIMA_ENV,
+                    cwd="/",
+                    check=False,
+                    print_success=False,
+                )
+            finally:
+                os.unlink(lima_yaml)
             run_command(
-                [limactl(), "--tty=false", "create", lima_yaml, "--mount-writable", "--name=locki"],
-                "Preparing VM",
+                [limactl(), "--tty=false", "start", "locki"],
+                "Starting VM",
                 env=LIMA_ENV,
                 cwd="/",
                 check=False,
-                print_success=False,
-            )
-        finally:
-            os.unlink(lima_yaml)
-        run_command(
-            [limactl(), "--tty=false", "start", "locki"],
-            "Starting VM",
-            env=LIMA_ENV,
-            cwd="/",
-            check=False,
-        )
-
-    if vm_status() != "Running":
-        fail(f"Lima VM failed to start. LIMA_HOME={LIMA}")
-
-
-def _fix_branch_suffixes(sandbox: SandboxInfo) -> None:
-    """Re-suffix branches so they carry this sandbox's `#locki-<id>` tag (e.g. after a rename)."""
-    suffix = f"#locki-{sandbox.wt_id}"
-    for meta_dir, wt_path in [
-        (sandbox.meta_path, sandbox.wt_path),
-        *(
-            (sandbox.include_meta_path(i.name), sandbox.include_wt_path(i.name))
-            for i in sandbox.include
-            if sandbox.include_wt_path(i.name).exists() and sandbox.include_meta_path(i.name).exists()
-        ),
-    ]:
-        branch = live_branch(meta_dir)
-        if branch.startswith("(") or branch.endswith(suffix):
-            continue
-        new_branch = f"{branch.split('#locki-')[0]}{suffix}"
-        run_command(
-            ["git", "-C", str(wt_path), "checkout", "-B", new_branch],
-            f"Fixing branch to {click.style(new_branch, fg='green')}",
-        )
-
-
-def _create_container(sandbox: SandboxInfo, config: LockiConfig) -> None:
-    """Create the sandbox container from the configured image and run first-time setup."""
-    incus_image = config.get_incus_image(sandbox.repo)
-
-    local_path = sandbox.repo / incus_image
-    with file_lock("image", "Waiting for another image import"):
-        image_ref = import_local_incus_image(local_path) if local_path.is_file() else incus_image
-
-        run_in_vm(
-            ["incus", "init", image_ref, sandbox.wt_id],
-            "Creating container",
-            print_success=False,
-        )
-
-        if local_path.is_file():
-            run_in_vm(
-                ["incus", "image", "delete", image_ref],
-                "Cleaning up imported image",
-                check=False,
-                print_success=False,
             )
 
-    run_in_vm(
-        [
-            "incus",
-            "config",
-            "device",
-            "add",
-            sandbox.wt_id,
-            "worktree",
-            "disk",
-            f"source={sandbox.wt_path}",
-            f"path={sandbox.wt_path}",
-        ],
-        "Mounting worktree into container",
-        print_success=False,
-    )
+        if vm_status() != "Running":
+            fail(f"Lima VM failed to start. LIMA_HOME={LIMA}")
 
-    run_in_vm(
-        ["incus", "start", sandbox.wt_id],
-        "Starting container",
-    )
+    if not sandbox.wt_path.exists():
+        create_sandbox_worktree(sandbox)
+    else:
+        suffix = f"#locki-{sandbox.wt_id}"
+        for meta_dir, wt_path in [
+            (sandbox.meta_path, sandbox.wt_path),
+            *(
+                (sandbox.include_meta_path(i.name), sandbox.include_wt_path(i.name))
+                for i in sandbox.include
+                if sandbox.include_wt_path(i.name).exists() and sandbox.include_meta_path(i.name).exists()
+            ),
+        ]:
+            branch = live_branch(meta_dir)
+            if branch.startswith("(") or branch.endswith(suffix):
+                continue
+            new_branch = f"{branch.split('#locki-')[0]}{suffix}"
+            run_command(
+                ["git", "-C", str(wt_path), "checkout", "-B", new_branch],
+                f"Fixing branch to {click.style(new_branch, fg='green')}",
+            )
 
-    setup_script = (
-        (PACKAGE_DATA / "container-setup.sh")
-        .read_bytes()
-        .replace(b"__AGENTS_MD_B64__", base64.b64encode((PACKAGE_DATA / "AGENTS.md").read_bytes()))
-        .replace(
-            b"__LIBATOMIC_B64__",
-            base64.b64encode((PACKAGE_DATA / "libatomic.so.1").read_bytes())
-            if (PACKAGE_DATA / "libatomic.so.1").is_file()
-            else b"",
-        )
-    )
-    env_flags = [flag for k, v in CONTAINER_ENV.items() for flag in ("--env", f"{k}={v}")]
-    run_in_vm(
-        [
-            "incus",
-            "exec",
-            sandbox.wt_id,
-            *env_flags,
-            "--env",
-            f"LOCKI_WORKTREES_HOME={WORKTREES}",
-            "--",
-            "/bin/sh",
-        ],
-        "Configuring container",
-        input=setup_script,
-        print_success=False,
-    )
+    config = load_config(sandbox.repo)
 
-
-def _ensure_container(sandbox: SandboxInfo, config: LockiConfig) -> None:
-    """Make sure the sandbox container exists and is running."""
     with file_lock(f"provision-{sandbox.wt_id}", "Waiting for another sandbox setup"):
         result = run_in_vm(
             ["incus", "list", "--format=csv", "--columns=ns", sandbox.wt_id],
@@ -312,19 +259,84 @@ def _ensure_container(sandbox: SandboxInfo, config: LockiConfig) -> None:
             print_success=False,
         )
         listing = result.stdout.decode()
-        if sandbox.wt_id not in listing:
-            _create_container(sandbox, config)
-        elif "RUNNING" not in listing:
+        if sandbox.wt_id in listing:
+            if "RUNNING" not in listing:
+                run_in_vm(
+                    ["incus", "start", sandbox.wt_id],
+                    "Starting container",
+                    check=False,
+                )
+        else:
+            incus_image = config.get_incus_image(sandbox.repo)
+
+            local_path = sandbox.repo / incus_image
+            with file_lock("image", "Waiting for another image import"):
+                image_ref = import_local_incus_image(local_path) if local_path.is_file() else incus_image
+
+                run_in_vm(
+                    ["incus", "init", image_ref, sandbox.wt_id],
+                    "Creating container",
+                    print_success=False,
+                )
+
+                if local_path.is_file():
+                    run_in_vm(
+                        ["incus", "image", "delete", image_ref],
+                        "Cleaning up imported image",
+                        check=False,
+                        print_success=False,
+                    )
+
+            run_in_vm(
+                [
+                    "incus",
+                    "config",
+                    "device",
+                    "add",
+                    sandbox.wt_id,
+                    "worktree",
+                    "disk",
+                    f"source={sandbox.wt_path}",
+                    f"path={sandbox.wt_path}",
+                ],
+                "Mounting worktree into container",
+                print_success=False,
+            )
+
             run_in_vm(
                 ["incus", "start", sandbox.wt_id],
                 "Starting container",
-                check=False,
             )
 
+            setup_script = (
+                (PACKAGE_DATA / "container-setup.sh")
+                .read_bytes()
+                .replace(b"__AGENTS_MD_B64__", base64.b64encode((PACKAGE_DATA / "AGENTS.md").read_bytes()))
+                .replace(
+                    b"__LIBATOMIC_B64__",
+                    base64.b64encode((PACKAGE_DATA / "libatomic.so.1").read_bytes())
+                    if (PACKAGE_DATA / "libatomic.so.1").is_file()
+                    else b"",
+                )
+            )
+            env_flags = [flag for k, v in CONTAINER_ENV.items() for flag in ("--env", f"{k}={v}")]
+            run_in_vm(
+                [
+                    "incus",
+                    "exec",
+                    sandbox.wt_id,
+                    *env_flags,
+                    "--env",
+                    f"LOCKI_WORKTREES_HOME={WORKTREES}",
+                    "--",
+                    "/bin/sh",
+                ],
+                "Configuring container",
+                input=setup_script,
+                print_success=False,
+            )
 
-def _setup_command_bridge() -> None:
-    """Idempotently start the Locki host daemon (SSH forced-command proxy + periodic
-    cleanup) and write the SSH client config the sandbox uses to reach it."""
+    # Idempotently start the Locki host daemon (SSH forced-command proxy + periodic cleanup).
     RUNTIME.mkdir(parents=True, exist_ok=True)
     client_ssh_dir = SANDBOX_HOME / ".ssh"
     client_ssh_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -356,10 +368,8 @@ def _setup_command_bridge() -> None:
         (PACKAGE_DATA / "locki-ssh-config").read_text() + f"    Port {ssh_port}\n    User {getpass.getuser()}\n"
     )
 
-
-def _enter_container(sandbox: SandboxInfo, args: list[str]) -> int:
-    """Run the requested command (or a shell) inside the sandbox container."""
     forwarded_env = {"TERM", "COLORTERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION", "LANG", "SSH_TTY"}
+
     result = subprocess.run(
         [
             limactl(),
@@ -384,16 +394,13 @@ def _enter_container(sandbox: SandboxInfo, args: list[str]) -> int:
                     *(f"--env={k}={v}" for k, v in CONTAINER_ENV.items()),
                     *(f'--env={env}="${env}"' for env in forwarded_env),
                     "--",
-                    *((shlex.quote(a) for a in args) if args else ["bash"]),
+                    *((shlex.quote(a) for a in ctx.args) if ctx.args else ["bash"]),
                 ]
             ),
         ],
         env={**os.environ, **LIMA_ENV, "LIMA_SHELLENV_ALLOW": ",".join(forwarded_env)},
     )
-    return result.returncode
 
-
-def _print_outro(sandbox: SandboxInfo) -> None:
     clear = "\r\033[2K" if sys.stderr.isatty() else ""
     click.echo(clear, err=True)
     click.echo(f"{clear}{EXIT} Exited Locki sandbox.", err=True)
@@ -408,46 +415,4 @@ def _print_outro(sandbox: SandboxInfo) -> None:
         err=True,
     )
     click.echo(f"{clear}{INFO}     on disk: {click.style(pretty_path(sandbox.wt_path), fg='green')}", err=True)
-
-
-@click.command(
-    "exec | x",
-    context_settings={"allow_extra_args": True, "ignore_unknown_options": True, "allow_interspersed_args": False},
-)
-@sandbox_options(create=True)
-@click.pass_context
-def exec_cmd(ctx, match, interactive, create):
-    """Run a command in the per-branch sandbox container.
-
-    \b
-    Examples:
-      locki x bash                    # current sandbox, or picker / create
-      locki x claude                  # run Claude Code
-      locki x -m feat bash            # match sandbox by substring
-      locki x -i bash                 # force sandbox picker even inside a worktree
-      locki x -n bash                 # create new sandbox
-      locki x bash -c "echo hello"    # run a one-liner
-    """
-    click.echo(f"{SPINNER} Entering a Locki sandbox.", err=True)
-
-    pre_resolved = ctx.obj if isinstance(ctx.obj, SandboxInfo) else None
-    sandbox = pre_resolved or resolve_sandbox(
-        match=match,
-        interactive=interactive,
-        create="force" if create else "allow",
-    )
-
-    _seed_agent_configs(sandbox)
-    _ensure_vm()
-
-    if not sandbox.wt_path.exists():
-        create_sandbox_worktree(sandbox)
-    else:
-        _fix_branch_suffixes(sandbox)
-
-    _ensure_container(sandbox, load_config(sandbox.repo))
-    _setup_command_bridge()
-
-    returncode = _enter_container(sandbox, ctx.args)
-    _print_outro(sandbox)
-    raise SystemExit(returncode)
+    raise SystemExit(result.returncode)

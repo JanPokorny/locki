@@ -21,8 +21,7 @@ def create_sandbox_worktree(sandbox: SandboxInfo) -> None:
         "Pruning stale git worktrees",
         print_success=False,
     )
-    sandbox.wt_path.mkdir(parents=True, exist_ok=True)
-    add_worktree(sandbox.repo, sandbox.branch, sandbox.wt_path, sandbox.meta_path, label=sandbox.branch)
+    add_worktree(sandbox.repo, sandbox.wt_id)
     locki_dir = sandbox.wt_path / ".locki"
     locki_dir.mkdir(parents=True, exist_ok=True)
     (locki_dir / ".gitignore").write_text("*\n")

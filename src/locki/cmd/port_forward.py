@@ -23,20 +23,6 @@ def _parse_port_spec(spec: str) -> tuple[int, int]:
     raise click.BadParameter(f"Invalid port spec '{spec}'. Use 'port', 'host_port:sandbox_port', or ':sandbox_port'.")
 
 
-def _query_container(wt_id: str) -> dict | None:
-    """Fetch the container's status and devices in a single `incus list` roundtrip."""
-    result = run_in_vm(
-        ["incus", "list", "--format=json", wt_id],
-        "Checking sandbox",
-        check=False,
-    )
-    try:
-        containers = json.loads(result.stdout.decode())
-    except json.JSONDecodeError:
-        return None
-    return next((c for c in containers if c.get("name") == wt_id), None)
-
-
 def _port(address: str) -> int | str:
     """Last `:`-separated field of a proxy device address, e.g. tcp:0.0.0.0:8080 -> 8080."""
     value = address.rsplit(":", 1)[-1]
@@ -53,7 +39,17 @@ def port_forward_cmd(ctx, match, interactive, clear, list_forwards, as_json):
     """Forward ports from the host to a sandbox."""
     sandbox = resolve_sandbox(match=match, interactive=interactive, create="deny")
 
-    container = _query_container(sandbox.wt_id)
+    # Fetch the container's status and devices in a single `incus list` roundtrip.
+    result = run_in_vm(
+        ["incus", "list", "--format=json", sandbox.wt_id],
+        "Checking sandbox",
+        check=False,
+    )
+    try:
+        containers = json.loads(result.stdout.decode())
+    except json.JSONDecodeError:
+        containers = []
+    container = next((c for c in containers if c.get("name") == sandbox.wt_id), None)
     if container is None:
         fail("Did not match an existing sandbox.")
     if container.get("status", "").lower() != "running":

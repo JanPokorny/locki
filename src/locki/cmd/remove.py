@@ -53,25 +53,6 @@ def _has_uncommitted_changes(sandbox: SandboxInfo, *, quiet: bool = False) -> bo
     )
 
 
-def _detect_trunk(repo: str) -> str | None:
-    """The branch `origin/HEAD` points at, falling back to a local `main`/`master`."""
-    ref = subprocess.run(
-        ["git", "-C", repo, "symbolic-ref", "refs/remotes/origin/HEAD"],
-        capture_output=True,
-        text=True,
-    )
-    if ref.returncode == 0:
-        return ref.stdout.strip().removeprefix("refs/remotes/origin/")
-    return next(
-        (
-            name
-            for name in ("main", "master")
-            if subprocess.run(["git", "-C", repo, "rev-parse", "--verify", name], capture_output=True).returncode == 0
-        ),
-        None,
-    )
-
-
 def _matching_branches(repo: str, wt_id: str) -> list[str]:
     result = subprocess.run(
         ["git", "-C", repo, "branch", "--list", f"*#locki-{wt_id}"],
@@ -154,7 +135,27 @@ def remove_cmd(match, interactive, force, branches, merged, as_json):
                 click.echo(json.dumps([]))
             return
 
-        trunk = _detect_trunk(str(all_sandboxes[0].repo))
+        repo = all_sandboxes[0].repo
+        ref = subprocess.run(
+            ["git", "-C", str(repo), "symbolic-ref", "refs/remotes/origin/HEAD"],
+            capture_output=True,
+            text=True,
+        )
+        if ref.returncode == 0:
+            trunk = ref.stdout.strip().removeprefix("refs/remotes/origin/")
+        else:
+            trunk = next(
+                (
+                    name
+                    for name in ("main", "master")
+                    if subprocess.run(
+                        ["git", "-C", str(repo), "rev-parse", "--verify", name],
+                        capture_output=True,
+                    ).returncode
+                    == 0
+                ),
+                None,
+            )
         if not trunk:
             fail("Could not determine the trunk branch.")
 
