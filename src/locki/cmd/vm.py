@@ -151,8 +151,9 @@ def vm_prune_cmd(as_json):
     if vm_status() != "Running":
         fail("VM is not running.")
 
-    script = _PRUNE_SCRIPT.replace("__WORKTREES__", shlex.quote(str(WORKTREES)))
-    result = run_in_vm(["bash", "-c", script], "Pruning caches")
+    result = run_in_vm(
+        ["bash", "-c", _PRUNE_SCRIPT.replace("__WORKTREES__", shlex.quote(str(WORKTREES)))], "Pruning caches"
+    )
 
     freed = int(result.stdout.decode().strip().splitlines()[-1])
     if as_json:

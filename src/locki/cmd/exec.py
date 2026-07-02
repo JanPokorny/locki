@@ -36,69 +36,65 @@ from locki.utils import (
     vm_status,
 )
 
-CONTAINER_ENV = {
-    "BUN_INSTALL_CACHE_DIR": "/var/cache/locki/bun",
-    "BUNDLE_PATH": "/var/cache/locki/bundle",
-    "CABAL_DIR": "/var/cache/locki/cabal",
-    "CARGO_HOME": "/var/cache/locki/cargo",
-    "COMPOSER_CACHE_DIR": "/var/cache/locki/composer",
-    "CONAN_USER_HOME": "/var/cache/locki/conan",
-    "CONAN_HOME": "/var/cache/locki/conan2",
-    "COPILOT_CUSTOM_INSTRUCTIONS_DIRS": "/etc/copilot",
-    "COREPACK_ENABLE_DOWNLOAD_PROMPT": "0",
-    "COURSIER_CACHE": "/var/cache/locki/coursier",
-    "DENO_DIR": "/var/cache/locki/deno",
-    "GEMINI_FORCE_ENCRYPTED_FILE_STORAGE": "true",
-    "GOCACHE": "/var/cache/locki/go/build",
-    "GOMODCACHE": "/var/cache/locki/go/mod",
-    "GRADLE_USER_HOME": "/var/cache/locki/gradle",
-    "HEX_HOME": "/var/cache/locki/hex",
-    "IS_SANDBOX": "1",
-    "JULIA_DEPOT_PATH": "/var/cache/locki/julia",
-    "LEIN_HOME": "/var/cache/locki/lein",
-    "MAVEN_OPTS": "-Dmaven.repo.local=/var/cache/locki/maven",
-    "MISE_CACHE_DIR": "/var/cache/locki/mise",
-    "MISE_DATA_DIR": "/usr/share/mise",
-    "MISE_GLOBAL_CONFIG_FILE": "/opt/locki/mise.toml",
-    "MISE_INSTALL_PATH": "/usr/local/bin/mise",
-    "MISE_NODE_VERIFY": "false",
-    "MISE_TRUSTED_CONFIG_PATHS": "/",
-    "MIX_HOME": "/var/cache/locki/mix",
-    "NIMBLE_DIR": "/var/cache/locki/nimble",
-    "npm_config_cache": "/var/cache/locki/npm",
-    "NUGET_PACKAGES": "/var/cache/locki/nuget",
-    "PATH": "/opt/locki/bin/high:/root/.local/bin:/usr/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/locki/bin/low",
-    "PIP_CACHE_DIR": "/var/cache/locki/pip",
-    "POETRY_VIRTUALENVS_IN_PROJECT": "false",
-    "PNPM_HOME": "/usr/share/pnpm",
-    "PUB_CACHE": "/var/cache/locki/pub",
-    "R_LIBS_USER": "/var/cache/locki/r",
-    "REBAR_CACHE_DIR": "/var/cache/locki/rebar3",
-    "STACK_ROOT": "/var/cache/locki/stack",
-    "TF_PLUGIN_CACHE_DIR": "/var/cache/locki/terraform",
-    "UV_CACHE_DIR": "/var/cache/locki/uv",
-    "VCPKG_DEFAULT_BINARY_CACHE": "/var/cache/locki/vcpkg",
-    "XDG_DATA_HOME": "/usr/share",
-    "XDG_CACHE_HOME": "/var/cache/locki",
-    "XDG_BIN_HOME": "/usr/local/bin",
-    "YARN_CACHE_FOLDER": "/var/cache/locki/yarn",
-    "ZIG_GLOBAL_CACHE_DIR": "/var/cache/locki/zig",
-}
-
 logger = logging.getLogger(__name__)
 
 
 def container_env(sandbox: SandboxInfo) -> dict[str, str]:
-    """CONTAINER_ENV plus the sandbox-scoped entries.
+    """Environment for processes running in the sandbox container.
 
-    Caches that cannot be shared across sandboxes live under
-    /var/cache/locki/scoped/<wt-id>/ so removal and pruning can delete the
-    whole folder without knowing the individual cache types."""
-    scoped = f"/var/cache/locki/scoped/{sandbox.wt_id}"
+    Shared caches live directly under /var/cache/locki; caches that cannot be
+    shared across sandboxes go under /var/cache/locki/scoped/<wt-id>/ so removal
+    and pruning can delete the whole folder without knowing the individual cache
+    types."""
     return {
-        **CONTAINER_ENV,
+        "BUN_INSTALL_CACHE_DIR": "/var/cache/locki/bun",
+        "BUNDLE_PATH": "/var/cache/locki/bundle",
+        "CABAL_DIR": "/var/cache/locki/cabal",
+        "CARGO_HOME": "/var/cache/locki/cargo",
+        "COMPOSER_CACHE_DIR": "/var/cache/locki/composer",
+        "CONAN_USER_HOME": "/var/cache/locki/conan",
+        "CONAN_HOME": "/var/cache/locki/conan2",
+        "COPILOT_CUSTOM_INSTRUCTIONS_DIRS": "/etc/copilot",
+        "COREPACK_ENABLE_DOWNLOAD_PROMPT": "0",
+        "COURSIER_CACHE": "/var/cache/locki/coursier",
+        "DENO_DIR": "/var/cache/locki/deno",
+        "GEMINI_FORCE_ENCRYPTED_FILE_STORAGE": "true",
+        "GOCACHE": "/var/cache/locki/go/build",
+        "GOMODCACHE": "/var/cache/locki/go/mod",
+        "GRADLE_USER_HOME": "/var/cache/locki/gradle",
+        "HEX_HOME": "/var/cache/locki/hex",
+        "IS_SANDBOX": "1",
+        "JULIA_DEPOT_PATH": "/var/cache/locki/julia",
+        "LEIN_HOME": "/var/cache/locki/lein",
         "LOCKI_SANDBOX_ID": sandbox.wt_id,
-        "POETRY_VIRTUALENVS_PATH": f"{scoped}/poetry-venvs",
+        "MAVEN_OPTS": "-Dmaven.repo.local=/var/cache/locki/maven",
+        "MISE_CACHE_DIR": "/var/cache/locki/mise",
+        "MISE_DATA_DIR": "/usr/share/mise",
+        "MISE_GLOBAL_CONFIG_FILE": "/opt/locki/mise.toml",
+        "MISE_INSTALL_PATH": "/usr/local/bin/mise",
+        "MISE_NODE_VERIFY": "false",
+        "MISE_TRUSTED_CONFIG_PATHS": "/",
+        "MIX_HOME": "/var/cache/locki/mix",
+        "NIMBLE_DIR": "/var/cache/locki/nimble",
+        "npm_config_cache": "/var/cache/locki/npm",
+        "NUGET_PACKAGES": "/var/cache/locki/nuget",
+        "PATH": "/opt/locki/bin/high:/root/.local/bin:/usr/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/locki/bin/low",
+        "PIP_CACHE_DIR": "/var/cache/locki/pip",
+        "POETRY_VIRTUALENVS_PATH": f"/var/cache/locki/scoped/{sandbox.wt_id}/poetry-venvs",
+        "POETRY_VIRTUALENVS_IN_PROJECT": "false",
+        "PNPM_HOME": "/usr/share/pnpm",
+        "PUB_CACHE": "/var/cache/locki/pub",
+        "R_LIBS_USER": "/var/cache/locki/r",
+        "REBAR_CACHE_DIR": "/var/cache/locki/rebar3",
+        "STACK_ROOT": "/var/cache/locki/stack",
+        "TF_PLUGIN_CACHE_DIR": "/var/cache/locki/terraform",
+        "UV_CACHE_DIR": "/var/cache/locki/uv",
+        "VCPKG_DEFAULT_BINARY_CACHE": "/var/cache/locki/vcpkg",
+        "XDG_DATA_HOME": "/usr/share",
+        "XDG_CACHE_HOME": "/var/cache/locki",
+        "XDG_BIN_HOME": "/usr/local/bin",
+        "YARN_CACHE_FOLDER": "/var/cache/locki/yarn",
+        "ZIG_GLOBAL_CACHE_DIR": "/var/cache/locki/zig",
     }
 
 
@@ -112,8 +108,7 @@ def import_local_incus_image(local_path: pathlib.Path) -> str:
     sources = [src for suffix in ("", ".root") if (src := local_path.parent / (local_path.name + suffix)).is_file()]
     path_hash = hashlib.sha256(str(local_path.resolve()).encode()).hexdigest()[:8]
     signature = "|".join(f"{src.stat().st_size}:{src.stat().st_mtime_ns}" for src in sources)
-    content_hash = hashlib.sha256(signature.encode()).hexdigest()[:8]
-    alias = f"locki-img-{path_hash}-{content_hash}"
+    alias = f"locki-img-{path_hash}-{hashlib.sha256(signature.encode()).hexdigest()[:8]}"
 
     result = run_in_vm(
         ["incus", "image", "list", "--format=csv", "--columns=l"],
