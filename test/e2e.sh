@@ -282,7 +282,7 @@ echo
 echo "Testing uv venv redirect to shared cache..."
 
 assert_ok "uv init + sync works" locki x -m "$RELEASE" bash -c 'uv init -q --name uvtest . && uv sync -q'
-assert_output "uv .venv is a symlink into the shared cache" "/var/cache/locki/uv-venvs" \
+assert_output "uv .venv is a symlink into the sandbox-scoped cache" "/var/cache/locki/scoped/$RELEASE/uv-venvs" \
     locki x -m "$RELEASE" readlink .venv
 
 # ── container isolation ──────────────────────────────────────────────────────

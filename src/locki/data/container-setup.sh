@@ -79,16 +79,19 @@ _mise="${MISE_INSTALL_PATH:-/usr/local/bin/mise}"
 "$_mise" which "$1" 2>/dev/null || PATH=$(printf '%s' "${PATH#*/opt/locki/bin/high:}" | tr ':' '\n' | grep -v '/mise/shims' | paste -sd:) command -v "$1" || exit 1
 EOF
 
-## locki-node-modules-redirect: point the project's node_modules at the btrfs cache.
+## locki-node-modules-redirect: point the project's node_modules at the btrfs cache
+## (under scoped/<sandbox-id>/ so sandbox removal can delete it generically).
 ## Skips when there is no package.json (don't litter arbitrary cwds) or when a real
 ## node_modules directory already exists (respect it instead of nesting a junk symlink).
 cat > /opt/locki/bin/high/locki-node-modules-redirect << 'EOF'
 #!/bin/sh
+[ -n "${LOCKI_SANDBOX_ID:-}" ] || exit 0
 _dir="$("$(locki-command-real-or-autoinstalled npm)" prefix 2>/dev/null)" || exit 0
 [ -f "$_dir/package.json" ] || exit 0
+_target="/var/cache/locki/scoped/$LOCKI_SANDBOX_ID/node-modules${_dir}/node_modules"
 if [ -L "$_dir/node_modules" ] || [ ! -e "$_dir/node_modules" ]; then
-  mkdir -p "/var/cache/locki/node-modules${_dir}/node_modules" 2>/dev/null || exit 0
-  ln -sfn "/var/cache/locki/node-modules${_dir}/node_modules" "$_dir/node_modules" 2>/dev/null || true
+  mkdir -p "$_target" 2>/dev/null || exit 0
+  ln -sfn "$_target" "$_dir/node_modules" 2>/dev/null || true
 fi
 exit 0
 EOF
@@ -173,14 +176,14 @@ fi
 exec "$_real" "$@"
 EOF
 
-## uv: symlink .venv to btrfs (skip if a real .venv directory already exists)
+## uv: symlink .venv to btrfs, scoped per sandbox (skip if a real .venv directory already exists)
 cat > /opt/locki/bin/high/uv << 'EOF'
 #!/bin/bash
 set -eo pipefail
 _real=$(locki-command-real-or-autoinstalled uv) || exit 1
-if _dir="$("$_real" workspace dir 2>/dev/null)"; then
+if [ -n "${LOCKI_SANDBOX_ID:-}" ] && _dir="$("$_real" workspace dir 2>/dev/null)"; then
   if [ -L "$_dir/.venv" ] || [ ! -e "$_dir/.venv" ]; then
-    export UV_PROJECT_ENVIRONMENT="/var/cache/locki/uv-venvs${_dir}/.venv"
+    export UV_PROJECT_ENVIRONMENT="/var/cache/locki/scoped/$LOCKI_SANDBOX_ID/uv-venvs${_dir}/.venv"
     ln -sfn "$UV_PROJECT_ENVIRONMENT" "$_dir/.venv" 2>/dev/null || true
   fi
 fi

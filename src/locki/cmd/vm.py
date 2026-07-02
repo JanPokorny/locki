@@ -122,25 +122,23 @@ WORKTREES=__WORKTREES__
 
 size() { du -sb "$@" 2>/dev/null | awk '{s+=$1} END {print s+0}'; }
 
-BEFORE=$(size "$CACHE/registry-cache" "$CACHE/uv-venvs" "$CACHE/node-modules")
+BEFORE=$(size "$CACHE/registry-cache" "$CACHE/scoped")
 
 if [ -d "$CACHE/registry-cache" ]; then
   find "$CACHE/registry-cache" -mindepth 1 -delete 2>/dev/null || true
   systemctl restart nginx 2>/dev/null || true
 fi
 
-# Per-sandbox caches are keyed by absolute worktree path; drop entries whose
+# Sandbox-scoped caches live under scoped/<wt-id>/; drop entries whose sandbox
 # worktree no longer exists (the worktrees dir is mounted in the VM at the host path).
-for base in uv-venvs node-modules; do
-  root="$CACHE/$base$WORKTREES"
-  [ -d "$root" ] || continue
-  for dir in "$root"/*; do
+if [ -d "$CACHE/scoped" ]; then
+  for dir in "$CACHE/scoped"/*; do
     [ -e "$dir" ] || continue
-    [ -e "$WORKTREES/$(basename "$dir")" ] || rm -rf "$dir"
+    ls -d "$WORKTREES"/*"-locki-$(basename "$dir")" >/dev/null 2>&1 || rm -rf "$dir"
   done
-done
+fi
 
-AFTER=$(size "$CACHE/registry-cache" "$CACHE/uv-venvs" "$CACHE/node-modules")
+AFTER=$(size "$CACHE/registry-cache" "$CACHE/scoped")
 FREED=$((BEFORE - AFTER))
 [ "$FREED" -lt 0 ] && FREED=0
 echo "$FREED"

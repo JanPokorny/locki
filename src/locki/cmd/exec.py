@@ -69,7 +69,6 @@ CONTAINER_ENV = {
     "NUGET_PACKAGES": "/var/cache/locki/nuget",
     "PATH": "/opt/locki/bin/high:/root/.local/bin:/usr/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/locki/bin/low",
     "PIP_CACHE_DIR": "/var/cache/locki/pip",
-    "POETRY_VIRTUALENVS_PATH": "/var/cache/locki/poetry-venvs",
     "POETRY_VIRTUALENVS_IN_PROJECT": "false",
     "PNPM_HOME": "/usr/share/pnpm",
     "PUB_CACHE": "/var/cache/locki/pub",
@@ -87,6 +86,20 @@ CONTAINER_ENV = {
 }
 
 logger = logging.getLogger(__name__)
+
+
+def container_env(sandbox: SandboxInfo) -> dict[str, str]:
+    """CONTAINER_ENV plus the sandbox-scoped entries.
+
+    Caches that cannot be shared across sandboxes live under
+    /var/cache/locki/scoped/<wt-id>/ so removal and pruning can delete the
+    whole folder without knowing the individual cache types."""
+    scoped = f"/var/cache/locki/scoped/{sandbox.wt_id}"
+    return {
+        **CONTAINER_ENV,
+        "LOCKI_SANDBOX_ID": sandbox.wt_id,
+        "POETRY_VIRTUALENVS_PATH": f"{scoped}/poetry-venvs",
+    }
 
 
 def import_local_incus_image(local_path: pathlib.Path) -> str:
@@ -353,7 +366,7 @@ def exec_cmd(ctx, match, interactive, create):
                     else b"",
                 )
             )
-            env_flags = [flag for k, v in CONTAINER_ENV.items() for flag in ("--env", f"{k}={v}")]
+            env_flags = [flag for k, v in container_env(sandbox).items() for flag in ("--env", f"{k}={v}")]
             run_in_vm(
                 [
                     "incus",
@@ -425,7 +438,7 @@ def exec_cmd(ctx, match, interactive, create):
                     "--cwd",
                     shlex.quote(str(sandbox.wt_path)),
                     f"--env=LOCKI_WORKTREES_HOME={WORKTREES}",
-                    *(f"--env={k}={v}" for k, v in CONTAINER_ENV.items()),
+                    *(f"--env={k}={v}" for k, v in container_env(sandbox).items()),
                     *(f'--env={env}="${env}"' for env in forwarded_env),
                     "--",
                     *((shlex.quote(a) for a in ctx.args) if ctx.args else ["bash"]),

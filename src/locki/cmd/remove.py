@@ -85,15 +85,13 @@ def _remove_sandbox(sandbox: SandboxInfo, *, branches: bool) -> None:
                     check=False,
                 )
 
-    # Delete the container and the per-sandbox caches keyed by the worktree path
-    # (uv venvs, node_modules) in one VM roundtrip.
-    wt = shlex.quote(str(sandbox.wt_path))
+    # Delete the container and the sandbox-scoped cache folder in one VM roundtrip.
+    wt_id = shlex.quote(sandbox.wt_id)
     run_in_vm(
         [
             "sh",
             "-c",
-            f"incus delete --force {shlex.quote(sandbox.wt_id)};"
-            f" rm -rf /var/cache/locki/uv-venvs{wt} /var/cache/locki/node-modules{wt}",
+            f"incus delete --force {wt_id}; rm -rf /var/cache/locki/scoped/{wt_id}",
         ],
         "Removing container",
         check=False,
