@@ -1,6 +1,10 @@
 #!/bin/sh
 set -eux
 
+# Whole-fs noatime: the incus pool's mount options only cover its own mountpoint,
+# while /var/cache/locki and friends are accessed through the root mount.
+mount -o remount,noatime / || true
+
 if ! command -v incus >/dev/null 2>&1; then
   echo "root:1000000:1000000000" >> /etc/subuid
   echo "root:1000000:1000000000" >> /etc/subgid
@@ -64,6 +68,8 @@ if ! command -v nginx >/dev/null 2>&1; then
       -subj "/CN=Locki Registry CA" -keyout /etc/locki/ca.key -out /etc/locki/ca.crt
   fi
   sans="DNS:registry-1.docker.io,DNS:mirror.gcr.io,DNS:ghcr.io,DNS:gcr.io,DNS:quay.io,DNS:registry.access.redhat.com"
+  sans="$sans,DNS:registry.k8s.io,DNS:public.ecr.aws,DNS:cgr.dev,DNS:nvcr.io,DNS:registry.gitlab.com"
+  sans="$sans,DNS:get.k3s.io,DNS:objects.githubusercontent.com,DNS:docker-io.locki"
   openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
     -keyout /etc/locki/registry.key -subj "/CN=Locki Registry" \
     -addext "subjectAltName=$sans" -addext "extendedKeyUsage=serverAuth" \
@@ -98,8 +104,18 @@ http {
 
 	proxy_http_version 1.1;
 	proxy_ssl_server_name on;
+	proxy_ssl_verify on;
+	proxy_ssl_verify_depth 3;
+	proxy_ssl_trusted_certificate /etc/pki/tls/certs/ca-bundle.crt;
 	proxy_read_timeout 300s;
 	proxy_max_temp_file_size 8192m;
+
+	# docker-io.locki is the mirror name the VM-side BuildKit daemon is pointed at;
+	# every other server_name proxies to itself (the /etc/hosts hijack in containers).
+	map $host $registry_upstream {
+		docker-io.locki registry-1.docker.io;
+		default $host;
+	}
 
 	server {
 		listen 10.99.0.1:80;
@@ -113,15 +129,16 @@ http {
 	server {
 		listen 10.99.0.1:443 ssl;
 		http2 on;
-		server_name registry-1.docker.io mirror.gcr.io ghcr.io gcr.io quay.io registry.access.redhat.com;
+		server_name registry-1.docker.io mirror.gcr.io ghcr.io gcr.io quay.io registry.access.redhat.com
+			registry.k8s.io public.ecr.aws cgr.dev nvcr.io registry.gitlab.com docker-io.locki;
 
 		ssl_certificate     /etc/locki/registry.crt;
 		ssl_certificate_key /etc/locki/registry.key;
 
 		location ~ "^/v2/.+/blobs/(sha256:[0-9a-f]{64})$" {
 			set $cache_key "blob:$1";
-			proxy_set_header Host $host;
-			proxy_pass https://$host;
+			proxy_set_header Host $registry_upstream;
+			proxy_pass https://$registry_upstream;
 			proxy_cache registry;
 			proxy_cache_key $cache_key;
 			proxy_cache_valid 200 365d;
@@ -135,10 +152,10 @@ http {
 		}
 
 		location ~ "^/v2/.+/manifests/sha256:[0-9a-f]{64}$" {
-			proxy_set_header Host $host;
-			proxy_pass https://$host;
+			proxy_set_header Host $registry_upstream;
+			proxy_pass https://$registry_upstream;
 			proxy_cache registry;
-			proxy_cache_key "manifest:$host:$request_uri";
+			proxy_cache_key "manifest:$registry_upstream:$request_uri";
 			proxy_cache_valid 200 365d;
 			proxy_cache_lock on;
 			proxy_ignore_headers Cache-Control Expires Set-Cookie X-Accel-Expires Vary;
@@ -146,14 +163,14 @@ http {
 		}
 
 		location / {
-			proxy_set_header Host $host;
-			proxy_pass https://$host;
+			proxy_set_header Host $registry_upstream;
+			proxy_pass https://$registry_upstream;
 		}
 
 		location @follow_redirect {
 			set $redirect_target $upstream_http_location;
 			if ($redirect_target !~ "^https?://") {
-				set $redirect_target "https://$host$upstream_http_location";
+				set $redirect_target "https://$registry_upstream$upstream_http_location";
 			}
 			proxy_set_header Authorization "";
 			proxy_pass $redirect_target;
@@ -166,9 +183,62 @@ http {
 			add_header X-Locki-Cache $upstream_cache_status always;
 		}
 	}
+
+	server {
+		listen 10.99.0.1:443 ssl;
+		http2 on;
+		server_name get.k3s.io;
+
+		ssl_certificate     /etc/locki/registry.crt;
+		ssl_certificate_key /etc/locki/registry.key;
+
+		# The k3s install script; it resolves versions at runtime (via update.k3s.io,
+		# which is not intercepted), so a short-lived cache of the script is safe.
+		location / {
+			proxy_set_header Host $host;
+			proxy_pass https://$host;
+			proxy_cache registry;
+			proxy_cache_key "k3s-install:$uri";
+			proxy_cache_valid 200 1d;
+			proxy_cache_lock on;
+			proxy_ignore_headers Cache-Control Expires Set-Cookie X-Accel-Expires Vary;
+			add_header X-Locki-Cache $upstream_cache_status always;
+		}
+	}
+
+	server {
+		listen 10.99.0.1:443 ssl;
+		http2 on;
+		server_name objects.githubusercontent.com;
+
+		ssl_certificate     /etc/locki/registry.crt;
+		ssl_certificate_key /etc/locki/registry.key;
+
+		# GitHub release-asset downloads (where github.com/<owner>/<repo>/releases/download/...
+		# redirects land, e.g. the k3s binary). The path embeds a unique per-upload asset id,
+		# so it is content-stable; the query string is a per-request signature and must be
+		# excluded from the cache key. Uncached requests pass the client's own signature through.
+		location / {
+			proxy_set_header Host $host;
+			proxy_pass https://$host;
+			proxy_cache registry;
+			proxy_cache_key "gh-release:$uri";
+			proxy_cache_valid 200 365d;
+			proxy_cache_lock on;
+			proxy_cache_lock_timeout 120s;
+			proxy_cache_use_stale error timeout updating;
+			proxy_ignore_headers Cache-Control Expires Set-Cookie X-Accel-Expires Vary;
+			add_header X-Locki-Cache $upstream_cache_status always;
+		}
+	}
 }
 __LOCKI_NGINX__
   sed -i "s|__RESOLVERS__|$resolvers|" /etc/nginx/nginx.conf
+
+  # VM-side mirror name for the shared BuildKit daemon (containers hijack the registry
+  # hostnames directly via their own /etc/hosts; the VM must not, or nginx's upstream
+  # resolution through systemd-resolved would loop back to nginx itself).
+  echo '10.99.0.1 docker-io.locki' >> /etc/hosts
 
   setsebool -P httpd_can_network_connect 1 || true
   chcon -R -t httpd_cache_t /var/cache/locki/registry-cache 2>/dev/null || true
@@ -197,6 +267,14 @@ root = "/var/cache/locki/buildkit"
   [[worker.oci.gcpolicy]]
     all = true
     maxUsedSpace = "20GB"
+
+# Pull docker.io base images through the shared nginx registry cache, so BuildKit's
+# pulls populate/reuse the same blob cache as `docker pull` in sandboxes. BuildKit
+# falls back to the canonical registry if the mirror is unreachable.
+[registry."docker.io"]
+  mirrors = ["docker-io.locki"]
+[registry."docker-io.locki"]
+  ca = ["/etc/locki/ca.crt"]
 EOF
 
   cat > /etc/systemd/system/locki-buildkit.service << 'EOF'

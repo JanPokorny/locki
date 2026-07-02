@@ -79,6 +79,23 @@ _mise="${MISE_INSTALL_PATH:-/usr/local/bin/mise}"
 "$_mise" which "$1" 2>/dev/null || PATH=$(printf '%s' "${PATH#*/opt/locki/bin/high:}" | tr ':' '\n' | grep -v '/mise/shims' | paste -sd:) command -v "$1" || exit 1
 EOF
 
+## locki-node-modules-redirect: point the project's node_modules at the btrfs cache
+## (under scoped/<sandbox-id>/ so sandbox removal can delete it generically).
+## Skips when there is no package.json (don't litter arbitrary cwds) or when a real
+## node_modules directory already exists (respect it instead of nesting a junk symlink).
+cat > /opt/locki/bin/high/locki-node-modules-redirect << 'EOF'
+#!/bin/sh
+[ -n "${LOCKI_SANDBOX_ID:-}" ] || exit 0
+_dir="$("$(locki-command-real-or-autoinstalled npm)" prefix 2>/dev/null)" || exit 0
+[ -f "$_dir/package.json" ] || exit 0
+_target="/var/cache/locki/scoped/$LOCKI_SANDBOX_ID/node-modules${_dir}/node_modules"
+if [ -L "$_dir/node_modules" ] || [ ! -e "$_dir/node_modules" ]; then
+  mkdir -p "$_target" 2>/dev/null || exit 0
+  ln -sfn "$_target" "$_dir/node_modules" 2>/dev/null || true
+fi
+exit 0
+EOF
+
 ## Command bridge (git, gh, locki → SSH proxy to host)
 ## When cwd is outside the worktree tree, run the real binary directly in sandbox.
 tee /opt/locki/bin/high/git /opt/locki/bin/high/gh /opt/locki/bin/high/locki > /dev/null << 'EOF'
@@ -125,8 +142,8 @@ export AGENT_BROWSER_EXECUTABLE_PATH=$(command -v chromium 2>/dev/null || comman
 exec "$(locki-command-real-or-autoinstalled agent-browser)" "$@"
 EOF
 
-## node/npm/npx: install Node.js if missing via mise
-for bin in node npm npx; do
+## node/npx: install Node.js if missing via mise
+for bin in node npx; do
   cat > "/opt/locki/bin/high/$bin" << EOF
 #!/bin/bash
 set -eo pipefail
@@ -136,6 +153,17 @@ fi
 exec "\$(locki-command-real-or-autoinstalled $bin)" "\$@"
 EOF
 done
+
+## npm: install Node.js if missing + symlink node_modules to btrfs
+cat > /opt/locki/bin/high/npm << 'EOF'
+#!/bin/bash
+set -eo pipefail
+if ! locki-command-real node >/dev/null 2>&1; then
+  /opt/locki/bin/high/locki-auto-install nodejs sh -c 'export MISE_AUTO_INSTALL=false MISE_NO_HOOKS=true; mise use -g node && mise install node' >/dev/null 2>&1
+fi
+locki-node-modules-redirect
+exec "$(locki-command-real-or-autoinstalled npm)" "$@"
+EOF
 
 ## pnpm: cache + global virtual store
 cat > /opt/locki/bin/high/pnpm << 'EOF'
@@ -148,14 +176,16 @@ fi
 exec "$_real" "$@"
 EOF
 
-## uv: symlink .venv to btrfs
+## uv: symlink .venv to btrfs, scoped per sandbox (skip if a real .venv directory already exists)
 cat > /opt/locki/bin/high/uv << 'EOF'
 #!/bin/bash
 set -eo pipefail
 _real=$(locki-command-real-or-autoinstalled uv) || exit 1
-if _dir="$("$_real" workspace dir 2>/dev/null)"; then
-  export UV_PROJECT_ENVIRONMENT="/var/cache/locki/uv-venvs${_dir}/.venv"
-  ln -sfn "$UV_PROJECT_ENVIRONMENT" "$_dir/.venv" 2>/dev/null || true
+if [ -n "${LOCKI_SANDBOX_ID:-}" ] && _dir="$("$_real" workspace dir 2>/dev/null)"; then
+  if [ -L "$_dir/.venv" ] || [ ! -e "$_dir/.venv" ]; then
+    export UV_PROJECT_ENVIRONMENT="/var/cache/locki/scoped/$LOCKI_SANDBOX_ID/uv-venvs${_dir}/.venv"
+    ln -sfn "$UV_PROJECT_ENVIRONMENT" "$_dir/.venv" 2>/dev/null || true
+  fi
 fi
 exec "$_real" "$@"
 EOF
@@ -164,21 +194,15 @@ EOF
 cat > /opt/locki/bin/high/yarn << 'EOF'
 #!/bin/bash
 set -eo pipefail
-if _dir="$("$(locki-command-real-or-autoinstalled npm)" prefix 2>/dev/null)"; then
-  mkdir -p "/var/cache/locki/node-modules${_dir}/node_modules"
-  ln -sfn "/var/cache/locki/node-modules${_dir}/node_modules" "$_dir/node_modules" 2>/dev/null || true
-fi
+locki-node-modules-redirect
 exec "$(locki-command-real-or-autoinstalled yarn)" "$@"
 EOF
 
-## bun: symlink node_modules to btrfs + redirect cache
+## bun: symlink node_modules to btrfs + redirect cache (BUN_INSTALL_CACHE_DIR)
 cat > /opt/locki/bin/high/bun << 'EOF'
 #!/bin/bash
 set -eo pipefail
-if _dir="$("$(locki-command-real-or-autoinstalled npm)" prefix 2>/dev/null)"; then
-  mkdir -p "/var/cache/locki/node-modules${_dir}/node_modules"
-  ln -sfn "/var/cache/locki/node-modules${_dir}/node_modules" "$_dir/node_modules" 2>/dev/null || true
-fi
+locki-node-modules-redirect
 exec "$(locki-command-real-or-autoinstalled bun)" "$@"
 EOF
 
@@ -289,7 +313,8 @@ if ! locki-command-real mise >/dev/null 2>&1; then
     mise_version="2026.4.10"
     musl=""; if ldd /bin/ls 2>/dev/null | grep musl; then musl="-musl"; fi
     case "$(uname -m)" in x86_64) arch="x64$musl";; aarch64|arm64) arch="arm64$musl";; esac
-    if ! test -d "/var/cache/mise-install/mise-v${mise_version}-linux-${arch}"; then
+    dest="/var/cache/locki/mise-install/mise-v${mise_version}-linux-${arch}"
+    if ! test -x "$dest/mise/bin/mise"; then
       ext="tar.gz"
       if command -v zstd >/dev/null 2>&1 && tar --version 2>/dev/null | grep -q "1\.\(3[1-9]\|[4-9][0-9]\)"; then ext="tar.zst"; fi
       case "$arch.$ext" in
@@ -304,7 +329,8 @@ if ! locki-command-real mise >/dev/null 2>&1; then
         *) echo "no checksum for linux-$arch.$ext" >&2; exit 1;;
       esac
       tmpdir=$(mktemp -d)
-      trap "rm -rf \"$tmpdir\"" EXIT
+      unpack=""
+      trap "rm -rf \"\$tmpdir\" \"\$unpack\"" EXIT
       mise_file="mise-v$mise_version-linux-$arch.$ext"
       mise_url="https://mise.jdx.dev/v$mise_version/$mise_file"
       if command -v curl >/dev/null 2>&1; then curl -fsSL -o "$tmpdir/$mise_file" "$mise_url"
@@ -312,12 +338,18 @@ if ! locki-command-real mise >/dev/null 2>&1; then
       elif command -v python3 >/dev/null 2>&1; then python3 -c "from urllib.request import urlretrieve,install_opener,build_opener;o=build_opener();o.addheaders=[(\"User-Agent\",\"curl/8\")];install_opener(o);urlretrieve(\"$mise_url\",\"$tmpdir/$mise_file\")"
       else echo "[Locki] Error: no HTTP client found (need curl, wget, or python3)" >&2; exit 1; fi
       if [ "$(sha256sum "$tmpdir/$mise_file" | cut -d" " -f1)" != "$checksum" ]; then echo "checksum mismatch" >&2; exit 1; fi
-      mkdir -p "/var/cache/mise-install/mise-v${mise_version}-linux-${arch}"
-      cd "/var/cache/mise-install/mise-v${mise_version}-linux-${arch}"
+      # Extract into a temp dir and rename: the cache is shared across sandboxes, so a
+      # crashed extraction must not leave a half-populated dir that later passes the check.
+      mkdir -p /var/cache/locki/mise-install
+      unpack=$(mktemp -d /var/cache/locki/mise-install/.unpack-XXXXXX)
+      cd "$unpack"
       if [ "$ext" = "tar.zst" ]; then zstd -d -c "$tmpdir/$mise_file" | tar -xf -; else tar -xf "$tmpdir/$mise_file"; fi
+      cd /
+      rm -rf "$dest"
+      mv "$unpack" "$dest"
     fi
-    chmod +x "/var/cache/mise-install/mise-v${mise_version}-linux-${arch}/mise/bin/mise"
-    ln -sf "/var/cache/mise-install/mise-v${mise_version}-linux-${arch}/mise/bin/mise" /usr/local/bin/mise
+    chmod +x "$dest/mise/bin/mise"
+    ln -sf "$dest/mise/bin/mise" /usr/local/bin/mise
     chmod +x /usr/local/bin/mise
   '
 fi
@@ -371,8 +403,10 @@ chmod +x /opt/locki/bin/low/*
 # MARK: Caching
 
 if command -v apt-get >/dev/null 2>&1; then
-  mkdir -p /etc/apt/apt.conf.d /var/cache/locki/apt/cache /var/cache/locki/apt/state
-  printf 'Dir::Cache "/var/cache/locki/apt/cache";\nDir::State "/var/cache/locki/apt/state";\n' > /etc/apt/apt.conf.d/99local-cache
+  ## Share only the caches (archives + repo metadata); the rest of Dir::State
+  ## (e.g. extended_states auto-install markers) is per-container state.
+  mkdir -p /etc/apt/apt.conf.d /var/cache/locki/apt/cache/archives/partial /var/cache/locki/apt/lists/partial
+  printf 'Dir::Cache "/var/cache/locki/apt/cache";\nDir::State::lists "/var/cache/locki/apt/lists";\n' > /etc/apt/apt.conf.d/99local-cache
 fi
 
 if command -v dnf >/dev/null 2>&1; then
@@ -413,7 +447,7 @@ if { command -v curl >/dev/null 2>&1 && curl -fsS --retry 3 -o "$ca_tmp" "$ca_ur
     ca_installed=1
   fi
   if [ -n "$ca_installed" ]; then
-    echo '10.99.0.1 registry-1.docker.io mirror.gcr.io gcr.io ghcr.io quay.io registry.access.redhat.com' >> /etc/hosts
+    echo '10.99.0.1 registry-1.docker.io mirror.gcr.io gcr.io ghcr.io quay.io registry.access.redhat.com registry.k8s.io public.ecr.aws cgr.dev nvcr.io registry.gitlab.com get.k3s.io objects.githubusercontent.com' >> /etc/hosts
   fi
 fi
 rm -f "$ca_tmp"

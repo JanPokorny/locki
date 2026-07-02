@@ -1,6 +1,7 @@
 import base64
 import contextlib
 import getpass
+import hashlib
 import json
 import logging
 import os
@@ -25,7 +26,6 @@ from locki.utils import (
     deep_merge,
     fail,
     file_lock,
-    gen_id,
     limactl,
     live_branch,
     pretty_path,
@@ -36,70 +36,102 @@ from locki.utils import (
     vm_status,
 )
 
-CONTAINER_ENV = {
-    "BUN_INSTALL_CACHE_DIR": "/var/cache/locki/bun",
-    "BUNDLE_PATH": "/var/cache/locki/bundle",
-    "CABAL_DIR": "/var/cache/locki/cabal",
-    "CARGO_HOME": "/var/cache/locki/cargo",
-    "COMPOSER_CACHE_DIR": "/var/cache/locki/composer",
-    "CONAN_USER_HOME": "/var/cache/locki/conan",
-    "CONAN_HOME": "/var/cache/locki/conan2",
-    "COPILOT_CUSTOM_INSTRUCTIONS_DIRS": "/etc/copilot",
-    "COREPACK_ENABLE_DOWNLOAD_PROMPT": "0",
-    "COURSIER_CACHE": "/var/cache/locki/coursier",
-    "DENO_DIR": "/var/cache/locki/deno",
-    "GEMINI_FORCE_ENCRYPTED_FILE_STORAGE": "true",
-    "GOCACHE": "/var/cache/locki/go/build",
-    "GOMODCACHE": "/var/cache/locki/go/mod",
-    "GRADLE_USER_HOME": "/var/cache/locki/gradle",
-    "HEX_HOME": "/var/cache/locki/hex",
-    "IS_SANDBOX": "1",
-    "JULIA_DEPOT_PATH": "/var/cache/locki/julia",
-    "LEIN_HOME": "/var/cache/locki/lein",
-    "MAVEN_OPTS": "-Dmaven.repo.local=/var/cache/locki/maven",
-    "MISE_CACHE_DIR": "/var/cache/locki/mise",
-    "MISE_DATA": "/usr/share/mise",
-    "MISE_GLOBAL_CONFIG_FILE": "/opt/locki/mise.toml",
-    "MISE_INSTALL_PATH": "/usr/local/bin/mise",
-    "MISE_NODE_VERIFY": "false",
-    "MISE_TRUSTED_CONFIG_PATHS": "/",
-    "MIX_HOME": "/var/cache/locki/mix",
-    "NIMBLE_DIR": "/var/cache/locki/nimble",
-    "npm_config_cache": "/var/cache/locki/npm",
-    "NUGET_PACKAGES": "/var/cache/locki/nuget",
-    "PATH": "/opt/locki/bin/high:/root/.local/bin:/usr/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/locki/bin/low",
-    "PIP_CACHE_DIR": "/var/cache/locki/pip",
-    "POETRY_VIRTUALENVS_PATH": "/var/cache/locki/poetry-venvs",
-    "POETRY_VIRTUALENVS_IN_PROJECT": "false",
-    "PNPM_HOME": "/usr/share/pnpm",
-    "PUB_CACHE": "/var/cache/locki/pub",
-    "R_LIBS_USER": "/var/cache/locki/r",
-    "REBAR_CACHE_DIR": "/var/cache/locki/rebar3",
-    "STACK_ROOT": "/var/cache/locki/stack",
-    "TF_PLUGIN_CACHE_DIR": "/var/cache/locki/terraform",
-    "UV_CACHE_DIR": "/var/cache/locki/uv",
-    "VCPKG_DEFAULT_BINARY_CACHE": "/var/cache/locki/vcpkg",
-    "XDG_DATA_HOME": "/usr/share",
-    "XDG_CACHE_HOME": "/var/cache/locki",
-    "XDG_BIN_HOME": "/usr/local/bin",
-    "YARN_CACHE_FOLDER": "/var/cache/locki/yarn",
-    "ZIG_GLOBAL_CACHE_DIR": "/var/cache/locki/zig",
-}
-
 logger = logging.getLogger(__name__)
 
 
-def import_local_incus_image(local_path: pathlib.Path) -> str:
-    """Copy a local Incus image archive into the VM and import it.
+def container_env(sandbox: SandboxInfo) -> dict[str, str]:
+    """Environment for processes running in the sandbox container.
 
-    Supports both unified tarballs and split images (metadata + companion .root file)."""
-    tmp_name = f"locki-img-{gen_id()}"
+    Shared caches live directly under /var/cache/locki; caches that cannot be
+    shared across sandboxes go under /var/cache/locki/scoped/<wt-id>/ so removal
+    and pruning can delete the whole folder without knowing the individual cache
+    types."""
+    return {
+        "BUN_INSTALL_CACHE_DIR": "/var/cache/locki/bun",
+        "BUNDLE_PATH": "/var/cache/locki/bundle",
+        "CABAL_DIR": "/var/cache/locki/cabal",
+        "CARGO_HOME": "/var/cache/locki/cargo",
+        "COMPOSER_CACHE_DIR": "/var/cache/locki/composer",
+        "CONAN_USER_HOME": "/var/cache/locki/conan",
+        "CONAN_HOME": "/var/cache/locki/conan2",
+        "COPILOT_CUSTOM_INSTRUCTIONS_DIRS": "/etc/copilot",
+        "COREPACK_ENABLE_DOWNLOAD_PROMPT": "0",
+        "COURSIER_CACHE": "/var/cache/locki/coursier",
+        "DENO_DIR": "/var/cache/locki/deno",
+        "GEMINI_FORCE_ENCRYPTED_FILE_STORAGE": "true",
+        "GOCACHE": "/var/cache/locki/go/build",
+        "GOMODCACHE": "/var/cache/locki/go/mod",
+        "GRADLE_USER_HOME": "/var/cache/locki/gradle",
+        "HEX_HOME": "/var/cache/locki/hex",
+        "IS_SANDBOX": "1",
+        "JULIA_DEPOT_PATH": "/var/cache/locki/julia",
+        "LEIN_HOME": "/var/cache/locki/lein",
+        "LOCKI_SANDBOX_ID": sandbox.wt_id,
+        "MAVEN_OPTS": "-Dmaven.repo.local=/var/cache/locki/maven",
+        "MISE_CACHE_DIR": "/var/cache/locki/mise",
+        "MISE_DATA_DIR": "/usr/share/mise",
+        "MISE_GLOBAL_CONFIG_FILE": "/opt/locki/mise.toml",
+        "MISE_INSTALL_PATH": "/usr/local/bin/mise",
+        "MISE_NODE_VERIFY": "false",
+        "MISE_TRUSTED_CONFIG_PATHS": "/",
+        "MIX_HOME": "/var/cache/locki/mix",
+        "NIMBLE_DIR": "/var/cache/locki/nimble",
+        "npm_config_cache": "/var/cache/locki/npm",
+        "NUGET_PACKAGES": "/var/cache/locki/nuget",
+        "PATH": "/opt/locki/bin/high:/root/.local/bin:/usr/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/locki/bin/low",
+        "PIP_CACHE_DIR": "/var/cache/locki/pip",
+        "POETRY_VIRTUALENVS_PATH": f"/var/cache/locki/scoped/{sandbox.wt_id}/poetry-venvs",
+        "POETRY_VIRTUALENVS_IN_PROJECT": "false",
+        "PNPM_HOME": "/usr/share/pnpm",
+        "PUB_CACHE": "/var/cache/locki/pub",
+        "R_LIBS_USER": "/var/cache/locki/r",
+        "REBAR_CACHE_DIR": "/var/cache/locki/rebar3",
+        "STACK_ROOT": "/var/cache/locki/stack",
+        "TF_PLUGIN_CACHE_DIR": "/var/cache/locki/terraform",
+        "UV_CACHE_DIR": "/var/cache/locki/uv",
+        "VCPKG_DEFAULT_BINARY_CACHE": "/var/cache/locki/vcpkg",
+        "XDG_DATA_HOME": "/usr/share",
+        "XDG_CACHE_HOME": "/var/cache/locki",
+        "XDG_BIN_HOME": "/usr/local/bin",
+        "YARN_CACHE_FOLDER": "/var/cache/locki/yarn",
+        "ZIG_GLOBAL_CACHE_DIR": "/var/cache/locki/zig",
+    }
+
+
+def import_local_incus_image(local_path: pathlib.Path) -> str:
+    """Copy a local Incus image archive into the VM and import it, cached by file identity.
+
+    Supports both unified tarballs and split images (metadata + companion .root file).
+    The alias encodes the archive path and the size/mtime of its file(s), so repeat
+    sandbox creations from an unchanged archive skip the copy+import entirely, and a
+    changed archive replaces the previously imported image."""
+    sources = [src for suffix in ("", ".root") if (src := local_path.parent / (local_path.name + suffix)).is_file()]
+    path_hash = hashlib.sha256(str(local_path.resolve()).encode()).hexdigest()[:8]
+    signature = "|".join(f"{src.stat().st_size}:{src.stat().st_mtime_ns}" for src in sources)
+    alias = f"locki-img-{path_hash}-{hashlib.sha256(signature.encode()).hexdigest()[:8]}"
+
+    result = run_in_vm(
+        ["incus", "image", "list", "--format=csv", "--columns=l"],
+        "Checking for cached image",
+        check=False,
+        quiet=True,
+    )
+    cached_aliases = result.stdout.decode().split() if result else []
+    if alias in cached_aliases:
+        return alias
+    for stale in cached_aliases:
+        if stale.startswith(f"locki-img-{path_hash}-"):
+            run_in_vm(
+                ["incus", "image", "delete", stale],
+                "Removing stale cached image",
+                check=False,
+                quiet=True,
+            )
+
     vm_files = []
-    for suffix in ("", ".root"):
-        src = local_path.parent / (local_path.name + suffix)
-        if suffix and not src.is_file():
-            continue
-        vm_path = f"/tmp/{tmp_name}{suffix}"
+    for src in sources:
+        suffix = ".root" if src != local_path else ""
+        vm_path = f"/tmp/{alias}{suffix}"
         run_command(
             [limactl(), "copy", str(src.resolve()), f"locki:{vm_path}"],
             f"Copying {'rootfs' if suffix else 'image'} into VM",
@@ -109,11 +141,29 @@ def import_local_incus_image(local_path: pathlib.Path) -> str:
         )
         vm_files.append(vm_path)
     try:
-        run_in_vm(
-            ["incus", "image", "import", *vm_files, f"--alias={tmp_name}"],
+        result = run_in_vm(
+            ["incus", "image", "import", *vm_files, f"--alias={alias}"],
             "Importing container image",
+            check=False,
             print_success=False,
         )
+        if result.returncode != 0:
+            stderr = result.stderr.decode()
+            if "fingerprint" not in stderr:
+                fail(f"Importing container image failed: {stderr.strip()}")
+            # Same content already imported under another alias (e.g. from another clone
+            # of the repo). The incus fingerprint is the sha256 of the archive (metadata
+            # then rootfs for split images) — compute it and add our alias to that image.
+            digest = hashlib.sha256()
+            for src in sources:
+                with open(src, "rb") as f:
+                    while chunk := f.read(1 << 20):
+                        digest.update(chunk)
+            run_in_vm(
+                ["incus", "image", "alias", "create", alias, digest.hexdigest()[:12]],
+                "Aliasing existing image",
+                print_success=False,
+            )
     finally:
         run_in_vm(
             ["rm", "-f", *vm_files],
@@ -122,7 +172,7 @@ def import_local_incus_image(local_path: pathlib.Path) -> str:
             quiet=True,
             print_success=False,
         )
-    return tmp_name
+    return alias
 
 
 @click.command(
@@ -279,14 +329,6 @@ def exec_cmd(ctx, match, interactive, create):
                     print_success=False,
                 )
 
-                if local_path.is_file():
-                    run_in_vm(
-                        ["incus", "image", "delete", image_ref],
-                        "Cleaning up imported image",
-                        check=False,
-                        print_success=False,
-                    )
-
             run_in_vm(
                 [
                     "incus",
@@ -319,7 +361,7 @@ def exec_cmd(ctx, match, interactive, create):
                     else b"",
                 )
             )
-            env_flags = [flag for k, v in CONTAINER_ENV.items() for flag in ("--env", f"{k}={v}")]
+            env_flags = [flag for k, v in container_env(sandbox).items() for flag in ("--env", f"{k}={v}")]
             run_in_vm(
                 [
                     "incus",
@@ -391,7 +433,7 @@ def exec_cmd(ctx, match, interactive, create):
                     "--cwd",
                     shlex.quote(str(sandbox.wt_path)),
                     f"--env=LOCKI_WORKTREES_HOME={WORKTREES}",
-                    *(f"--env={k}={v}" for k, v in CONTAINER_ENV.items()),
+                    *(f"--env={k}={v}" for k, v in container_env(sandbox).items()),
                     *(f'--env={env}="${env}"' for env in forwarded_env),
                     "--",
                     *((shlex.quote(a) for a in ctx.args) if ctx.args else ["bash"]),

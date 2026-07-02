@@ -1,5 +1,6 @@
 import json
 import logging
+import shlex
 import shutil
 import subprocess
 
@@ -84,8 +85,14 @@ def _remove_sandbox(sandbox: SandboxInfo, *, branches: bool) -> None:
                     check=False,
                 )
 
+    # Delete the container and the sandbox-scoped cache folder in one VM roundtrip.
+    wt_id = shlex.quote(sandbox.wt_id)
     run_in_vm(
-        ["incus", "delete", "--force", sandbox.wt_id],
+        [
+            "sh",
+            "-c",
+            f"incus delete --force {wt_id}; rm -rf /var/cache/locki/scoped/{wt_id}",
+        ],
         "Removing container",
         check=False,
     )
