@@ -69,7 +69,7 @@ if ! command -v nginx >/dev/null 2>&1; then
   fi
   sans="DNS:registry-1.docker.io,DNS:mirror.gcr.io,DNS:ghcr.io,DNS:gcr.io,DNS:quay.io,DNS:registry.access.redhat.com"
   sans="$sans,DNS:registry.k8s.io,DNS:public.ecr.aws,DNS:cgr.dev,DNS:nvcr.io,DNS:registry.gitlab.com"
-  sans="$sans,DNS:get.k3s.io,DNS:objects.githubusercontent.com,DNS:docker-io.locki"
+  sans="$sans,DNS:get.k3s.io,DNS:objects.githubusercontent.com,DNS:release-assets.githubusercontent.com,DNS:docker-io.locki"
   openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
     -keyout /etc/locki/registry.key -subj "/CN=Locki Registry" \
     -addext "subjectAltName=$sans" -addext "extendedKeyUsage=serverAuth" \
@@ -209,13 +209,14 @@ http {
 	server {
 		listen 10.99.0.1:443 ssl;
 		http2 on;
-		server_name objects.githubusercontent.com;
+		server_name objects.githubusercontent.com release-assets.githubusercontent.com;
 
 		ssl_certificate     /etc/locki/registry.crt;
 		ssl_certificate_key /etc/locki/registry.key;
 
 		# GitHub release-asset downloads (where github.com/<owner>/<repo>/releases/download/...
-		# redirects land, e.g. the k3s binary). The path embeds a unique per-upload asset id,
+		# redirects land, e.g. the k3s binary). GitHub redirects to release-assets.* since
+		# mid-2025; objects.* is kept for older links. The path embeds a unique per-upload asset id,
 		# so it is content-stable; the query string is a per-request signature and must be
 		# excluded from the cache key. Uncached requests pass the client's own signature through.
 		location / {

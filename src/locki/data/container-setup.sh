@@ -208,6 +208,50 @@ locki-node-modules-redirect
 exec "$(locki-command-real-or-autoinstalled bun)" "$@"
 EOF
 
+## Docker: auto-install + route builds through the shared BuildKit daemon.
+## Must live in high (shadowing the real docker) — otherwise the build redirect
+## stops working the moment moby-engine lands in /usr/sbin.
+cat > /opt/locki/bin/high/docker << 'EOF'
+#!/bin/bash
+set -eo pipefail
+if ! locki-command-real docker >/dev/null 2>&1; then
+  /opt/locki/bin/high/locki-auto-install docker sh -c '
+    if command -v dnf >/dev/null 2>&1; then
+      dnf install -yq moby-engine docker-compose docker-buildx docker-buildkit
+    else
+      echo "Error: unsupported distro, install Docker manually (https://get.docker.com/)"
+      exit 1
+    fi
+    systemctl enable --now containerd docker
+  '
+fi
+_real=$(locki-command-real docker)
+
+[ -n "${LOCKI_INSTALLING:-}" ] || flock /var/cache/locki/.install.lock true 2>/dev/null || true
+
+sock=/var/cache/locki/buildkit.sock
+is_build=
+case "${1:-}" in
+  build) is_build=1 ;;
+  buildx) [ "${2:-}" = build ] && is_build=1 ;;
+  image) [ "${2:-}" = build ] && is_build=1 ;;
+esac
+
+timeout 60 sh -c 'until "$0" info >/dev/null 2>&1; do sleep 0.5; done' "$_real" || true
+
+if [ -n "$is_build" ] && [ -S "$sock" ]; then
+  for a in "$@"; do case "$a" in --builder|--builder=*) exec "$_real" "$@" ;; esac; done
+  [ -f "${HOME:-/root}/.docker/buildx/instances/locki" ] \
+    || "$_real" buildx create --name locki --driver remote "unix://$sock" >/dev/null 2>&1 || true
+  case "$1" in build) shift ;; *) shift 2 ;; esac
+  has_output=
+  for a in "$@"; do case "$a" in --load|--push|--output*|-o*) has_output=1 ;; esac; done
+  set -- buildx build --builder locki "$@"
+  [ -z "$has_output" ] && set -- "$@" --load
+fi
+exec "$_real" "$@"
+EOF
+
 chmod +x /opt/locki/bin/high/*
 
 # MARK: Low-priority shims
@@ -360,48 +404,6 @@ fi
 exec "$(locki-command-real mise)" "$@"
 EOF
 
-## Docker
-cat > /opt/locki/bin/low/docker << 'EOF'
-#!/bin/bash
-set -eo pipefail
-if ! locki-command-real docker >/dev/null 2>&1; then
-  /opt/locki/bin/high/locki-auto-install docker sh -c '
-    if command -v dnf >/dev/null 2>&1; then
-      dnf install -yq moby-engine docker-compose docker-buildx docker-buildkit
-    else
-      echo "Error: unsupported distro, install Docker manually (https://get.docker.com/)"
-      exit 1
-    fi
-    systemctl enable --now containerd docker
-  '
-fi
-_real=$(locki-command-real docker)
-
-[ -n "${LOCKI_INSTALLING:-}" ] || flock /var/cache/locki/.install.lock true 2>/dev/null || true
-
-sock=/var/cache/locki/buildkit.sock
-is_build=
-case "${1:-}" in
-  build) is_build=1 ;;
-  buildx) [ "${2:-}" = build ] && is_build=1 ;;
-  image) [ "${2:-}" = build ] && is_build=1 ;;
-esac
-
-timeout 60 sh -c 'until "$0" info >/dev/null 2>&1; do sleep 0.5; done' "$_real" || true
-
-if [ -n "$is_build" ] && [ -S "$sock" ]; then
-  for a in "$@"; do case "$a" in --builder|--builder=*) exec "$_real" "$@" ;; esac; done
-  [ -f "${HOME:-/root}/.docker/buildx/instances/locki" ] \
-    || "$_real" buildx create --name locki --driver remote "unix://$sock" >/dev/null 2>&1 || true
-  case "$1" in build) shift ;; *) shift 2 ;; esac
-  has_output=
-  for a in "$@"; do case "$a" in --load|--push|--output*|-o*) has_output=1 ;; esac; done
-  set -- buildx build --builder locki "$@"
-  [ -z "$has_output" ] && set -- "$@" --load
-fi
-exec "$_real" "$@"
-EOF
-
 chmod +x /opt/locki/bin/low/*
 
 # MARK: Caching
@@ -451,7 +453,7 @@ if { command -v curl >/dev/null 2>&1 && curl -fsS --retry 3 -o "$ca_tmp" "$ca_ur
     ca_installed=1
   fi
   if [ -n "$ca_installed" ]; then
-    echo '10.99.0.1 registry-1.docker.io mirror.gcr.io gcr.io ghcr.io quay.io registry.access.redhat.com registry.k8s.io public.ecr.aws cgr.dev nvcr.io registry.gitlab.com get.k3s.io objects.githubusercontent.com' >> /etc/hosts
+    echo '10.99.0.1 registry-1.docker.io mirror.gcr.io gcr.io ghcr.io quay.io registry.access.redhat.com registry.k8s.io public.ecr.aws cgr.dev nvcr.io registry.gitlab.com get.k3s.io objects.githubusercontent.com release-assets.githubusercontent.com' >> /etc/hosts
   fi
 fi
 rm -f "$ca_tmp"

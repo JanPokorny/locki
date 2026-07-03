@@ -411,6 +411,13 @@ assert_output "docker is real docker" "Docker version" locki x -m "$LOGIN" docke
 assert_ok "docker pull from docker.io" locki x -m "$LOGIN" docker pull -q alpine:3.20
 assert_ok "docker pull from ghcr.io" locki x -m "$LOGIN" docker pull -q ghcr.io/astral-sh/uv:latest
 assert_ok "docker run works" locki x -m "$LOGIN" docker run --rm alpine:3.20 true
+# docker is a real binary by now — the shim must still shadow it so plain
+# `docker build` routes through the shared BuildKit daemon
+locki x -m "$LOGIN" bash -c 'printf "FROM alpine:3.20\nRUN echo locki-e2e > /stamp\n" > Dockerfile.e2e'
+assert_output "docker build routes through shared BuildKit" 'building with "locki" instance' bash -c \
+    "locki x -m '$LOGIN' docker build -f Dockerfile.e2e -t e2e:local . 2>&1"
+assert_output "rebuild hits shared BuildKit layer cache" "CACHED" bash -c \
+    "locki x -m '$LOGIN' docker build -f Dockerfile.e2e -t e2e:local . 2>&1"
 assert_ok "docker API socket responds" locki x -m "$LOGIN" curl -sf --unix-socket /run/docker.sock http://d/_ping
 # Proxied blobs are committed to the cache asynchronously — allow a moment
 sleep 5
@@ -425,10 +432,14 @@ echo
 echo "Testing get.k3s.io cache..."
 
 assert_ok "get.k3s.io is intercepted" locki x -m "$LOGIN" grep -q get.k3s.io /etc/hosts
-assert_ok "release asset host is intercepted" locki x -m "$LOGIN" grep -q objects.githubusercontent.com /etc/hosts
+assert_ok "release asset host is intercepted" locki x -m "$LOGIN" grep -q release-assets.githubusercontent.com /etc/hosts
 assert_ok "first fetch of the k3s install script" locki x -m "$LOGIN" curl -sSf -o /dev/null https://get.k3s.io/
 assert_output "second fetch is a cache HIT" "HIT" bash -c \
     "locki x -m '$LOGIN' curl -sSfI https://get.k3s.io/ | grep -i x-locki-cache"
+GH_ASSET=https://github.com/jdx/mise/releases/download/v2026.4.10/SHASUMS256.txt
+assert_ok "first fetch of a GitHub release asset" locki x -m "$LOGIN" curl -sSfL -o /dev/null "$GH_ASSET"
+assert_output "second asset fetch is a cache HIT" "HIT" bash -c \
+    "locki x -m '$LOGIN' bash -c 'curl -sSfL -o /dev/null -D - $GH_ASSET' | grep -i x-locki-cache"
 
 # ── concurrent exec on a new sandbox ─────────────────────────────────────────
 
