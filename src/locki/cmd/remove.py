@@ -56,12 +56,12 @@ def _has_uncommitted_changes(sandbox: SandboxInfo, *, quiet: bool = False) -> bo
 
 def _matching_branches(repo: str, wt_id: str) -> list[str]:
     result = subprocess.run(
-        ["git", "-C", repo, "branch", "--list", f"*#locki-{wt_id}"],
+        ["git", "-C", repo, "for-each-ref", "--format=%(refname:short)", f"refs/heads/*#locki-{wt_id}"],
         capture_output=True,
         text=True,
         stdin=subprocess.DEVNULL,
     )
-    return [line.lstrip("* ").strip() for line in result.stdout.splitlines() if line.strip()]
+    return result.stdout.split()
 
 
 def _remove_sandbox(sandbox: SandboxInfo, *, branches: bool) -> None:
@@ -117,7 +117,7 @@ def _remove_sandbox(sandbox: SandboxInfo, *, branches: bool) -> None:
 @click.command()
 @sandbox_options()
 @click.option(
-    "--force", "-f", is_flag=True, default=False, help="Remove despite having uncommited changes. (May lose work!)"
+    "--force", "-f", is_flag=True, default=False, help="Remove despite having uncommitted changes. (May lose work!)"
 )
 @click.option(
     "--branches", "-b", is_flag=True, default=False, help="Also delete all git branches belonging to this sandbox."

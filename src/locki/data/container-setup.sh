@@ -96,6 +96,12 @@ fi
 exit 0
 EOF
 
+cat > /opt/locki/bin/high/locki-ensure-node << 'EOF'
+#!/bin/sh
+locki-command-real node >/dev/null 2>&1 && exit 0
+/opt/locki/bin/high/locki-auto-install nodejs sh -c 'export MISE_AUTO_INSTALL=false MISE_NO_HOOKS=true; mise use -g node && mise install node' >/dev/null 2>&1
+EOF
+
 ## Command bridge (git, gh, locki → SSH proxy to host)
 ## When cwd is outside the worktree tree, run the real binary directly in sandbox.
 tee /opt/locki/bin/high/git /opt/locki/bin/high/gh /opt/locki/bin/high/locki > /dev/null << 'EOF'
@@ -147,9 +153,7 @@ for bin in node npx; do
   cat > "/opt/locki/bin/high/$bin" << EOF
 #!/bin/bash
 set -eo pipefail
-if ! locki-command-real node >/dev/null 2>&1; then
-  /opt/locki/bin/high/locki-auto-install nodejs sh -c 'export MISE_AUTO_INSTALL=false MISE_NO_HOOKS=true; mise use -g node && mise install node' >/dev/null 2>&1
-fi
+locki-ensure-node
 exec "\$(locki-command-real-or-autoinstalled $bin)" "\$@"
 EOF
 done
@@ -158,9 +162,7 @@ done
 cat > /opt/locki/bin/high/npm << 'EOF'
 #!/bin/bash
 set -eo pipefail
-if ! locki-command-real node >/dev/null 2>&1; then
-  /opt/locki/bin/high/locki-auto-install nodejs sh -c 'export MISE_AUTO_INSTALL=false MISE_NO_HOOKS=true; mise use -g node && mise install node' >/dev/null 2>&1
-fi
+locki-ensure-node
 locki-node-modules-redirect
 exec "$(locki-command-real-or-autoinstalled npm)" "$@"
 EOF
@@ -223,7 +225,7 @@ if ! locki-command-real claude >/dev/null 2>&1; then
       dnf install -yq claude-code
     '
   else
-    locki-command-real node >/dev/null 2>&1 || /opt/locki/bin/high/locki-auto-install nodejs sh -c 'export MISE_AUTO_INSTALL=false MISE_NO_HOOKS=true; mise use -g node && mise install node' >/dev/null 2>&1
+    locki-ensure-node
     /opt/locki/bin/high/locki-auto-install @anthropic-ai/claude-code sh -c 'export MISE_AUTO_INSTALL=false MISE_NO_HOOKS=true; mise use -g npm:@anthropic-ai/claude-code && mise install npm:@anthropic-ai/claude-code'
   fi
 fi
@@ -244,7 +246,7 @@ for pair in \
 #!/bin/bash
 set -eo pipefail
 if ! locki-command-real $bin >/dev/null 2>&1; then
-  locki-command-real node >/dev/null 2>&1 || /opt/locki/bin/high/locki-auto-install nodejs sh -c 'export MISE_AUTO_INSTALL=false MISE_NO_HOOKS=true; mise use -g node && mise install node' >/dev/null 2>&1
+  locki-ensure-node
   /opt/locki/bin/high/locki-auto-install $pkg sh -c 'export MISE_AUTO_INSTALL=false MISE_NO_HOOKS=true; mise use -g npm:$pkg && mise install npm:$pkg'
 fi
 exec "\$(locki-command-real $bin)" "\$@"
@@ -297,10 +299,12 @@ exec "\$(locki-command-real $bin)" "\$@"
 EOF
 done
 
-## bwrap: no-op shim so Codex doesn't complain at startup
 cat > /opt/locki/bin/low/bwrap << 'EOF'
 #!/bin/sh
-exec "$(locki-command-real bwrap)" "$@"
+real=$(locki-command-real bwrap 2>/dev/null) && exec "$real" "$@"
+while [ "$#" -gt 0 ]; do [ "$1" = "--" ] && { shift; break; }; shift; done
+[ "$#" -gt 0 ] && exec "$@"
+exit 0
 EOF
 
 ## Mise

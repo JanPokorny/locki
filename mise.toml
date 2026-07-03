@@ -81,11 +81,26 @@ set -euxo pipefail
 LIMA_VERSION=$(mise current lima)
 mkdir -p ./vendor
 echo '*' >./vendor/.gitignore
-( test -f ./vendor/lima-$LIMA_VERSION/manylinux_2_34_x86_64/bin/limactl  || ( mkdir -p ./vendor/lima-$LIMA_VERSION/manylinux_2_34_x86_64  && curl -fsL https://github.com/lima-vm/lima/releases/download/v${LIMA_VERSION}/lima-${LIMA_VERSION}-Linux-x86_64.tar.gz  | tar -xzf - -C ./vendor/lima-$LIMA_VERSION/manylinux_2_34_x86_64  )) &
-( test -f ./vendor/lima-$LIMA_VERSION/manylinux_2_34_aarch64/bin/limactl || ( mkdir -p ./vendor/lima-$LIMA_VERSION/manylinux_2_34_aarch64 && curl -fsL https://github.com/lima-vm/lima/releases/download/v${LIMA_VERSION}/lima-${LIMA_VERSION}-Linux-aarch64.tar.gz | tar -xzf - -C ./vendor/lima-$LIMA_VERSION/manylinux_2_34_aarch64 )) &
-( test -f ./vendor/lima-$LIMA_VERSION/macosx_12_0_x86_64/bin/limactl     || ( mkdir -p ./vendor/lima-$LIMA_VERSION/macosx_12_0_x86_64     && curl -fsL https://github.com/lima-vm/lima/releases/download/v${LIMA_VERSION}/lima-${LIMA_VERSION}-Darwin-x86_64.tar.gz | tar -xzf - -C ./vendor/lima-$LIMA_VERSION/macosx_12_0_x86_64     )) &
-( test -f ./vendor/lima-$LIMA_VERSION/macosx_12_0_arm64/bin/limactl      || ( mkdir -p ./vendor/lima-$LIMA_VERSION/macosx_12_0_arm64      && curl -fsL https://github.com/lima-vm/lima/releases/download/v${LIMA_VERSION}/lima-${LIMA_VERSION}-Darwin-arm64.tar.gz  | tar -xzf - -C ./vendor/lima-$LIMA_VERSION/macosx_12_0_arm64      )) &
-wait
+base="https://github.com/lima-vm/lima/releases/download/v${LIMA_VERSION}"
+# Verify each tarball against the release's own SHA256SUMS (TLS-fetched, version-agnostic).
+sums=$(curl -fsL "$base/SHA256SUMS")
+sha256() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -d' ' -f1; }
+
+fetch() { # <wheel_tag> <lima_os_arch>
+  local dest="./vendor/lima-$LIMA_VERSION/$1" file="lima-${LIMA_VERSION}-$2.tar.gz"
+  test -f "$dest/bin/limactl" && return 0
+  local want; want=$(awk -v f="$file" '$2==f {print $1}' <<<"$sums")
+  [ -n "$want" ] || { echo "no checksum for $file" >&2; return 1; }
+  local tmp; tmp=$(mktemp)
+  curl -fsL -o "$tmp" "$base/$file"
+  [ "$(sha256 "$tmp")" = "$want" ] || { echo "checksum mismatch for $file" >&2; return 1; }
+  mkdir -p "$dest" && tar -xzf "$tmp" -C "$dest" && rm -f "$tmp"
+}
+fetch manylinux_2_34_x86_64  Linux-x86_64  &
+fetch manylinux_2_34_aarch64 Linux-aarch64 &
+fetch macosx_12_0_x86_64     Darwin-x86_64 &
+fetch macosx_12_0_arm64      Darwin-arm64  &
+for job in $(jobs -p); do wait "$job"; done
 '''
 
 [tasks."build:download-libatomic"]
@@ -96,6 +111,11 @@ set -euxo pipefail
 version="15.2.1"
 release="7.fc43"
 base="https://kojipkgs.fedoraproject.org/packages/gcc/${version}/${release}"
+declare -A libatomic_sha=(
+  [x86_64]=accf5ed257142e2a12cf91371c109e65b93a155f323fc6ef615936b079262bef
+  [aarch64]=75d817540b1b1ee3aaf6b4d4e64882ae29bf8d63b08a21d56b20ace56cf59acc
+)
+sha256() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -d' ' -f1; }
 
 extract_rpm() {
   local rpm="$1" dest="$2"
@@ -126,6 +146,7 @@ for arch in x86_64 aarch64; do
   test -f "$out" && continue
   rpm_name="libatomic-${version}-${release}.${arch}.rpm"
   curl -fsSL -o "$tmpdir/$rpm_name" "${base}/${arch}/${rpm_name}"
+  [ "$(sha256 "$tmpdir/$rpm_name")" = "${libatomic_sha[$arch]}" ] || { echo "libatomic checksum mismatch for $arch" >&2; exit 1; }
   extract_rpm "$tmpdir/$rpm_name" "$tmpdir/$arch"
   mkdir -p "./vendor/libatomic/${arch}"
   cp "$tmpdir/$arch/usr/lib64/libatomic.so.1.2.0" "$out"

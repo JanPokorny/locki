@@ -60,17 +60,6 @@ def incus_exec(args: list[str]) -> subprocess.CompletedProcess[str]:
     )
 
 
-def list_incus_containers() -> list[dict]:
-    """Parsed `incus list --format=json`: one dict per container (name, status, devices, ...)."""
-    result = incus_exec(["list", "--format=json"])
-    if result.returncode != 0:
-        return []
-    try:
-        return json.loads(result.stdout)
-    except json.JSONDecodeError:
-        return []
-
-
 # ── Command bridge grammar engine ───────────────────────────────────────────────
 
 
@@ -529,7 +518,11 @@ def internal_cleanup() -> None:
     except (FileNotFoundError, json.JSONDecodeError):
         last_active = {}
 
-    containers = list_incus_containers()
+    result = incus_exec(["list", "--format=json"])
+    try:
+        containers = json.loads(result.stdout) if result.returncode == 0 else []
+    except json.JSONDecodeError:
+        containers = []
 
     worktrees_root = WORKTREES.resolve()
     deleted: set[str] = set()
@@ -634,7 +627,7 @@ def internal_daemon() -> None:
                     process.exit(1)
 
         server = await asyncssh.listen(
-            host="0.0.0.0",
+            host="127.0.0.1",
             port=0,
             server_host_keys=[str(HOST_KEY)],
             authorized_client_keys=str(AUTHORIZED_KEYS_FILE),
@@ -647,7 +640,7 @@ def internal_daemon() -> None:
         port = next(iter(server.sockets)).getsockname()[1]
         PORT_FILE.write_text(str(port))
         PID_FILE.write_text(str(os.getpid()))
-        logger.info("Locki daemon listening on 0.0.0.0:%d", port)
+        logger.info("Locki daemon listening on 127.0.0.1:%d", port)
 
         stop = asyncio.Event()
         loop = asyncio.get_running_loop()
@@ -658,8 +651,7 @@ def internal_daemon() -> None:
         async def cleanup_loop() -> None:
             while not stop.is_set():
                 proc = await asyncio.create_subprocess_exec(sys.executable, "-m", "locki", "internal", "cleanup")
-                if await proc.wait() != 0:
-                    break
+                await proc.wait()
                 with contextlib.suppress(TimeoutError):
                     await asyncio.wait_for(stop.wait(), timeout=CLEANUP_INTERVAL)
 
@@ -686,7 +678,7 @@ def internal_command_bridge() -> None:
         sys.exit("No command specified.")
     try:
         cwd_str, exe, *argv = shlex.split(cmd)
-    except (ValueError, AssertionError):
+    except ValueError:
         sys.exit("Usage: <cwd> <exe> [args...]")
 
     cwd = pathlib.Path(cwd_str).resolve()
@@ -699,12 +691,13 @@ def internal_command_bridge() -> None:
     wt_dir = rel_parts[0]
     wt_id = wt_dir[-8:]
 
-    # Walk up from cwd to find the .git file, then rewrite it from the trusted
-    # metadata copy so a compromised container cannot redirect the gitdir.
     sandbox_root = WORKTREES / wt_dir
     p: pathlib.Path = cwd
     while True:
-        if (p / ".git").is_file():
+        git_file = p / ".git"
+        if git_file.is_symlink():
+            sys.exit(f"Refusing to follow symlinked .git at {str(git_file)!r}")
+        if git_file.is_file():
             break
         if p == sandbox_root:
             sys.exit(f"No worktree .git found at or above {str(cwd)!r}")
@@ -718,7 +711,6 @@ def internal_command_bridge() -> None:
             sys.exit(f"Unexpected worktree layout: {p}")
     if not meta_git.exists():
         sys.exit(f"Missing worktree metadata: {meta_git}")
-    (p / ".git").write_text(meta_git.read_text())
 
     os.chdir(str(cwd))
 
@@ -730,6 +722,14 @@ def internal_command_bridge() -> None:
                     f"{datetime.datetime.now().isoformat(timespec='seconds')}\t{wt_id}\t{shlex.join([exe, *argv])}\n"
                 )
         sys.exit(error)
+
+    trusted = meta_git.read_text()
+    if git_file.read_text() != trusted:
+        fd = os.open(git_file, os.O_WRONLY | os.O_TRUNC | os.O_NOFOLLOW)
+        try:
+            os.write(fd, trusted.encode())
+        finally:
+            os.close(fd)
 
     if exe == "locki":
         os.execvp(sys.executable, [sys.executable, "-m", "locki", *argv])

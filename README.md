@@ -30,12 +30,14 @@
 ![](https://badgen.net/badge/_/macOS%20%E2%9C%94/green?icon=apple&label)
 ![](https://badgen.net/badge/_/Linux%20%E2%9C%94/green?icon=linux&label)
 ![](https://badgen.net/badge/_/uv%20tool%20install%20locki/DE5FE9?icon=uv&label)
+[![](https://img.shields.io/pypi/v/locki?color=DE5FE9&label=PyPI)](https://pypi.org/project/locki/)
+![](https://img.shields.io/pypi/l/locki?color=green&label=License)
   
 </div>
 
 &nbsp;
 
-**Locki** is an AI sandbox for real-world projects. Not another vibe-coded `docker` wrapper, but an actual engineered solution built for the development needs of [Agent Stack](https://github.com/i-am-bee/agentstack). Other sandoxes break down on anything more complex than "a single Next.js app". Locki can handle as many containers, systemd services and even Kuberentes clusters as you like (and your RAM allows).
+**Locki** is an AI sandbox for real-world projects. Not another vibe-coded `docker` wrapper, but an actual engineered solution built for the development needs of [Agent Stack](https://github.com/i-am-bee/agentstack). Other sandboxes break down on anything more complex than "a single Next.js app". Locki can handle as many containers, systemd services and even Kubernetes clusters as you like (and your RAM allows).
 
 &nbsp;
 
@@ -69,7 +71,7 @@ locki x codex "improve perf"
 # Started k3s cluster...
 # Measured performance...
 # Improved critical paths...
-# Re-build and re-deployed...
+# Re-built and re-deployed...
 # Measured again...
 ```
 
@@ -82,7 +84,7 @@ locki x pi "add CZ translation"
 # Started k3s cluster...
 # Explored UI in context...
 # Translated strings...
-# Re-build and re-deployed...
+# Re-built and re-deployed...
 # Verified accuracy...
 ```
 
@@ -140,36 +142,53 @@ Each sandbox gets its own [worktree](https://git-scm.com/docs/git-worktree) (a f
 
 &nbsp;
 
+## Commands
+
+Every command supports `-h`/`--help`; most data commands take `--json` for scripting. Sandbox-selecting commands share `-m/--match` (id prefix or branch substring), `-i/--interactive` (force the picker), and `-n/--new` (create fresh).
+
+| Command | What it does |
+| --- | --- |
+| `locki ai` | Start your AI harness in a sandbox — resume, pick, or create. |
+| `locki exec` \| `x` `-- <cmd>` | Run any command in a sandbox (default: `bash`). |
+| `locki ide` | Open your editor on the sandbox worktree (runs on host). |
+| `locki new` \| `n` | Create a sandbox worktree without entering it. |
+| `locki list` \| `ls` `[--all]` | List sandboxes for the current repo (or `--all` repos). |
+| `locki include` `(--repo <path> \| --this)` | Graft another repo's worktree into a sandbox. |
+| `locki port-forward` \| `pf` `[--list] [--clear] [port[:port]] ...` | Forward host ports to a sandbox. |
+| `locki remove` \| `rm` \| `delete` `[-f] [-b] [--merged]` | Remove a sandbox (`-b` also deletes its branches; `--merged` sweeps merged-and-clean ones). |
+| `locki setup` `[--defaults] [--copy]` | Setup wizard: pick harness/editor, copy AI config into the sandbox home. |
+| `locki vm` `status`\|`st` / `stop` / `prune` / `delete` | Manage the shared Lima VM and its caches. |
+
+&nbsp;
+
 ## Comparison
 
 Most sandboxing solutions use one of these techniques:
 
-- Full VM per sandbox: resource-heavy, slow to start
-- MicroVM per sandbox: none or limited support for building, running and orchestrating containers
-- OCI container per sandbox: none or limited support for building, running and orchestrating containers; potentially unsafe if runing VM-less on Linux
-- OS-level jail (Landlock, Bubblewrap, etc.): just restriction, not isolation (ports collide, image tags get overwritten, etc.)
+- **Full VM per sandbox** (Vagrant, Multipass): resource-heavy, slow to start
+- **MicroVM per sandbox** (Firecracker, Apple `container`): none or limited support for building, running and orchestrating containers
+- **OCI container per sandbox** (Devcontainers, Distrobox, `container-use`): none or limited support for building, running and orchestrating containers; potentially unsafe if running VM-less on Linux
+- **OS-level jail** (Landlock, Bubblewrap, `sandbox-exec`): just restriction, not isolation (ports collide, image tags get overwritten, etc.)
 
-To my knowledge Locki is the only one packing a fully vertically integrated Incus-based solution. Seriously, stop reading this README and run `uvx locki ai`, that's all there is.
+Locki instead runs **one Lima VM hosting many lightweight Incus containers** — one shared kernel boundary you can trust, cheap per-sandbox containers, and full support for building and orchestrating containers (even Kubernetes) inside. Seriously, stop reading this README and run `uvx locki ai`, that's all there is.
 
 &nbsp;
 
 ## Pro-tips for power users
 
-- Launch an IDE in the worktree folder using `locki ide`. Supported: VSCode, Zed, Fresh -- PR if you want to add your favorite.\
+- Launch an IDE in the worktree folder using `locki ide`. 30+ editors are recognized out of the box (VSCode, Cursor, Zed, the JetBrains suite, Neovim, Sublime Text, ...), and you can set any custom command via `locki setup` or `ide_command`.\
   *(The IDE runs on host: you still need to run `locki ai` / `locki x -- <cmd>` in the built-in terminal to run commands in the sandbox. This is intentional: running your IDE inside the sandbox (using "remote SSH" or similar features) is unsafe, since the agent could potentially access authentication tokens stored in the IDE's memory.)*
 
-- When `cd`'d into a worktree folder (`~/.local/share/locki/worktrees/.../`), `locki` commands use it by default -- otherwise they show an interactive picker. Use `--match ...` to select by sandbox id or branch name.
+- When `cd`'d into a worktree folder (`~/.local/share/locki/worktrees/.../`), `locki` commands use it by default -- otherwise they show an interactive picker. Use `--match`/`-m` to select by sandbox id or branch substring. `locki list` (alias `ls`) shows every sandbox and its worktree path.
 
 - Editors like VSCode show worktrees in the sidebar, useful as a quick UI for reviewing and modifying changes.\
   *(⚠️ VSCode 1.115.0+ requires setting `"git.detectWorktrees": true` for this to work.)*
 
-- `locki list` shows worktree paths. `cd` to a worktree folder (`~/.local/share/locki/worktrees/...`) to operate on it directly. `locki` commands default to operating on the corresponding sandbox when in worktree folder.
-
-- Working on two repos at once? `cd` into your sandbox's primary repo and run `locki include --repo ../other-repo` to graft the other repo into the current sandbox at `.locki/include/<repo-name>/`. Or from the other repo: `locki include --this -m <sandbox-id>`.
+- Working on two repos at once? `cd` into your sandbox's primary repo and run `locki include --repo ../other-repo` to graft the other repo into the current sandbox at `.locki/include/<repo-name>-locki-<sandbox-id>/`. Or from the other repo: `locki include --this -m <sandbox-id>`.
 
 - While `locki ai` opens a coding agent, `locki exec` (or short `locki x`) is the low-level version which can run any command. Pass a command to run in a sandbox, use `--match`/`-m` to select by branch substring or sandbox id: `locki exec -m big-refactor -- pytest`.
 
-- The first `locki ai` run prompts you to pick a default harness; change it later in `~/.config/locki/config.toml` under `[ai] harness = "..."`.
+- The first `locki ai` run prompts you to pick a default harness and editor. Re-run `locki setup` to change them, or edit `~/.config/locki/config.toml` directly — the keys are full command lines, e.g. `ai_command = "gemini --yolo -r"` and `ide_command = "code ."`. A repo can override `ai_command` via a `locki.toml` in its root; `ide_command` is user-only (it launches on your host).
 
 - Ask your agent to forward ports, or use `locki port-forward` for more control.
 
@@ -205,19 +224,38 @@ Locki may not provide perfect security, however we believe it works better than 
 
 &nbsp;
 
-## Tech
+## How it works
 
-- Python CLI
-- Single [Lima](https://lima-vm.io/) VM
-- Multiple [Incus](https://linuxcontainers.org/incus/introduction/) containers
-- [Mise](https://mise.jdx.dev) for ergonomic package installation
-- Host proxy for bridged commands (`git`, `gh`, port forwarding)
+- **Python CLI** driving a single [Lima](https://lima-vm.io/) VM (both `limactl` and Lima's guest agents are bundled in the platform wheels — no separate install) that hosts many lightweight [Incus](https://linuxcontainers.org/incus/introduction/) containers, one per sandbox. The VM is sized to your full host RAM and CPU count with a 200 GiB sparse disk.
+- **A host daemon** provides the `git`/`gh`/port-forward command bridge (over an SSH forced command bound to loopback) and idles containers and the VM back down when unused.
+- **Shared caches across all sandboxes** keep repeat work fast: a pull-through container-registry cache (nginx), a shared BuildKit daemon (Docker layers cached across sandboxes), package caches for [Mise](https://mise.jdx.dev), cargo, npm/pnpm, pip/uv, go, and more, plus GitHub-release and k3s-installer caching.
+- **btrfs with [bees](https://github.com/Zygo/bees) deduplication** for the container pool, so many similar sandboxes cost little disk. `node_modules` and `.venv` are redirected to the shared cache via a per-sandbox symlink (so opening a worktree on the host shows a symlink, not a real directory).
+- **[Mise](https://mise.jdx.dev)** provides on-demand, version-managed tools inside each sandbox.
+
+&nbsp;
+
+## Uninstall
+
+```sh
+locki vm delete            # stop and remove the Lima VM
+uv tool uninstall locki    # remove the CLI
+rm -rf ~/.local/share/locki ~/.config/locki   # worktrees, shared home, config (honors $XDG_*)
+```
+
+&nbsp;
+
+## Troubleshooting
+
+- **Something is wedged?** `locki vm delete` recreates the VM from scratch on the next run; worktrees and settings are preserved.
+- **`Command bridge proxy is disabled`** — the host daemon didn't come up in time; re-run the command, and check `~/.local/state/locki/logs/daemon.log`.
+- **On Linux, "requires QEMU"** — install [QEMU](https://www.qemu.org/download/#linux) (`qemu-system-<arch>` + `qemu-img`).
+- **VSCode worktree sidebar empty** — set `"git.detectWorktrees": true` (needed on VSCode 1.115.0+).
 
 &nbsp;
 
 ## License
 
-Copyright 2026 Jan Pokorný and [contributors](../../graphs/contributors)
+Copyright 2026 Jan Pokorný and [contributors](https://github.com/JanPokorny/locki/graphs/contributors)
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.

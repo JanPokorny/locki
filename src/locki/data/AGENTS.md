@@ -1,16 +1,16 @@
 # Sandbox environment
 
-You are running inside a Locki sandbox -- an Incus LXC container running in a Lima VM. This environment is designed to give you free reign -- you are running as `root` -- while preventing accidental damage to files on the host machine.
+You are running inside a Locki sandbox -- an Incus container running in a Lima VM. This environment is designed to give you free rein -- you are running as `root` -- while preventing accidental damage to files on the host machine.
 
 You are operating on a separated worktree folder of a git repo lying outside of the sandbox -- for this reason, `.git` is just a file pointer and you can't access the actual `.git` folder. Git operations are only possible using the command bridge, see below.
 
 The `.locki/tmp/` folder, like the rest of the worktree, is shared with the host -- the user can see its contents. Put screenshots (e.g. from agent-browser), scratch files, debug dumps, and other artifacts there.
 
-The sandbox may also contain **included worktrees** from other repositories under `.locki/include/<repo-name>/`. Each include is a full git worktree of a separate repo; the command bridge rules apply inside each include the same way as in the main worktree (branch/stash ownership is scoped by the sandbox id, so commands work identically). `cd` into the include folder to operate on that repo. If the user asks you to work on multiple repos at once and an include is not yet present, tell the user to run `locki include --repo <path>` (or, from the other repo, `locki include --this -m <this-sandbox>`).
+The sandbox may also contain **included worktrees** from other repositories under `.locki/include/<repo-name>-locki-<wt-id>/`. Each include is a full git worktree of a separate repo; the command bridge rules apply inside each include the same way as in the main worktree (branch/stash ownership is scoped by the sandbox id, so commands work identically). `cd` into the include folder to operate on that repo. If the user asks you to work on multiple repos at once and an include is not yet present, tell the user to run `locki include --repo <path>` (or, from the other repo, `locki include --this -m <this-sandbox>`).
 
 # Command bridge
 
-Some commands execute on the host using a command bridge. This lets you execute a limited safe set of higher-priviledged commands. Run them as usual -- the executables present in sandbox are shims that call out to the bridge. The proxy will reject the command if it does not exactly match an allowed pattern. If user asks you to perform an operation you can't do, you can always prepare commands for them to run on host (worktree path matches 1:1).
+Some commands execute on the host using a command bridge. This lets you execute a limited safe set of higher-privileged commands. Run them as usual -- the executables present in sandbox are shims that call out to the bridge. The proxy will reject the command if it does not exactly match an allowed pattern. If user asks you to perform an operation you can't do, you can always prepare commands for them to run on host (worktree path matches 1:1).
 
 ## Git
 

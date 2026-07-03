@@ -133,10 +133,7 @@ def setup_cmd(defaults: bool, copy_only: bool):
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 if dst.exists() or dst.is_symlink():
                     dst.rename(dst.with_name(dst.name + backup_suffix))
-                if src.is_symlink():
-                    os.symlink(os.readlink(src), dst)
-                else:
-                    shutil.copy2(src, dst)
+                shutil.copy2(src, dst, follow_symlinks=False)
 
         for rel in COPY_DIRS:
             src_root = HOME / rel

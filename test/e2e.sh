@@ -65,7 +65,7 @@ export XDG_RUNTIME_DIR="$TMPDIR_ROOT/xdg/run"
 export LIMA_HOME="$XDG_STATE_HOME/locki/lima"
 kill_locki_pids() {
     local pf
-    for pf in "$XDG_RUNTIME_DIR/locki/sshd.pid" "$XDG_RUNTIME_DIR/locki/daemon.pid"; do
+    for pf in "$XDG_RUNTIME_DIR/locki/daemon.pid"; do
         [ -f "$pf" ] && kill "$(cat "$pf")" 2>/dev/null || true
     done
 }
@@ -497,7 +497,7 @@ git -C "$REPO2" add hello.txt
 git -C "$REPO2" commit -m "initial repo2" >/dev/null
 git -C "$REPO2" push >/dev/null 2>&1
 
-INCLUDE_NAME="$(basename "$REPO2")"
+INCLUDE_NAME="$(basename "$REPO2")-locki-$AUTH"
 INCLUDE_PATH="$WORKTREE_A/.locki/include/$INCLUDE_NAME"
 
 INCLUDE_OUT=$(locki include -m "$AUTH" --repo "$REPO2" --json 2>/dev/null || true)

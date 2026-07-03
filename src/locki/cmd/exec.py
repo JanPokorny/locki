@@ -116,7 +116,7 @@ def import_local_incus_image(local_path: pathlib.Path) -> str:
         check=False,
         quiet=True,
     )
-    cached_aliases = result.stdout.decode().split() if result else []
+    cached_aliases = result.stdout.decode().split()
     if alias in cached_aliases:
         return alias
     for stale in cached_aliases:

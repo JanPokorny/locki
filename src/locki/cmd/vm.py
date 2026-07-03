@@ -34,16 +34,13 @@ def vm_status_cmd(as_json):
 
     sandboxes: list[dict] = []
     if status == "running":
-        try:
-            result = run_in_vm(
-                ["incus", "list", "--format=csv", "--columns=n,s"],
-                "Listing containers",
-                check=False,
-                quiet=True,
-            )
-        except Exception:
-            result = None
-        for line in result.stdout.decode().splitlines() if result else []:
+        result = run_in_vm(
+            ["incus", "list", "--format=csv", "--columns=n,s"],
+            "Listing containers",
+            check=False,
+            quiet=True,
+        )
+        for line in result.stdout.decode().splitlines():
             wt_id, sep, container_status = line.partition(",")
             if not sep:
                 continue

@@ -4,30 +4,28 @@ ORIGINAL_HOOK="$(git rev-parse --git-common-dir)/hooks/$(basename "$0")"
 if [[ ! -x "$ORIGINAL_HOOK" ]]; then exit 0; fi
 HOOK_TMP="/tmp/locki-hook-$$"
 
-# Copy the hook script into the container
-locki x tee "$HOOK_TMP" < "$ORIGINAL_HOOK" >/dev/null
-locki x chmod +x "$HOOK_TMP"
-
-# Copy file arguments (e.g. COMMIT_EDITMSG) into the container
 file_args=()
 for arg in "$@"; do
-    if [[ -f "$arg" ]]; then
-        file_args+=("$arg")
-        locki x mkdir -p "$(dirname "$arg")"
-        locki x tee "$arg" < "$arg" >/dev/null
-    fi
+    [[ -f "$arg" ]] && file_args+=("$arg")
 done
 
-# Run the hook
+if [[ ${#file_args[@]} -gt 0 ]]; then
+    tar -cpf - -P "${file_args[@]}" | locki x sh -c 'tar -xpf - -P'
+fi
+
 set +e
-locki x "$HOOK_TMP" "$@"
+locki x sh -c '
+  printf %s "$1" | base64 -d > "$2"; chmod +x "$2"
+  hook="$2"; shift 2
+  "$hook" "$@"; rc=$?
+  rm -f "$hook"
+  exit $rc
+' _ "$(base64 < "$ORIGINAL_HOOK")" "$HOOK_TMP" "$@"
 rc=$?
 set -e
-locki x rm -f "$HOOK_TMP"
 
-# Copy modified file arguments back from the container
-for arg in ${file_args+"${file_args[@]}"}; do
-    locki x cat "$arg" > "$arg"
-done
+if [[ ${#file_args[@]} -gt 0 ]]; then
+    locki x sh -c 'tar -cpf - -P "$@"' _ "${file_args[@]}" | tar -xpf - -P
+fi
 
 exit "$rc"

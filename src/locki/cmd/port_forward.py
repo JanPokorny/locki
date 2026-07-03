@@ -1,4 +1,5 @@
 import json
+import shlex
 import socket
 
 import click
@@ -36,7 +37,21 @@ def _port(address: str) -> int | str:
 @json_option
 @click.pass_context
 def port_forward_cmd(ctx, match, interactive, clear, list_forwards, as_json):
-    """Forward ports from the host to a sandbox."""
+    """Forward ports from the host to a sandbox.
+
+    \b
+    Port specs (repeatable):
+      8080            # host 8080 -> sandbox 8080
+      9090:8080       # host 9090 -> sandbox 8080
+      :8080           # random free host port -> sandbox 8080
+
+    \b
+    Examples:
+      locki pf -m feat 8080          # forward a port
+      locki pf -m feat :3000         # random host port (shown in output)
+      locki pf -m feat --list        # list active forwards
+      locki pf -m feat --clear       # remove all forwards
+    """
     sandbox = resolve_sandbox(match=match, interactive=interactive, create="deny")
 
     # Fetch the container's status and devices in a single `incus list` roundtrip.
@@ -59,12 +74,13 @@ def port_forward_cmd(ctx, match, interactive, clear, list_forwards, as_json):
     devices = {name: dev for name, dev in (container.get("devices") or {}).items() if name.startswith("port-fwd-")}
 
     if clear:
-        for name in devices:
+        if devices:
+            wt = shlex.quote(sandbox.wt_id)
             run_in_vm(
-                ["incus", "config", "device", "remove", sandbox.wt_id, name],
-                f"Removing {name}",
+                ["sh", "-c", "; ".join(f"incus config device remove {wt} {shlex.quote(n)}" for n in devices)],
+                f"Removing {len(devices)} port forward(s)",
             )
-        devices = {}
+            devices = {}
         if not ctx.args and not list_forwards:
             if as_json:
                 click.echo(json.dumps([]))

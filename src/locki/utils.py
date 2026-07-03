@@ -1,7 +1,6 @@
 import dataclasses
 import fcntl
 import functools
-import json
 import logging
 import os
 import pathlib
@@ -12,7 +11,7 @@ import subprocess
 import sys
 import threading
 import time
-from contextlib import contextmanager, nullcontext, suppress
+from contextlib import contextmanager, nullcontext
 
 import click
 
@@ -29,7 +28,7 @@ def deep_merge(base: dict, override: dict) -> dict:
         if k in result and isinstance(result[k], dict) and isinstance(v, dict):
             result[k] = deep_merge(result[k], v)
         elif k in result and isinstance(result[k], list) and isinstance(v, list):
-            result[k] = list({*result[k], *v})
+            result[k] = result[k] + [x for x in v if x not in result[k]]
         else:
             result[k] = v
     return result
@@ -177,19 +176,12 @@ def limactl() -> str:
 def vm_status() -> str | None:
     """Return the Locki VM status ('Running', 'Stopped', etc.), or None."""
     result = subprocess.run(
-        [limactl(), "list", "--json"],
+        [limactl(), "list", "locki", "--format", "{{.Status}}"],
         capture_output=True,
         text=True,
         env={**os.environ, **LIMA_ENV},
     )
-    for line in result.stdout.splitlines():
-        try:
-            vm = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if vm.get("name") == "locki":
-            return vm.get("status")
-    return None
+    return result.stdout.strip() or None
 
 
 def run_in_vm(
@@ -277,31 +269,6 @@ GIT_HOOKS = [
 ]
 
 
-def setup_worktree_hooks(repo: pathlib.Path, meta_dir: pathlib.Path, wt_path: pathlib.Path) -> None:
-    run_command(
-        ["git", "-C", str(repo), "config", "extensions.worktreeConfig", "true"],
-        "Enabling per-worktree git config",
-        print_success=False,
-    )
-    hooks_dir = meta_dir / "hooks"
-    hooks_dir.mkdir(parents=True, exist_ok=True)
-    hook_script = (PACKAGE_DATA / "locki-hook.sh").read_bytes()
-    for name in GIT_HOOKS:
-        hook_path = hooks_dir / name
-        hook_path.write_bytes(hook_script)
-        hook_path.chmod(0o755)
-    run_command(
-        ["git", "-C", str(wt_path), "config", "--worktree", "core.hooksPath", str(hooks_dir)],
-        "Configuring per-worktree hooks",
-        print_success=False,
-    )
-    run_command(
-        ["git", "-C", str(wt_path), "config", "--worktree", "push.autoSetupRemote", "true"],
-        "Configuring auto push for new branches",
-        print_success=False,
-    )
-
-
 def add_worktree(repo: pathlib.Path, wt_id: str, parent_name: str | None = None) -> pathlib.Path:
     """Create the sandbox worktree of *repo* for *wt_id*: the `untitled#locki-<wt-id>`
     branch (reused if it already exists), the worktree itself, trusted metadata, and
@@ -337,14 +304,29 @@ def add_worktree(repo: pathlib.Path, wt_id: str, parent_name: str | None = None)
     meta_path.mkdir(parents=True, exist_ok=True)
     (meta_path / ".git").write_text((wt_path / ".git").read_text())
     (meta_path / "repo").write_text(str(repo))
-    setup_worktree_hooks(repo, meta_path, wt_path)
-    with suppress(FileNotFoundError):
-        subprocess.run(["mise", "trust"], cwd=str(wt_path), capture_output=True)
+
+    run_command(
+        ["git", "-C", str(repo), "config", "extensions.worktreeConfig", "true"],
+        "Enabling per-worktree git config",
+        print_success=False,
+    )
+    hooks_dir = meta_path / "hooks"
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    hook_script = (PACKAGE_DATA / "locki-hook.sh").read_bytes()
+    for name in GIT_HOOKS:
+        (hooks_dir / name).write_bytes(hook_script)
+        (hooks_dir / name).chmod(0o755)
+    run_command(
+        ["git", "-C", str(wt_path), "config", "--worktree", "core.hooksPath", str(hooks_dir)],
+        "Configuring per-worktree hooks",
+        print_success=False,
+    )
+    run_command(
+        ["git", "-C", str(wt_path), "config", "--worktree", "push.autoSetupRemote", "true"],
+        "Configuring auto push for new branches",
+        print_success=False,
+    )
     return wt_path
-
-
-def gen_id() -> str:
-    return "".join(secrets.choice("abcdefghijklmnopqrstuvwxyz0123456789") for _ in range(8))
 
 
 # ── Sandbox discovery (repo-agnostic) ────────────────────────────────────────
@@ -484,7 +466,7 @@ def cwd_git_repo() -> pathlib.Path | None:
 
 
 def new_sandbox(repo: pathlib.Path) -> SandboxInfo:
-    wt_id = gen_id()
+    wt_id = "".join(secrets.choice("abcdefghijklmnopqrstuvwxyz0123456789") for _ in range(8))
     return SandboxInfo(wt_id=wt_id, branch=f"untitled#locki-{wt_id}", repo=repo)
 
 

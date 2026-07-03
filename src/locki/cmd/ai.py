@@ -41,4 +41,4 @@ def ai_cmd(ctx, match, interactive, create):
 
     ctx.args = shlex.split(ai_command)
     ctx.obj = sandbox
-    ctx.invoke(exec_cmd.callback, match=sandbox.wt_id, interactive=False, create=False)
+    ctx.invoke(exec_cmd.callback, match=None, interactive=False, create=False)
