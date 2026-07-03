@@ -106,7 +106,7 @@ http {
 	proxy_ssl_server_name on;
 	proxy_ssl_verify on;
 	proxy_ssl_verify_depth 3;
-	proxy_ssl_trusted_certificate /etc/pki/tls/certs/ca-bundle.crt;
+	proxy_ssl_trusted_certificate /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem;
 	proxy_read_timeout 300s;
 	proxy_max_temp_file_size 8192m;
 
