@@ -111,10 +111,11 @@ set -euxo pipefail
 version="15.2.1"
 release="7.fc43"
 base="https://kojipkgs.fedoraproject.org/packages/gcc/${version}/${release}"
-declare -A libatomic_sha=(
-  [x86_64]=accf5ed257142e2a12cf91371c109e65b93a155f323fc6ef615936b079262bef
-  [aarch64]=75d817540b1b1ee3aaf6b4d4e64882ae29bf8d63b08a21d56b20ace56cf59acc
-)
+# case rather than an associative array — macOS's system bash is 3.2 (no `declare -A`).
+libatomic_sha() { case "$1" in
+  x86_64)  echo accf5ed257142e2a12cf91371c109e65b93a155f323fc6ef615936b079262bef ;;
+  aarch64) echo 75d817540b1b1ee3aaf6b4d4e64882ae29bf8d63b08a21d56b20ace56cf59acc ;;
+esac; }
 sha256() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -d' ' -f1; }
 
 extract_rpm() {
@@ -146,7 +147,7 @@ for arch in x86_64 aarch64; do
   test -f "$out" && continue
   rpm_name="libatomic-${version}-${release}.${arch}.rpm"
   curl -fsSL -o "$tmpdir/$rpm_name" "${base}/${arch}/${rpm_name}"
-  [ "$(sha256 "$tmpdir/$rpm_name")" = "${libatomic_sha[$arch]}" ] || { echo "libatomic checksum mismatch for $arch" >&2; exit 1; }
+  [ "$(sha256 "$tmpdir/$rpm_name")" = "$(libatomic_sha "$arch")" ] || { echo "libatomic checksum mismatch for $arch" >&2; exit 1; }
   extract_rpm "$tmpdir/$rpm_name" "$tmpdir/$arch"
   mkdir -p "./vendor/libatomic/${arch}"
   cp "$tmpdir/$arch/usr/lib64/libatomic.so.1.2.0" "$out"
