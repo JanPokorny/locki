@@ -285,6 +285,16 @@ assert_ok "uv init + sync works" locki x -m "$RELEASE" bash -c 'uv init -q --nam
 assert_output "uv .venv is a symlink into the sandbox-scoped cache" "/var/cache/locki/scoped/$RELEASE/uv-venvs" \
     locki x -m "$RELEASE" readlink .venv
 
+# ── cache symlinks git-ignored per-worktree ──────────────────────────────────
+# "node_modules/" style .gitignore rules don't match symlinks; the per-worktree
+# core.excludesFile set at worktree creation must hide them from git status.
+
+echo
+echo "Testing cache symlinks are git-ignored..."
+
+assert_fail "symlinked .venv/node_modules hidden from git status" locki x -m "$RELEASE" bash -c \
+    'ln -sfn /tmp node_modules && git status --porcelain | grep -e node_modules -e "\.venv"'
+
 # ── container isolation ──────────────────────────────────────────────────────
 
 echo

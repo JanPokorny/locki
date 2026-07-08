@@ -327,6 +327,26 @@ def add_worktree(repo: pathlib.Path, wt_id: str, parent_name: str | None = None)
         print_success=False,
     )
 
+    # Repos often ignore only "node_modules/", which doesn't match the cache
+    # symlinks the sandbox creates. info/exclude is shared across worktrees, so
+    # use per-worktree core.excludesFile — it overrides the user's global ignore
+    # file, hence its content is carried over (snapshot; fine for throwaway worktrees).
+    global_ignore = pathlib.Path(
+        run_command(
+            ["git", "config", "--path", "core.excludesFile"], "Reading global git excludes", check=False, quiet=True
+        )
+        .stdout.decode()
+        .strip()
+        or pathlib.Path(os.environ.get("XDG_CONFIG_HOME") or (HOME / ".config")) / "git" / "ignore"
+    )
+    exclude = meta_path / "exclude"
+    exclude.write_text((global_ignore.read_text() if global_ignore.is_file() else "") + "\nnode_modules\n.venv\n")
+    run_command(
+        ["git", "-C", str(wt_path), "config", "--worktree", "core.excludesFile", str(exclude)],
+        "Excluding sandbox cache symlinks from git",
+        print_success=False,
+    )
+
     # mise trust is per-path, so a trusted root checkout doesn't cover its worktrees
     if mise := shutil.which("mise"):
         show = run_command([mise, "trust", "--show"], "Checking mise trust", cwd=str(repo), check=False, quiet=True)
