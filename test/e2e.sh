@@ -418,6 +418,12 @@ assert_output "docker build routes through shared BuildKit" 'building with "lock
     "locki x -m '$LOGIN' docker build -f Dockerfile.e2e -t e2e:local . 2>&1"
 assert_output "rebuild hits shared BuildKit layer cache" "CACHED" bash -c \
     "locki x -m '$LOGIN' docker build -f Dockerfile.e2e -t e2e:local . 2>&1"
+# FROM a locally-built image: the shared buildkitd can't see the sandbox's
+# dockerd, so the shim must ship e2e:local as an oci-layout build context
+locki x -m "$LOGIN" bash -c 'printf "FROM e2e:local\nCOPY --from=e2e:local /stamp /stamp2\nRUN echo child >> /stamp\n" > Dockerfile.e2e-child'
+assert_ok "docker build resolves locally-built base image" bash -c \
+    "locki x -m '$LOGIN' docker build -f Dockerfile.e2e-child -t e2e:child ."
+assert_output "child image stacks on local base" "locki-e2e" locki x -m "$LOGIN" docker run --rm e2e:child head -1 /stamp
 assert_ok "docker API socket responds" locki x -m "$LOGIN" curl -sf --unix-socket /run/docker.sock http://d/_ping
 # Proxied blobs are committed to the cache asynchronously — allow a moment
 sleep 5

@@ -244,9 +244,58 @@ if [ -n "$is_build" ] && [ -S "$sock" ]; then
   [ -f "${HOME:-/root}/.docker/buildx/instances/locki" ] \
     || "$_real" buildx create --name locki --driver remote "unix://$sock" >/dev/null 2>&1 || true
   case "$1" in build) shift ;; *) shift 2 ;; esac
+
+  ## FROM refs present in this sandbox's dockerd are invisible to the shared
+  ## buildkitd, which pulls from the registry instead — a hard failure for
+  ## locally-built images. Ship each locally-present ref as an oci-layout build
+  ## context so local images win, matching plain `docker build` semantics.
+  ## Best-effort: any failure means an unpinned build.
+  dockerfile= ctx= prev=
+  extra=() dfargs=()
+  for a in "$@"; do
+    if [ -n "$prev" ]; then
+      case "$prev" in -f|--file) dockerfile=$a ;; --build-arg) dfargs+=(-build-arg "$a") ;; esac
+      prev=
+      continue
+    fi
+    case "$a" in
+      --file=*) dockerfile=${a#*=} ;;
+      --build-arg=*) dfargs+=(-build-arg "${a#*=}") ;;
+      --load|--push|--pull|--no-cache|--rm|--force-rm|--squash|--compress|-q|--quiet|-D|--debug|--check|--detach) ;;
+      -*=*) ;;
+      -*) prev=$a ;;  # assume unknown flags take a value; a misparse just skips pinning
+      *) ctx=$a ;;
+    esac
+  done
+  if [ -d "$ctx" ] && [ -n "${LOCKI_SANDBOX_ID:-}" ]; then
+    pindir="/var/cache/locki/scoped/$LOCKI_SANDBOX_ID/oci-pin"
+    while IFS= read -r ref; do
+      id=$("$_real" image inspect -f '{{.Id}}' "$ref" 2>/dev/null) || continue
+      dir="$pindir/$(printf %s "$ref" | sha256sum | cut -d' ' -f1)"
+      if [ "$(cat "$dir/locki-id" 2>/dev/null)" != "$id" ]; then
+        # full re-export per new image ID; upgrade path: read dockerd's containerd store directly
+        mkdir -p "$pindir"
+        tmp=$(mktemp -d "$pindir/.pin-XXXXXX") || continue
+        if "$_real" save "$ref" | tar -xf - -C "$tmp" && printf %s "$id" > "$tmp/locki-id"; then
+          rm -rf "$dir"
+          mv "$tmp" "$dir" 2>/dev/null || rm -rf "$tmp"  # lost a concurrent export race: keep winner's copy
+        else
+          rm -rf "$tmp"
+          continue
+        fi
+      fi
+      digest=$(jq -r '.manifests[0].digest // empty' "$dir/index.json" 2>/dev/null) || true
+      [ -n "$digest" ] && extra+=(--build-context "$ref=oci-layout://$dir@$digest")
+    done < <(dockerfile-json -quiet "${dfargs[@]}" "${dockerfile:-$ctx/Dockerfile}" 2>/dev/null \
+      | jq -r '[.Stages[].Name | select(. != "") | ascii_downcase] as $stages
+          | [(.Stages[].From.Image // empty), (.Stages[].Commands[]? | (.From // empty), (.Mounts[]?.From // empty))]
+          | unique[]
+          | select(. != "" and (test("^[0-9]+$") | not) and (ascii_downcase as $l | $stages | index($l) | not))' 2>/dev/null)
+  fi
+
   has_output=
   for a in "$@"; do case "$a" in --load|--push|--output*|-o*) has_output=1 ;; esac; done
-  set -- buildx build --builder locki "$@"
+  set -- buildx build --builder locki "${extra[@]}" "$@"
   [ -z "$has_output" ] && set -- "$@" --load
 fi
 exec "$_real" "$@"
@@ -322,6 +371,7 @@ for pair in \
   "fd=fd" \
   "github:anomalyco/opencode=opencode" \
   "github:github/copilot-cli=copilot" \
+  "github:keilerkonzept/dockerfile-json=dockerfile-json" \
   "jq=jq" \
   "k9s=k9s" \
   "kubectl=kubectl" \
