@@ -326,6 +326,12 @@ def add_worktree(repo: pathlib.Path, wt_id: str, parent_name: str | None = None)
         "Configuring auto push for new branches",
         print_success=False,
     )
+
+    # mise trust is per-path, so a trusted root checkout doesn't cover its worktrees
+    if mise := shutil.which("mise"):
+        show = run_command([mise, "trust", "--show"], "Checking mise trust", cwd=str(repo), check=False, quiet=True)
+        if any(line.endswith(": trusted") for line in show.stdout.decode(errors="replace").splitlines()):
+            run_command([mise, "trust"], "Trusting mise config", cwd=str(wt_path), check=False, print_success=False)
     return wt_path
 
 

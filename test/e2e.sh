@@ -471,6 +471,26 @@ assert_output "worktree dir uses <repo>-locki-<id> format" "/r-locki-$NEW_ID" ec
 assert_output "locki new --json prints matching branch" "untitled#locki-$NEW_ID" printf '%s\n' "$(printf '%s\n' "$NEW_OUT" | json_field branch)"
 assert_ok    "locki new keeps stdout empty without --json" test -z "$(locki new 2>/dev/null)"
 
+# ── mise trust propagation to new worktrees ──────────────────────────────────
+
+echo
+echo "Testing mise trust propagation..."
+
+echo '[env]' > "$REPO/mise.toml"
+git -C "$REPO" add mise.toml
+# --no-verify: the guest-hook test above left a pre-commit hook that only works in the guest
+git -C "$REPO" commit -qm "add mise.toml" --no-verify
+(cd "$REPO" && mise trust >/dev/null 2>&1)
+TRUSTED_WT=$(locki new --json 2>/dev/null | json_field path)
+assert_output "trusted root propagates to new worktree" ": trusted" bash -c "cd '$TRUSTED_WT' && mise trust --show 2>/dev/null"
+
+(cd "$REPO" && mise trust --untrust >/dev/null 2>&1)
+UNTRUSTED_WT=$(locki new --json 2>/dev/null | json_field path)
+assert_output "untrusted root leaves worktree untrusted" ": untrusted" bash -c "cd '$UNTRUSTED_WT' && mise trust --show 2>/dev/null"
+
+git -C "$REPO" rm -q mise.toml
+git -C "$REPO" commit -qm "remove mise.toml" --no-verify
+
 # ── sandbox creation with --new ─────────────────────────────────────────
 
 echo
