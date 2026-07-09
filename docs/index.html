@@ -157,6 +157,8 @@
   }
   .yoda .rev { display: block; color: var(--accent2); }
   .attr { font-family: var(--mono); color: var(--dim); letter-spacing: .2em; }
+  h2.lvl { color: var(--lc); text-transform: uppercase; letter-spacing: .08em; font-family: var(--mono); }
+  h2.lvl .stars { color: var(--lc); opacity: .8; font-size: .55em; vertical-align: middle; letter-spacing: .2em; }
   .formula {
     font-family: var(--mono);
     font-size: clamp(1.3rem, 4.5vw, 3rem);
@@ -294,11 +296,34 @@
   <section id="s10">
     <p class="kicker fx">making it fast</p>
     <h2 class="fx">snapshotting <span class="bad">❌</span><br>caching <span class="ok">✅</span></h2>
-    <div class="chips fx">
-      <span class="chip">RPM</span><span class="chip">Mise</span><span class="chip">(p)npm</span>
-      <span class="chip">venv</span><span class="chip">BuildKit</span><span class="chip">image pulls</span>
-      <span class="chip">…</span>
-    </div>
+    <p class="tagline fx">Never download twice.</p>
+  </section>
+
+  <!-- 10a · caching easy -->
+  <section id="s10e">
+    <p class="kicker fx">caching · lvl.</p>
+    <h2 class="fx lvl" style="--lc:var(--accent2)">easy <span class="stars">★☆☆</span></h2>
+    <div class="big-emoji fx" style="font-size:clamp(1.8rem,5vw,3.5rem);font-family:var(--mono)">RPM · Mise</div>
+    <p class="tagline fx">Point at <code>/var/cache/locki</code>. Done.</p>
+    <div class="chips fx"><span class="chip">apt</span><span class="chip">pip/uv</span><span class="chip">cargo</span><span class="chip">go</span><span class="chip">~/.cache</span></div>
+  </section>
+
+  <!-- 10b · caching medium -->
+  <section id="s10m">
+    <p class="kicker fx">caching · lvl.</p>
+    <h2 class="fx lvl" style="--lc:var(--accent)">medium <span class="stars">★★☆</span></h2>
+    <div class="big-emoji fx" style="font-size:clamp(1.8rem,5vw,3.5rem);font-family:var(--mono)">node_modules · .venv</div>
+    <p class="tagline fx">Per-sandbox symlinks onto shared btrfs.<br>bees deduplicates the rest.</p>
+    <div class="chips fx"><span class="chip">npm</span><span class="chip">pnpm store</span><span class="chip">yarn</span><span class="chip">bun</span><span class="chip">uv</span></div>
+  </section>
+
+  <!-- 10c · caching hard -->
+  <section id="s10h">
+    <p class="kicker fx">caching · lvl.</p>
+    <h2 class="fx lvl" style="--lc:var(--danger)">hard <span class="stars">★★★</span></h2>
+    <div class="big-emoji fx" style="font-size:clamp(1.8rem,5vw,3.5rem);font-family:var(--mono)">BuildKit · image pulls</div>
+    <p class="tagline fx">One shared build daemon.<br>TLS pull-through registry mirror.</p>
+    <div class="chips fx"><span class="chip">docker.io</span><span class="chip">ghcr · quay · gcr…</span><span class="chip">GitHub releases</span><span class="chip">k3s installer</span></div>
   </section>
 
   <!-- 11 · shims -->
