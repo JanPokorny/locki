@@ -1,7 +1,3 @@
-<p align="right"><small><i>Locki is the first sandbox I've used where I genuinely forget I'm in one — until I try something I shouldn't.</i></small></p>
-
-<p align="right"><small><b>⸺ Claude Code</b></small></p>
-
 <div align="center">
     <h1>
         <table>
@@ -23,7 +19,7 @@
     </h1>
 </div>
 
-<p align="center">AI sandboxing without the taste of sand</p>
+<p align="center">All-in-one sandboxed worktrees for you and your AIs</p>
 
 <div align=center>
   
@@ -37,140 +33,55 @@
 
 &nbsp;
 
-**Locki** is an AI sandbox for real-world projects. Not another vibe-coded `docker` wrapper, but an actual engineered solution built for the development needs of [Agent Stack](https://github.com/i-am-bee/agentstack). Other sandboxes break down on anything more complex than "a single Next.js app". Locki can handle as many containers, systemd services and even Kubernetes clusters as you like (and your RAM allows).
+With **Locki**, every AI conversation (Claude Code, Codex, etc.) receives its own *Git worktree* and *VM sandbox* -- zero interference between agents, zero interference with the host machine. Locki uses a unique sandboxing solution based on [Lima](https://lima-vm.io/) and [Incus](https://linuxcontainers.org/), combining the **power of real VMs** with the **speed of containers**. Unlike most sandboxing solutions, Locki can run mostly anything -- from simple Python and Node.js apps to **systemd services**, **containerized applications** and full **Kuberentes clusters**!
 
 &nbsp;
 
-<table align=center>
-<tr>
-<td colspan=3 align=center>
-
-Run agents in parallel with no collisions in ports, image tags, or infrastructure:
-
-</td>
-<tr>
-<tr>
-<td>
-
-```sh
-locki x claude "fix #42"
-# Read issue using `gh`...
-# Determined the cause...
-# Fixed in code...
-# Built image app:local...
-# Started k3s cluster...
-# Verified the fix...
-```
-
-</td>
-<td>
-
-```sh
-locki x codex "improve perf"
-# Built image app:local...
-# Started k3s cluster...
-# Measured performance...
-# Improved critical paths...
-# Re-built and re-deployed...
-# Measured again...
-```
-
-</td>
-<td>
-
-```sh
-locki x pi "add CZ translation"
-# Built image app:local...
-# Started k3s cluster...
-# Explored UI in context...
-# Translated strings...
-# Re-built and re-deployed...
-# Verified accuracy...
-```
-
-</td>
-</tr>
-</table>
-
-&nbsp;
-
-- **First-class DX**: Work with your AI of choice. Zero config. No sign Locki is even there.
-- **No compromises**: Run anything including `systemd`, containers, even Kubernetes clusters.
-- **Worktree-backed**: All data remains on your disk in a git worktree. No need to dig in VMs.
+- **AI-agnostic**: Supports Claude Code, Codex, Gemini, Pi, Copilot, OpenCode and more.
+- **Fast**: After the initial VM setup, spawning a new sandbox takes seconds.
+- **Worktree-backed**: Code lives in a git worktree on disk, fully under your control.
+- **No compromises**: Each agent gets a brand new, full-featured machine to develop in.
+- **Aggresively cached**: PyPI, NPM, Docker Hub and more are cached to ensure fast builds in a fresh sandbox.
 - **Safe Git**: Agents are only able to modify namespaced branches. Stash is scoped. Hooks are redirected.
-- **Visibility and control**: Worktrees live on your computer, see and modify them right there.
 - **Agent-friendly**: Bundled hand-picked tools and sandbox-specific instructions for best behavior.
 
-Case study: [Kagenti ADK](https://github.com/kagenti/adk) uses Locki to run a full MicroShift node, allowing agents to verify their work using E2E tests on a real cluster. Something breaks? The agent can `kubectl` right in and debug, all contained within the Locki sandbox.
+**Real-world projects** are using Locki, including [Agent Stack](https://github.com/i-am-bee/agentstack), [Kagenti ADK](https://github.com/kagenti/adk), and [DAM](https://github.com/dam-agents/dam).
 
 &nbsp;
 
-## Tutorial
+## Get Started
 
 1. Install: `uv tool install locki`. ([Install uv](https://docs.astral.sh/uv/getting-started/installation/) first if you don't have it.)
 1. If on Linux, install [QEMU](https://www.qemu.org/download/#linux). (Not needed on macOS.)
-1. `cd` to your Git repository and run: `locki ai`
-
-    <small>
-
-    (Supported harnesses: `claude`, `gemini`, `codex`, `opencode`, `pi`, `copilot`.)
-
-    </small>
-1. First start takes longer, wait a few minutes for the VM to boot.
+1. `cd` to your Git repository, run: `locki ai`, follow interactive setup and choose to create a new sandbox. Wait a few minutes for the initial start.
 1. Follow prompts to log in to the AI CLI. Login will be persisted across sandboxes.
-1. Build! Your agent is already instructed on how to behave in the sandbox.
-1. Run `locki ai` again to open an interactive selector: continue existing session, or start a new one.
-1. Once happy, commit and push your changes. Ask the agent, or do this manually for more control.
-1. After merging the branch, just delete the worktree from your IDE and Locki will clean up the sandbox.
+1. Build! Your agent is already instructed on how to behave in the sandbox. Agent can create any branch with `#locki-<worktree-id>` suffix, and if `gh` is available on host, even create a pull request.
+1. After merging the branch, run `locki rm` to delete the worktree.
 
-    <small>
+## Quick Reference
 
-    (Or do it manually with: `locki remove`)
+Commands act on the current worktree if inside one, letting you select interactively otherwise.
 
-    </small>
+Most important commands are:
+
+```bash
+locki ai   # open AI agent in sandbox (pick existing or new)
+locki x    # open Bash in sandbox (pick existing or new)
+locki rm   # remove sandbox
+```
+
+See the "pro-tips" section below for more advanced usage like IDE integration, port forwarding, working on multiple repos at once and more! You can also use `locki --help` anytime for a refresher.
 
 &nbsp;
 
-## Folders
+## Path mapping from host to sandbox
 
-Each sandbox gets its own [worktree](https://git-scm.com/docs/git-worktree) (a full copy of your repo) and shares a common home folder. The original repo and your actual home stay safely out of reach:
+Each sandbox gets its own [worktree](https://git-scm.com/docs/git-worktree) (a full copy of your repo) and shares a common home folder with other sandboxes. The original repo and your actual home stay safely out of reach:
 
 - **Your Git repo** (`~/myproject/`) — ❌ Not visible from any sandbox. That means sandboxes can't reach the `.git` folder and mess it up -- all `git` calls go through a command bridge and get reviewed and filtered.
 - **Each sandbox's worktree** (`~/.local/share/locki/worktrees/myproject-locki-.../`) — Visible in corresponding sandbox, at the same path. All edits in the sandbox are instantly visible on host.
 - **Shared sandbox home** (`~/.local/share/locki/home/`) — Visible from every sandbox as `~`. Save your agent configuration here to use it in sandboxes.
 - **Your actual home** (`~`) — ❌ Not visible from any sandbox. Sandboxes can't mess up your global config.
-
-&nbsp;
-
-## Commands
-
-Every command supports `-h`/`--help`; most data commands take `--json` for scripting. Sandbox-selecting commands share `-m/--match` (id prefix or branch substring), `-i/--interactive` (force the picker), and `-n/--new` (create fresh).
-
-| Command | What it does |
-| --- | --- |
-| `locki ai` | Start your AI harness in a sandbox — resume, pick, or create. |
-| `locki exec` \| `x` `-- <cmd>` | Run any command in a sandbox (default: `bash`). |
-| `locki ide` | Open your editor on the sandbox worktree (runs on host). |
-| `locki new` \| `n` | Create a sandbox worktree without entering it. |
-| `locki list` \| `ls` `[--all]` | List sandboxes for the current repo (or `--all` repos). |
-| `locki include` `(--repo <path> \| --this)` | Graft another repo's worktree into a sandbox. |
-| `locki port-forward` \| `pf` `[--list] [--clear] [port[:port]] ...` | Forward host ports to a sandbox. |
-| `locki remove` \| `rm` \| `delete` `[-f] [-b] [--merged]` | Remove a sandbox (`-b` also deletes its branches; `--merged` sweeps merged-and-clean ones). |
-| `locki setup` `[--defaults] [--copy]` | Setup wizard: pick harness/editor, copy AI config into the sandbox home. |
-| `locki vm` `status`\|`st` / `stop` / `prune` / `delete` | Manage the shared Lima VM and its caches. |
-
-&nbsp;
-
-## Comparison
-
-Most sandboxing solutions use one of these techniques:
-
-- **Full VM per sandbox** (Vagrant, Multipass): resource-heavy, slow to start
-- **MicroVM per sandbox** (Firecracker, Apple `container`): none or limited support for building, running and orchestrating containers
-- **OCI container per sandbox** (Devcontainers, Distrobox, `container-use`): none or limited support for building, running and orchestrating containers; potentially unsafe if running VM-less on Linux
-- **OS-level jail** (Landlock, Bubblewrap, `sandbox-exec`): just restriction, not isolation (ports collide, image tags get overwritten, etc.)
-
-Locki instead runs **one Lima VM hosting many lightweight Incus containers** — one shared kernel boundary you can trust, cheap per-sandbox containers, and full support for building and orchestrating containers (even Kubernetes) inside. Seriously, stop reading this README and run `uvx locki ai`, that's all there is.
 
 &nbsp;
 
@@ -194,7 +105,7 @@ Locki instead runs **one Lima VM hosting many lightweight Incus containers** —
 
 - Locki sandboxes provide [Mise](https://mise.jdx.dev) for tool version management -- replacing `nvm`, `rbenv`, `brew` etc. with a single tool. Adding `mise.toml` to your repo with tool versions and task definitions will help agents and humans alike: ask your agent to do it!
 
-- Want to use custom AI configuration in the VM -- instructions, skills, MCP servers, ...? Sandboxes share a home folder accessible at `~/.local/share/locki/home` on host (or `$XDG_DATA_HOME/locki/home`). For example, you can run `cp ~/.claude/CLAUDE.md ~/.local/share/locki/home/.claude/CLAUDE.md` to copy your custom instructions for use in sandboxes.
+- Want to use custom AI configuration in the VM -- instructions, skills, MCP servers, ...? Sandboxes share a home folder accessible at `~/.local/share/locki/home` on host (or `$XDG_DATA_HOME/locki/home`). For example, you can edit `~/.local/share/locki/home/.claude/CLAUDE.md` for sandbox-specific instructions.
 
 - Something is broken? Try `locki vm delete` -- it will preserve your worktrees and settings, but the VM and sandboxes will be recreated from scratch on next run.
 
@@ -214,13 +125,26 @@ Locki instead runs **one Lima VM hosting many lightweight Incus containers** —
 
 &nbsp;
 
-## Notes on security
+## Comparison
+
+Most sandboxing solutions use one of these techniques:
+
+- **Full VM per sandbox** (Vagrant, Multipass): resource-heavy, slow to start
+- **MicroVM per sandbox** (Firecracker, Apple `container`): none or limited support for building, running and orchestrating containers
+- **OCI container per sandbox** (Devcontainers, Distrobox, `container-use`): none or limited support for building, running and orchestrating containers; potentially unsafe if running VM-less on Linux
+- **OS-level jail** (Landlock, Bubblewrap, `sandbox-exec`): just restriction, not isolation (ports collide, image tags get overwritten, etc.)
+
+Locki instead runs **one Lima VM hosting many lightweight Incus containers** — one shared kernel boundary you can trust, cheap per-sandbox containers, and full support for building and orchestrating containers (even Kubernetes) inside.
+
+&nbsp;
+
+## Security
 
 Locki uses a single Lima VM which can only access the `~/.local/share/locki/worktrees` and `~/.local/share/locki/home` folders (honoring `$XDG_DATA_HOME`), which forms the security boundary. The sandboxed programs can read and write to these folders, and also access anything on the internet and local network. Furthermore, a guest-to-host SSH server exposes a limited set of `git` and `gh` subcommands, with write access restricted to the sandbox's own namespaced branches and stashes (so an agent in one sandbox cannot alter another sandbox's branch, the main branch, or unrelated stashes). `.git` files are checked for tampering when hooks are executed against them.
 
-Locki is designed to provide protection for the host operating system and files from being messed up by a malfunctioning AI agent. There is no exfiltration protection, so be aware that API keys exposed to the agents need to be treated as potentially exposed and disposable, with limited scope. (This is no different from running the agent locally, just specifying that Locki does not help here. Use a dedicated solution like [DAM!](https://github.com/dam-agents/dam) if interested.)
+Locki is designed to provide protection for the host operating system and files from being messed up by a malfunctioning AI agent. There is no exfiltration protection, so be aware that API keys exposed to the agents need to be treated as potentially exposed and disposable, with limited scope. (This is no different from running the agent locally, just specifying that Locki does not help here.)
 
-Locki may not provide perfect security, however we believe it works better than many existing sandboxing solutions and certainly better than going full `--yolo` on your bare machine and hoping for the best.
+Locki may not provide perfect security, however it is certainly much better than going full `--yolo` on your bare machine and hoping for the best.
 
 &nbsp;
 
@@ -237,19 +161,10 @@ Locki may not provide perfect security, however we believe it works better than 
 ## Uninstall
 
 ```sh
-locki vm delete            # stop and remove the Lima VM
-uv tool uninstall locki    # remove the CLI
-rm -rf ~/.local/share/locki ~/.config/locki   # worktrees, shared home, config (honors $XDG_*)
+locki vm delete
+uv tool uninstall locki
+rm -rf ~/.local/share/locki ~/.config/locki
 ```
-
-&nbsp;
-
-## Troubleshooting
-
-- **Something is wedged?** `locki vm delete` recreates the VM from scratch on the next run; worktrees and settings are preserved.
-- **`Command bridge proxy is disabled`** — the host daemon didn't come up in time; re-run the command, and check `~/.local/state/locki/logs/daemon.log`.
-- **On Linux, "requires QEMU"** — install [QEMU](https://www.qemu.org/download/#linux) (`qemu-system-<arch>` + `qemu-img`).
-- **VSCode worktree sidebar empty** — set `"git.detectWorktrees": true` (needed on VSCode 1.115.0+).
 
 &nbsp;
 
