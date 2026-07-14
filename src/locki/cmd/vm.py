@@ -86,7 +86,7 @@ def vm_status_cmd(as_json):
 @vm_app.command("stop", help="Stop the Locki VM.")
 def vm_stop_cmd():
     run_command(
-        [limactl(), "stop", "locki"],
+        [limactl(), "stop", "-f", "locki"],
         "Stopping VM",
         env=LIMA_ENV,
         cwd="/",
