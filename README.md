@@ -58,6 +58,8 @@ With **Locki**, every AI conversation (Claude Code, Codex, etc.) receives its ow
 1. Build! Your agent is already instructed on how to behave in the sandbox. Agent can create any branch with `#locki-<worktree-id>` suffix, and if `gh` is available on host, even create a pull request.
 1. After merging the branch, run `locki rm` to delete the worktree.
 
+&nbsp;
+
 ## Quick Reference
 
 Commands act on the current worktree if inside one, letting you select interactively otherwise.
