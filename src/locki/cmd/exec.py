@@ -217,7 +217,18 @@ def exec_cmd(ctx, match, interactive, create):
         (SANDBOX_HOME / ".claude.json", {"projects": {str(sandbox.wt_path): {"hasTrustDialogAccepted": True}}}),
         (
             SANDBOX_HOME / ".claude" / "settings.json",
-            {"skipDangerousModePermissionPrompt": True, "permissions": {"defaultMode": "bypassPermissions"}},
+            {
+                "skipDangerousModePermissionPrompt": True,
+                "permissions": {"defaultMode": "bypassPermissions"},
+                "hooks": {
+                    "PreToolUse": [
+                        {
+                            "matcher": "*",
+                            "hooks": [{"type": "command", "command": "sh /root/.claude/hooks/locki-branch-guard.sh"}],
+                        }
+                    ]
+                },
+            },
         ),
         (
             SANDBOX_HOME / ".config" / "opencode" / "opencode.json",
@@ -234,6 +245,10 @@ def exec_cmd(ctx, match, interactive, create):
             path.write_text(json.dumps(deep_merge(existing, updates), indent=2))
         except json.JSONDecodeError:
             click.echo(f"{WARNING} Invalid JSON data found in {path}, not updating it.")
+
+    guard = SANDBOX_HOME / ".claude" / "hooks" / "locki-branch-guard.sh"
+    guard.parent.mkdir(parents=True, exist_ok=True)
+    guard.write_bytes((PACKAGE_DATA / "claude-branch-guard.sh").read_bytes())
 
     if vm_status() != "Running":
         with file_lock("vm", "Waiting for VM to start"):

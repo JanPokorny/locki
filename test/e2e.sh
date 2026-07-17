@@ -613,6 +613,22 @@ assert_output "worktree switched to rogue branch" "rogue-branch" git -C "$WORKTR
 assert_output "locki x auto-fixes branch" "fix-ok" locki x -m "$LOGIN" echo fix-ok
 assert_output "branch renamed with locki suffix" "rogue-branch#locki-$LOGIN" git -C "$WORKTREE_B" branch --show-current
 
+# ── Claude Code untitled-branch guard hook ──────────────────────────────────
+
+echo
+echo "Testing Claude Code branch guard hook..."
+
+GUARD="sh /root/.claude/hooks/locki-branch-guard.sh"
+assert_ok   "guard passes on named branch" locki x -m "$LOGIN" sh -c "echo '{}' | $GUARD"
+# the rogue-branch test above left the original untitled branch behind — clear it for the rename
+locki x -m "$LOGIN" git branch "untitled#locki-$LOGIN" --delete --force
+locki x -m "$LOGIN" git branch "untitled#locki-$LOGIN" --move
+locki x -m "$LOGIN" rm -f /tmp/.locki-branch-named
+assert_fail "guard blocks tools while untitled" locki x -m "$LOGIN" sh -c "echo '{}' | $GUARD"
+assert_ok   "guard lets the rename command through" locki x -m "$LOGIN" sh -c "echo '{\"tool_input\":{\"command\":\"git branch guarded#locki-$LOGIN --move\"}}' | $GUARD"
+locki x -m "$LOGIN" git branch "guarded#locki-$LOGIN" --move
+assert_ok   "guard passes after rename" locki x -m "$LOGIN" sh -c "echo '{}' | $GUARD"
+
 # ── worktree cleanup ─────────────────────────────────────────────────────────
 
 echo
