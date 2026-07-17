@@ -536,6 +536,16 @@ echo "Testing sandbox creation with --new..."
 assert_output "--new creates sandbox" "create-ok" locki x --new echo create-ok
 assert_fail "unknown substring rejects" locki x -m nonexistent-branch echo nope
 
+# ── locki cd ─────────────────────────────────────────────────────────────────
+
+echo
+echo "Testing locki cd..."
+
+FAKE_SHELL="$TMPDIR_ROOT/fake-shell"
+printf '#!/bin/bash\npwd\n' > "$FAKE_SHELL"
+chmod +x "$FAKE_SHELL"
+assert_output "locki cd opens shell in worktree" "-locki-$AUTH" env SHELL="$FAKE_SHELL" locki cd -m "$AUTH"
+
 # ── locki list outside git repo ─────────────────────────────────────────────
 
 echo
