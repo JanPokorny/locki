@@ -269,12 +269,20 @@ GIT_HOOKS = [
 ]
 
 
-def add_worktree(repo: pathlib.Path, wt_id: str, parent_name: str | None = None) -> pathlib.Path:
-    """Create the sandbox worktree of *repo* for *wt_id*: the `untitled#locki-<wt-id>`
-    branch (reused if it already exists), the worktree itself, trusted metadata, and
-    per-worktree hooks.  With *parent_name* (the parent sandbox repo's name) the
-    worktree becomes an include inside that sandbox; without it, the primary worktree."""
-    branch = f"untitled#locki-{wt_id}"
+def add_worktree(
+    repo: pathlib.Path,
+    wt_id: str,
+    parent_name: str | None = None,
+    branch: str | None = None,
+    from_ref: str | None = None,
+) -> pathlib.Path:
+    """Create the sandbox worktree of *repo* for *wt_id*: the *branch* (default
+    `untitled#locki-<wt-id>`, reused if it already exists), the worktree itself,
+    trusted metadata, and per-worktree hooks.  With *parent_name* (the parent
+    sandbox repo's name) the worktree becomes an include inside that sandbox;
+    without it, the primary worktree.  *from_ref* bases a newly created branch
+    on that ref instead of HEAD."""
+    branch = branch or f"untitled#locki-{wt_id}"
     dir_name = f"{repo.name}-locki-{wt_id}"
     if parent_name is None:
         wt_path = WORKTREES / dir_name
@@ -292,7 +300,7 @@ def add_worktree(repo: pathlib.Path, wt_id: str, parent_name: str | None = None)
     )
     if exists.returncode != 0:
         run_command(
-            ["git", "-C", str(repo), "branch", branch],
+            ["git", "-C", str(repo), "branch", branch] + ([from_ref] if from_ref else []),
             f"Creating branch {click.style(branch, fg='green')}",
             print_success=False,
         )
@@ -491,9 +499,9 @@ def cwd_git_repo() -> pathlib.Path | None:
     return pathlib.Path(result.stdout.strip()).resolve()
 
 
-def new_sandbox(repo: pathlib.Path) -> SandboxInfo:
+def new_sandbox(repo: pathlib.Path, branch_stem: str = "untitled") -> SandboxInfo:
     wt_id = "".join(secrets.choice("abcdefghijklmnopqrstuvwxyz0123456789") for _ in range(8))
-    return SandboxInfo(wt_id=wt_id, branch=f"untitled#locki-{wt_id}", repo=repo)
+    return SandboxInfo(wt_id=wt_id, branch=f"{branch_stem}#locki-{wt_id}", repo=repo)
 
 
 def resolve_sandbox(

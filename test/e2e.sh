@@ -499,6 +499,15 @@ assert_output "worktree dir uses <repo>-locki-<id> format" "/r-locki-$NEW_ID" ec
 assert_output "locki new --json prints matching branch" "untitled#locki-$NEW_ID" printf '%s\n' "$(printf '%s\n' "$NEW_OUT" | json_field branch)"
 assert_ok    "locki new keeps stdout empty without --json" test -z "$(locki new 2>/dev/null)"
 
+NAMED_OUT=$(locki new -b my-feature --json 2>/dev/null)
+NAMED_ID=$(printf '%s\n' "$NAMED_OUT" | json_field id)
+assert_output "locki new -b uses branch stem" "my-feature#locki-$NAMED_ID" printf '%s\n' "$(printf '%s\n' "$NAMED_OUT" | json_field branch)"
+
+BASE_SHA=$(git -C "$REPO" rev-parse HEAD)
+git -C "$REPO" commit -qm "advance head" --allow-empty --no-verify
+FROM_PATH=$(locki new -f "$BASE_SHA" --json 2>/dev/null | json_field path)
+assert_output "locki new -f bases branch on given ref" "$BASE_SHA" git -C "$FROM_PATH" rev-parse HEAD
+
 # ── mise trust propagation to new worktrees ──────────────────────────────────
 
 echo
