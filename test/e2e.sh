@@ -285,6 +285,18 @@ assert_ok "uv init + sync works" locki x -m "$RELEASE" bash -c 'uv init -q --nam
 assert_output "uv .venv is a symlink into the sandbox-scoped cache" "/var/cache/locki/scoped/$RELEASE/uv-venvs" \
     locki x -m "$RELEASE" readlink .venv
 
+# ── python shims ─────────────────────────────────────────────────────────────
+# Base fedora image ships no python3 (dnf5 dropped the dependency); the shims
+# must auto-install it via mise so e.g. python3-based Claude Code hooks work.
+
+echo
+echo "Testing python/pip shims..."
+
+assert_output "python3 shim auto-installs and runs" "py-ok" locki x -m "$RELEASE" python3 -c 'print("py-ok")'
+assert_ok "python resolves" locki x -m "$RELEASE" python --version
+assert_ok "pip3 resolves" locki x -m "$RELEASE" pip3 --version
+assert_ok "pip resolves" locki x -m "$RELEASE" pip --version
+
 # ── cache symlinks git-ignored per-worktree ──────────────────────────────────
 # "node_modules/" style .gitignore rules don't match symlinks; the per-worktree
 # core.excludesFile set at worktree creation must hide them from git status.

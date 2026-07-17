@@ -376,6 +376,10 @@ for pair in \
   "k9s=k9s" \
   "kubectl=kubectl" \
   "poetry=poetry" \
+  "python=pip" \
+  "python=pip3" \
+  "python=python" \
+  "python=python3" \
   "rg=rg" \
   "uv=uv" \
   "uv=uvx" \
