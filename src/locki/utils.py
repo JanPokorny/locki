@@ -1,22 +1,24 @@
 import dataclasses
 import fcntl
 import functools
+import json
 import logging
 import os
 import pathlib
 import random
+import re
 import secrets
 import shutil
 import subprocess
 import sys
 import threading
 import time
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager, nullcontext, suppress
 
 import click
 
 from locki.logging import print_log_tail
-from locki.paths import HOME, LIMA, PACKAGE_DATA, RUNTIME, WORKTREES, WORKTREES_META
+from locki.paths import HOME, LIMA, PACKAGE_DATA, RUNTIME, SANDBOX_HOME, WORKTREES, WORKTREES_META
 from locki.runes import ERROR, FUTHARK, SUCCESS
 
 logger = logging.getLogger(__name__)
@@ -436,6 +438,31 @@ def live_branch(meta_dir: pathlib.Path) -> str:
     return f"(broken #locki-{wt_id})"
 
 
+def ai_title(sandbox: SandboxInfo) -> str:
+    """Last AI-generated session title from the sandbox's Claude Code transcripts, or "".
+
+    Claude Code appends `{"type":"ai-title","aiTitle":...}` lines to
+    `~/.claude/projects/<munged-cwd>/<session>.jsonl`; the sandbox's `/root` is
+    SANDBOX_HOME, so those are directly readable here. Internal format
+    (observed on 2.1.212) -- fail soft on any surprise.
+    """
+    project = SANDBOX_HOME / ".claude" / "projects" / re.sub(r"[^a-zA-Z0-9]", "-", str(sandbox.wt_path))
+    for jsonl in sorted(project.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True):
+        title = ""
+        try:
+            # ceiling: full scan, transcripts reach MBs; upgrade: tail-read (title recurs every ~25 lines)
+            lines = jsonl.read_text().splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            if '"type":"ai-title"' in line:
+                with suppress(json.JSONDecodeError):  # torn line from a live append
+                    title = json.loads(line).get("aiTitle") or title
+        if title:
+            return title
+    return ""
+
+
 def list_sandboxes() -> list[SandboxInfo]:
     """Every Locki sandbox on disk, read from the meta directory.
 
@@ -586,6 +613,8 @@ def resolve_sandbox(
             choices.append(Choice(value="__create__", name="(create new)"))
         for s in sorted(candidate_sandboxes, key=lambda x: x.branch):
             label = s.branch + (f" ({pretty_path(s.repo)})" if scope_all else "")
+            if title := ai_title(s):
+                label += f" — {title}"
             choices.append(Choice(value=s.wt_id, name=label))
         if not scope_all and not filter_out_current_repo:
             choices.append(Choice(value="__all__", name="(show sandboxes from all repos)"))

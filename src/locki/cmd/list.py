@@ -3,7 +3,7 @@ import json
 import click
 
 from locki.runes import INFO
-from locki.utils import cwd_git_repo, format_table, json_option, list_sandboxes, pretty_path
+from locki.utils import ai_title, cwd_git_repo, format_table, json_option, list_sandboxes, pretty_path
 
 
 @click.command()
@@ -20,7 +20,7 @@ def list_cmd(show_all: bool, as_json: bool) -> None:
         sandboxes = [s for s in sandboxes if s.repo.resolve() == cwd_repo.resolve()]
 
     if as_json:
-        click.echo(json.dumps([dict(s) for s in sandboxes]))
+        click.echo(json.dumps([dict(s) | {"title": ai_title(s)} for s in sandboxes]))
         return
 
     if not sandboxes:
@@ -37,14 +37,14 @@ def list_cmd(show_all: bool, as_json: bool) -> None:
 
     rows: list[tuple[str, ...]] = []
     for s in sandboxes:
-        row = [s.wt_id, s.branch, pretty_path(s.wt_path)]
+        row = [s.wt_id, s.branch, ai_title(s), pretty_path(s.wt_path)]
         if show_all:
             row.append(pretty_path(s.repo))
         if has_includes:
             row.append(",".join(pretty_path(i.repo) for i in s.include) if s.include else "")
         rows.append(tuple(row))
 
-    headers_list = ["WORKTREE ID", "WORKTREE BRANCH", "WORKTREE DIRECTORY"]
+    headers_list = ["WORKTREE ID", "WORKTREE BRANCH", "SESSION TITLE", "WORKTREE DIRECTORY"]
     if show_all:
         headers_list.append("PARENT REPO")
     if has_includes:
