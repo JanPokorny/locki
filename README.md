@@ -37,6 +37,10 @@ With **Locki**, every AI conversation (Claude Code, Codex, etc.) receives its ow
 
 &nbsp;
 
+https://github.com/user-attachments/assets/27c0aeb2-c5ef-4e7f-a293-519499215cc8
+
+&nbsp;
+
 - **AI-agnostic**: Supports Claude Code, Codex, Gemini, Pi, Copilot, OpenCode and more.
 - **Fast**: After the initial VM setup, spawning a new sandbox takes seconds.
 - **Worktree-backed**: Code lives in a git worktree on disk, fully under your control.
