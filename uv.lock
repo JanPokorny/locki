@@ -190,7 +190,7 @@ wheels = [
 
 [[package]]
 name = "locki"
-version = "0.0.26"
+version = "0.0.27"
 source = { editable = "." }
 dependencies = [
     { name = "asyncssh" },
