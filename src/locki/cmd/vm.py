@@ -7,19 +7,9 @@ import click
 
 from locki.paths import WORKTREES, WORKTREES_META
 from locki.runes import INFO
-from locki.utils import (
-    LIMA_ENV,
-    AliasGroup,
-    fail,
-    format_table,
-    json_option,
-    limactl,
-    live_branch,
-    pretty_path,
-    run_command,
-    run_in_vm,
-    vm_status,
-)
+from locki.services.vm import vm
+from locki.services.worktree import worktrees
+from locki.utils import AliasGroup, fail, format_table, json_option, pretty_path
 
 
 @click.group(cls=AliasGroup, help="Manage the Locki VM.")
@@ -30,11 +20,11 @@ def vm_app():
 @vm_app.command("status | st", help="Show VM and sandbox status.")
 @json_option
 def vm_status_cmd(as_json):
-    status = (vm_status() or "none").lower()
+    status = (vm.status() or "none").lower()
 
-    sandboxes: list[dict] = []
+    sandbox_list: list[dict] = []
     if status == "running":
-        result = run_in_vm(
+        result = vm.run(
             ["incus", "list", "--format=csv", "--columns=n,s"],
             "Listing containers",
             check=False,
@@ -48,24 +38,24 @@ def vm_status_cmd(as_json):
             meta_dir = next(WORKTREES_META.glob(f"*{wt_id}"), None)
             wt_path = next(WORKTREES.glob(f"*{wt_id}"), None)
             repo_file = meta_dir / "repo" if meta_dir else None
-            sandboxes.append(
+            sandbox_list.append(
                 {
                     "id": wt_id,
                     "status": container_status.strip().lower(),
                     "repo": repo_file.read_text().strip() if repo_file and repo_file.exists() else "",
-                    "branch": live_branch(meta_dir) if meta_dir else "",
+                    "branch": worktrees.live_branch(meta_dir) if meta_dir else "",
                     "worktree": str(wt_path) if wt_path else "",
                 }
             )
 
     if as_json:
-        click.echo(json.dumps({"vm": status, "sandboxes": sandboxes}))
+        click.echo(json.dumps({"vm": status, "sandboxes": sandbox_list}))
         return
 
     click.echo(f"VM: {status}")
     if status != "running":
         return
-    if not sandboxes:
+    if not sandbox_list:
         click.echo("No sandboxes.")
         return
 
@@ -77,7 +67,7 @@ def vm_status_cmd(as_json):
             s["branch"],
             pretty_path(pathlib.Path(s["worktree"])) if s["worktree"] else "",
         )
-        for s in sandboxes
+        for s in sandbox_list
     ]
     headers = ("SANDBOX ID", "STATUS", "REPO", "BRANCH", "WORKTREE")
     click.echo(format_table(headers, sorted(rows, key=lambda r: (r[1], r[2], r[3]))))
@@ -85,12 +75,7 @@ def vm_status_cmd(as_json):
 
 @vm_app.command("stop", help="Stop the Locki VM.")
 def vm_stop_cmd():
-    run_command(
-        [limactl(), "stop", "-f", "locki"],
-        "Stopping VM",
-        env=LIMA_ENV,
-        cwd="/",
-    )
+    vm.stop()
 
 
 @vm_app.command("delete | remove | rm", help="Delete the Locki VM entirely.")
@@ -104,12 +89,7 @@ def vm_delete_cmd(yes):
             click.echo("Pass --yes to accept this warning.")
             raise SystemExit(1)
         click.confirm("Continue?", abort=True)
-    run_command(
-        [limactl(), "delete", "-f", "locki"],
-        "Deleting VM",
-        env=LIMA_ENV,
-        cwd="/",
-    )
+    vm.delete()
 
 
 _PRUNE_SCRIPT = r"""
@@ -145,10 +125,10 @@ echo "$FREED"
 @vm_app.command("prune", help="Clear the registry cache and caches of removed sandboxes.")
 @json_option
 def vm_prune_cmd(as_json):
-    if vm_status() != "Running":
+    if vm.status() != "Running":
         fail("VM is not running.")
 
-    result = run_in_vm(
+    result = vm.run(
         ["bash", "-c", _PRUNE_SCRIPT.replace("__WORKTREES__", shlex.quote(str(WORKTREES)))], "Pruning caches"
     )
 

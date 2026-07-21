@@ -7,7 +7,8 @@ import click
 from locki.cmd.exec import exec_cmd
 from locki.config import load_config
 from locki.paths import SANDBOX_HOME
-from locki.utils import cwd_git_repo, resolve_sandbox, sandbox_options
+from locki.services.worktree import worktrees
+from locki.utils import sandbox_options
 
 
 @click.command("ai", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
@@ -24,21 +25,21 @@ def ai_cmd(ctx, match, interactive, create):
       locki ai -n                     # new sandbox, fresh conversation
     """
 
-    ai_command = load_config(cwd_git_repo()).ai_command
+    ai_command = load_config(worktrees.cwd_repo).ai_command
 
-    sandbox = resolve_sandbox(
+    worktree = worktrees.resolve(
         match=match,
         interactive=interactive,
         create="force" if create else "allow",
     )
 
     if shlex.split(ai_command)[0] == "claude":
-        project_name = re.sub(r"[^a-zA-Z0-9]", "-", str(sandbox.wt_path))
+        project_name = re.sub(r"[^a-zA-Z0-9]", "-", str(worktree.wt_path))
         project_dir = SANDBOX_HOME / ".claude" / "projects" / project_name
         project_dir.mkdir(parents=True, exist_ok=True)
         if not any(project_dir.glob("*.jsonl")):
             (project_dir / f"{uuid.uuid4()}.jsonl").write_text("\n")
 
     ctx.args = shlex.split(ai_command)
-    ctx.obj = sandbox
+    ctx.obj = worktree
     ctx.invoke(exec_cmd.callback, match=None, interactive=False, create=False)

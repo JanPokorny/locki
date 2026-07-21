@@ -3,7 +3,8 @@ import json
 import click
 
 from locki.runes import INFO
-from locki.utils import ai_title, cwd_git_repo, format_table, json_option, list_sandboxes, pretty_path
+from locki.services.worktree import worktrees
+from locki.utils import format_table, json_option, pretty_path
 
 
 @click.command()
@@ -11,19 +12,19 @@ from locki.utils import ai_title, cwd_git_repo, format_table, json_option, list_
 @json_option
 def list_cmd(show_all: bool, as_json: bool) -> None:
     """List Locki sandboxes (current repo by default; all repos outside a git repo)."""
-    cwd_repo = cwd_git_repo()
+    cwd_repo = worktrees.cwd_repo
     show_all = show_all or cwd_repo is None
-    sandboxes = list_sandboxes()
+    listed = worktrees.list()
 
     if not show_all:
         assert cwd_repo is not None
-        sandboxes = [s for s in sandboxes if s.repo.resolve() == cwd_repo.resolve()]
+        listed = [s for s in listed if s.repo.resolve() == cwd_repo.resolve()]
 
     if as_json:
-        click.echo(json.dumps([dict(s) | {"title": ai_title(s)} for s in sandboxes]))
+        click.echo(json.dumps([dict(s) | {"title": worktrees.ai_title(s)} for s in listed]))
         return
 
-    if not sandboxes:
+    if not listed:
         if show_all:
             click.echo(f"{INFO} No Locki sandboxes found.", err=True)
         else:
@@ -33,11 +34,11 @@ def list_cmd(show_all: bool, as_json: bool) -> None:
             )
         return
 
-    has_includes = any(s.include for s in sandboxes)
+    has_includes = any(s.include for s in listed)
 
     rows: list[tuple[str, ...]] = []
-    for s in sandboxes:
-        row = [s.wt_id, s.branch, ai_title(s), pretty_path(s.wt_path)]
+    for s in listed:
+        row = [s.wt_id, s.branch, worktrees.ai_title(s), pretty_path(s.wt_path)]
         if show_all:
             row.append(pretty_path(s.repo))
         if has_includes:

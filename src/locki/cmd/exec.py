@@ -1,178 +1,14 @@
-import base64
-import contextlib
-import getpass
-import hashlib
-import json
-import logging
-import os
-import pathlib
-import platform
-import shlex
-import shutil
-import subprocess
 import sys
-import tempfile
-import time
 
 import click
 
-from locki.cmd.new import create_sandbox_worktree
-from locki.config import load_config
-from locki.paths import LIMA, PACKAGE_DATA, PID_FILE, PORT_FILE, RUNTIME, SANDBOX_HOME, WORKTREES
-from locki.runes import EXIT, INFO, SPINNER, WARNING
-from locki.utils import (
-    LIMA_ENV,
-    SandboxInfo,
-    deep_merge,
-    fail,
-    file_lock,
-    limactl,
-    live_branch,
-    pretty_path,
-    resolve_sandbox,
-    run_command,
-    run_in_vm,
-    sandbox_options,
-    vm_status,
-)
-
-logger = logging.getLogger(__name__)
-
-
-def container_env(sandbox: SandboxInfo) -> dict[str, str]:
-    """Environment for processes running in the sandbox container.
-
-    Shared caches live directly under /var/cache/locki; caches that cannot be
-    shared across sandboxes go under /var/cache/locki/scoped/<wt-id>/ so removal
-    and pruning can delete the whole folder without knowing the individual cache
-    types."""
-    return {
-        "BUN_INSTALL_CACHE_DIR": "/var/cache/locki/bun",
-        "BUNDLE_PATH": "/var/cache/locki/bundle",
-        "CABAL_DIR": "/var/cache/locki/cabal",
-        "CARGO_HOME": "/var/cache/locki/cargo",
-        "COMPOSER_CACHE_DIR": "/var/cache/locki/composer",
-        "CONAN_USER_HOME": "/var/cache/locki/conan",
-        "CONAN_HOME": "/var/cache/locki/conan2",
-        "COPILOT_CUSTOM_INSTRUCTIONS_DIRS": "/etc/copilot",
-        "COREPACK_ENABLE_DOWNLOAD_PROMPT": "0",
-        "COURSIER_CACHE": "/var/cache/locki/coursier",
-        "DENO_DIR": "/var/cache/locki/deno",
-        "GEMINI_FORCE_ENCRYPTED_FILE_STORAGE": "true",
-        "GOCACHE": "/var/cache/locki/go/build",
-        "GOMODCACHE": "/var/cache/locki/go/mod",
-        "GRADLE_USER_HOME": "/var/cache/locki/gradle",
-        "HEX_HOME": "/var/cache/locki/hex",
-        "IS_SANDBOX": "1",
-        "JULIA_DEPOT_PATH": "/var/cache/locki/julia",
-        "LEIN_HOME": "/var/cache/locki/lein",
-        "LOCKI_SANDBOX_ID": sandbox.wt_id,
-        "MAVEN_OPTS": "-Dmaven.repo.local=/var/cache/locki/maven",
-        "MISE_CACHE_DIR": "/var/cache/locki/mise",
-        "MISE_DATA_DIR": "/usr/share/mise",
-        "MISE_GLOBAL_CONFIG_FILE": "/opt/locki/mise.toml",
-        "MISE_INSTALL_PATH": "/usr/local/bin/mise",
-        "MISE_NODE_VERIFY": "false",
-        "MISE_TRUSTED_CONFIG_PATHS": "/",
-        "MIX_HOME": "/var/cache/locki/mix",
-        "NIMBLE_DIR": "/var/cache/locki/nimble",
-        "npm_config_cache": "/var/cache/locki/npm",
-        "NUGET_PACKAGES": "/var/cache/locki/nuget",
-        "PATH": "/opt/locki/bin/high:/root/.local/bin:/usr/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/locki/bin/low",
-        "PIP_CACHE_DIR": "/var/cache/locki/pip",
-        "POETRY_VIRTUALENVS_PATH": f"/var/cache/locki/scoped/{sandbox.wt_id}/poetry-venvs",
-        "POETRY_VIRTUALENVS_IN_PROJECT": "false",
-        "PNPM_HOME": "/usr/share/pnpm",
-        "PUB_CACHE": "/var/cache/locki/pub",
-        "R_LIBS_USER": "/var/cache/locki/r",
-        "REBAR_CACHE_DIR": "/var/cache/locki/rebar3",
-        "STACK_ROOT": "/var/cache/locki/stack",
-        "TF_PLUGIN_CACHE_DIR": "/var/cache/locki/terraform",
-        "UV_CACHE_DIR": "/var/cache/locki/uv",
-        "VCPKG_DEFAULT_BINARY_CACHE": "/var/cache/locki/vcpkg",
-        "XDG_DATA_HOME": "/usr/share",
-        "XDG_CACHE_HOME": "/var/cache/locki",
-        "XDG_BIN_HOME": "/usr/local/bin",
-        "YARN_CACHE_FOLDER": "/var/cache/locki/yarn",
-        "ZIG_GLOBAL_CACHE_DIR": "/var/cache/locki/zig",
-    }
-
-
-def import_local_incus_image(local_path: pathlib.Path) -> str:
-    """Copy a local Incus image archive into the VM and import it, cached by file identity.
-
-    Supports both unified tarballs and split images (metadata + companion .root file).
-    The alias encodes the archive path and the size/mtime of its file(s), so repeat
-    sandbox creations from an unchanged archive skip the copy+import entirely, and a
-    changed archive replaces the previously imported image."""
-    sources = [src for suffix in ("", ".root") if (src := local_path.parent / (local_path.name + suffix)).is_file()]
-    path_hash = hashlib.sha256(str(local_path.resolve()).encode()).hexdigest()[:8]
-    signature = "|".join(f"{src.stat().st_size}:{src.stat().st_mtime_ns}" for src in sources)
-    alias = f"locki-img-{path_hash}-{hashlib.sha256(signature.encode()).hexdigest()[:8]}"
-
-    result = run_in_vm(
-        ["incus", "image", "list", "--format=csv", "--columns=l"],
-        "Checking for cached image",
-        check=False,
-        quiet=True,
-    )
-    cached_aliases = result.stdout.decode().split()
-    if alias in cached_aliases:
-        return alias
-    for stale in cached_aliases:
-        if stale.startswith(f"locki-img-{path_hash}-"):
-            run_in_vm(
-                ["incus", "image", "delete", stale],
-                "Removing stale cached image",
-                check=False,
-                quiet=True,
-            )
-
-    vm_files = []
-    for src in sources:
-        suffix = ".root" if src != local_path else ""
-        vm_path = f"/tmp/{alias}{suffix}"
-        run_command(
-            [limactl(), "copy", str(src.resolve()), f"locki:{vm_path}"],
-            f"Copying {'rootfs' if suffix else 'image'} into VM",
-            env=LIMA_ENV,
-            cwd="/",
-            print_success=False,
-        )
-        vm_files.append(vm_path)
-    try:
-        result = run_in_vm(
-            ["incus", "image", "import", *vm_files, f"--alias={alias}"],
-            "Importing container image",
-            check=False,
-            print_success=False,
-        )
-        if result.returncode != 0:
-            stderr = result.stderr.decode()
-            if "fingerprint" not in stderr:
-                fail(f"Importing container image failed: {stderr.strip()}")
-            # Same content already imported under another alias (e.g. from another clone
-            # of the repo). The incus fingerprint is the sha256 of the archive (metadata
-            # then rootfs for split images) — compute it and add our alias to that image.
-            digest = hashlib.sha256()
-            for src in sources:
-                with open(src, "rb") as f:
-                    while chunk := f.read(1 << 20):
-                        digest.update(chunk)
-            run_in_vm(
-                ["incus", "image", "alias", "create", alias, digest.hexdigest()[:12]],
-                "Aliasing existing image",
-                print_success=False,
-            )
-    finally:
-        run_in_vm(
-            ["rm", "-f", *vm_files],
-            "Cleaning up copied image archive",
-            check=False,
-            quiet=True,
-            print_success=False,
-        )
-    return alias
+from locki.paths import WORKTREES
+from locki.runes import EXIT, INFO, SPINNER
+from locki.services.container import containers
+from locki.services.daemon import daemon
+from locki.services.vm import vm
+from locki.services.worktree import WorktreeInfo, worktrees
+from locki.utils import pretty_path, sandbox_options
 
 
 @click.command(
@@ -195,281 +31,40 @@ def exec_cmd(ctx, match, interactive, create):
     """
     click.echo(f"{SPINNER} Entering a Locki sandbox.", err=True)
 
-    pre_resolved = ctx.obj if isinstance(ctx.obj, SandboxInfo) else None
-    sandbox = pre_resolved or resolve_sandbox(
+    pre_resolved = ctx.obj if isinstance(ctx.obj, WorktreeInfo) else None
+    worktree = pre_resolved or worktrees.resolve(
         match=match,
         interactive=interactive,
         create="force" if create else "allow",
     )
 
-    if sys.platform == "linux" and (
-        missing := [b for b in [f"qemu-system-{platform.machine()}", "qemu-img"] if not shutil.which(b)]
-    ):
-        fail(
-            f"Locki requires QEMU on Linux, but {', '.join(missing)} not found in PATH. Install QEMU: https://www.qemu.org/download/#linux"
-        )
-
-    LIMA.mkdir(exist_ok=True, parents=True)
     WORKTREES.mkdir(parents=True, exist_ok=True)
+    worktrees.prepare_home(worktree)
 
-    SANDBOX_HOME.mkdir(parents=True, exist_ok=True)
-    for path, updates in [
-        (SANDBOX_HOME / ".claude.json", {"projects": {str(sandbox.wt_path): {"hasTrustDialogAccepted": True}}}),
-        (
-            SANDBOX_HOME / ".claude" / "settings.json",
-            {
-                "skipDangerousModePermissionPrompt": True,
-                "permissions": {"defaultMode": "bypassPermissions"},
-                "hooks": {
-                    "PreToolUse": [
-                        {
-                            "matcher": "*",
-                            "hooks": [{"type": "command", "command": "sh /root/.claude/hooks/locki-branch-guard.sh"}],
-                        }
-                    ]
-                },
-            },
-        ),
-        (
-            SANDBOX_HOME / ".config" / "opencode" / "opencode.json",
-            {
-                "$schema": "https://opencode.ai/config.json",
-                "permission": "allow",
-                "instructions": ["/etc/opencode/AGENTS.md"],
-            },
-        ),
-    ]:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            existing = json.loads(path.read_text()) if path.exists() else {}
-            path.write_text(json.dumps(deep_merge(existing, updates), indent=2))
-        except json.JSONDecodeError:
-            click.echo(f"{WARNING} Invalid JSON data found in {path}, not updating it.")
+    vm.ensure_running()
 
-    guard = SANDBOX_HOME / ".claude" / "hooks" / "locki-branch-guard.sh"
-    guard.parent.mkdir(parents=True, exist_ok=True)
-    guard.write_bytes((PACKAGE_DATA / "claude-branch-guard.sh").read_bytes())
-
-    if vm_status() != "Running":
-        with file_lock("vm", "Waiting for VM to start"):
-            vm_setup = (PACKAGE_DATA / "vm-setup.sh").read_text()
-            lima_config = json.dumps(
-                {
-                    "minimumLimaVersion": "2.0.0",
-                    "base": ["template:fedora"],
-                    "memory": f"{os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES') // (1024**3)}GiB",
-                    "cpus": os.cpu_count(),
-                    "disk": "200GiB",
-                    "containerd": {"system": False, "user": False},
-                    "mounts": [
-                        {"location": str(WORKTREES), "writable": True},
-                        {"location": str(SANDBOX_HOME), "mountPoint": "/root/.locki/home", "writable": True},
-                    ],
-                    "provision": [{"mode": "system", "script": vm_setup}],
-                }
-            )
-            lima_fd, lima_yaml = tempfile.mkstemp(suffix=".yaml")
-            try:
-                os.write(lima_fd, lima_config.encode())
-                os.close(lima_fd)
-                run_command(
-                    [limactl(), "--tty=false", "create", lima_yaml, "--mount-writable", "--name=locki"],
-                    "Preparing VM",
-                    env=LIMA_ENV,
-                    cwd="/",
-                    check=False,
-                    print_success=False,
-                )
-            finally:
-                os.unlink(lima_yaml)
-            run_command(
-                [limactl(), "--tty=false", "start", "locki"],
-                "Starting VM",
-                env=LIMA_ENV,
-                cwd="/",
-                check=False,
-            )
-
-        if vm_status() != "Running":
-            fail(f"Lima VM failed to start. LIMA_HOME={LIMA}")
-
-    if not sandbox.wt_path.exists():
-        create_sandbox_worktree(sandbox)
+    if not worktree.wt_path.exists():
+        worktrees.create(worktree)
     else:
-        suffix = f"#locki-{sandbox.wt_id}"
-        for meta_dir, wt_path in [
-            (sandbox.meta_path, sandbox.wt_path),
-            *(
-                (sandbox.include_meta_path(i.name), sandbox.include_wt_path(i.name))
-                for i in sandbox.include
-                if sandbox.include_wt_path(i.name).exists() and sandbox.include_meta_path(i.name).exists()
-            ),
-        ]:
-            branch = live_branch(meta_dir)
-            if branch.startswith("(") or branch.endswith(suffix):
-                continue
-            new_branch = f"{branch.split('#locki-')[0]}{suffix}"
-            run_command(
-                ["git", "-C", str(wt_path), "checkout", "-B", new_branch],
-                f"Fixing branch to {click.style(new_branch, fg='green')}",
-            )
+        worktrees.fix_branches(worktree)
 
-    config = load_config(sandbox.repo)
+    containers.ensure_running(worktree)
+    daemon.ensure_running()
 
-    with file_lock(f"provision-{sandbox.wt_id}", "Waiting for another sandbox setup"):
-        result = run_in_vm(
-            ["incus", "list", "--format=csv", "--columns=ns", sandbox.wt_id],
-            "Checking container",
-            check=False,
-            print_success=False,
-        )
-        listing = result.stdout.decode()
-        if sandbox.wt_id in listing:
-            if "RUNNING" not in listing:
-                run_in_vm(
-                    ["incus", "start", sandbox.wt_id],
-                    "Starting container",
-                    check=False,
-                )
-        else:
-            incus_image = config.get_incus_image(sandbox.repo)
-
-            local_path = sandbox.repo / incus_image
-            with file_lock("image", "Waiting for another image import"):
-                image_ref = import_local_incus_image(local_path) if local_path.is_file() else incus_image
-
-                run_in_vm(
-                    ["incus", "init", image_ref, sandbox.wt_id],
-                    "Creating container",
-                    print_success=False,
-                )
-
-            run_in_vm(
-                [
-                    "incus",
-                    "config",
-                    "device",
-                    "add",
-                    sandbox.wt_id,
-                    "worktree",
-                    "disk",
-                    f"source={sandbox.wt_path}",
-                    f"path={sandbox.wt_path}",
-                ],
-                "Mounting worktree into container",
-                print_success=False,
-            )
-
-            run_in_vm(
-                ["incus", "start", sandbox.wt_id],
-                "Starting container",
-            )
-
-            setup_script = (
-                (PACKAGE_DATA / "container-setup.sh")
-                .read_bytes()
-                .replace(b"__AGENTS_MD_B64__", base64.b64encode((PACKAGE_DATA / "AGENTS.md").read_bytes()))
-                .replace(
-                    b"__LIBATOMIC_B64__",
-                    base64.b64encode((PACKAGE_DATA / "libatomic.so.1").read_bytes())
-                    if (PACKAGE_DATA / "libatomic.so.1").is_file()
-                    else b"",
-                )
-            )
-            env_flags = [flag for k, v in container_env(sandbox).items() for flag in ("--env", f"{k}={v}")]
-            run_in_vm(
-                [
-                    "incus",
-                    "exec",
-                    sandbox.wt_id,
-                    *env_flags,
-                    "--env",
-                    f"LOCKI_WORKTREES_HOME={WORKTREES}",
-                    "--",
-                    "/bin/sh",
-                ],
-                "Configuring container",
-                input=setup_script,
-                print_success=False,
-            )
-
-    # Idempotently start the Locki host daemon (SSH forced-command proxy + periodic cleanup).
-    RUNTIME.mkdir(parents=True, exist_ok=True)
-    client_ssh_dir = SANDBOX_HOME / ".ssh"
-    client_ssh_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-    ssh_port = 0
-    with file_lock("daemon", "Waiting for daemon start"):
-        alive = False
-        if PID_FILE.exists():
-            with contextlib.suppress(ProcessLookupError, ValueError, PermissionError, FileNotFoundError):
-                os.kill(int(PID_FILE.read_text().strip()), 0)
-                alive = True
-        if not alive:
-            PID_FILE.unlink(missing_ok=True)
-            PORT_FILE.unlink(missing_ok=True)
-            subprocess.Popen(
-                [sys.executable, "-m", "locki", "internal", "daemon"],
-                start_new_session=True,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-        for _ in range(100):  # up to 10s for the daemon to write its port
-            with contextlib.suppress(OSError, ValueError):
-                if ssh_port := int(PORT_FILE.read_text().strip()):
-                    break
-            time.sleep(0.1)
-    if not ssh_port:
-        logger.warning("Locki daemon did not report a port in time. Command bridge proxy is disabled in this sandbox.")
-    (client_ssh_dir / "locki-ssh-config").write_text(
-        (PACKAGE_DATA / "locki-ssh-config").read_text() + f"    Port {ssh_port}\n    User {getpass.getuser()}\n"
-    )
-
-    forwarded_env = {"TERM", "COLORTERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION", "LANG", "SSH_TTY"}
-
-    result = subprocess.run(
-        [
-            limactl(),
-            "shell",
-            "--yes",
-            "--preserve-env",
-            "--start",
-            "--workdir=/",
-            "locki",
-            "--",
-            "bash",
-            "-c",
-            " ".join(
-                [
-                    "sudo",
-                    "incus",
-                    "exec",
-                    shlex.quote(sandbox.wt_id),
-                    "--cwd",
-                    shlex.quote(str(sandbox.wt_path)),
-                    f"--env=LOCKI_WORKTREES_HOME={WORKTREES}",
-                    *(f"--env={k}={v}" for k, v in container_env(sandbox).items()),
-                    *(f'--env={env}="${env}"' for env in forwarded_env),
-                    "--",
-                    *((shlex.quote(a) for a in ctx.args) if ctx.args else ["bash"]),
-                ]
-            ),
-        ],
-        env={**os.environ, **LIMA_ENV, "LIMA_SHELLENV_ALLOW": ",".join(forwarded_env)},
-    )
+    result = containers.exec_interactive(worktree, ctx.args or ["bash"])
 
     clear = "\r\033[2K" if sys.stderr.isatty() else ""
     click.echo(clear, err=True)
     click.echo(f"{clear}{EXIT} Exited Locki sandbox.", err=True)
     click.echo(f"{clear}{INFO} Return to this sandbox:", err=True)
     click.echo(
-        f"{clear}{INFO}      via AI: {click.style(f'locki ai -m {sandbox.wt_id}', fg='green')}"
+        f"{clear}{INFO}      via AI: {click.style(f'locki ai -m {worktree.wt_id}', fg='green')}"
         f" (or just {click.style('locki ai', fg='green')} and find it in the list)",
         err=True,
     )
     click.echo(
-        f"{clear}{INFO}   via shell: {click.style(f'locki x -m {sandbox.wt_id}', fg='green')}",
+        f"{clear}{INFO}   via shell: {click.style(f'locki x -m {worktree.wt_id}', fg='green')}",
         err=True,
     )
-    click.echo(f"{clear}{INFO}     on disk: {click.style(pretty_path(sandbox.wt_path), fg='green')}", err=True)
+    click.echo(f"{clear}{INFO}     on disk: {click.style(pretty_path(worktree.wt_path), fg='green')}", err=True)
     raise SystemExit(result.returncode)

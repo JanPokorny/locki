@@ -36,7 +36,8 @@ from locki.paths import (
     WORKTREES,
     WORKTREES_META,
 )
-from locki.utils import LIMA_ENV, AliasGroup, limactl, vm_status
+from locki.services.vm import vm
+from locki.utils import AliasGroup
 
 logger = logging.getLogger(__name__)
 
@@ -49,15 +50,6 @@ VM_IDLE_SINCE_FILE = STATE / "cleanup" / "vm-idle-since"
 HOST_KEY = STATE / "ssh" / "host_key"
 CLIENT_KEY = SANDBOX_HOME / ".ssh" / "id_locki"
 AUTHORIZED_KEYS_FILE = STATE / "ssh" / "authorized_keys"
-
-
-def incus_exec(args: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [limactl(), "shell", "--tty=false", "locki", "--", "sudo", "incus", *args],
-        capture_output=True,
-        text=True,
-        env={**os.environ, **LIMA_ENV},
-    )
 
 
 # ── Command bridge grammar engine ───────────────────────────────────────────────
@@ -510,7 +502,7 @@ internal_app = click.group(cls=AliasGroup, help="Internal commands (invoked by L
 @internal_app.command("cleanup")
 def internal_cleanup() -> None:
     """One-shot: stop idle containers, remove orphans, power off idle VM."""
-    if vm_status() != "Running":
+    if vm.status() != "Running":
         sys.exit(1)
 
     try:
@@ -518,7 +510,7 @@ def internal_cleanup() -> None:
     except (FileNotFoundError, json.JSONDecodeError):
         last_active = {}
 
-    result = incus_exec(["list", "--format=json"])
+    result = vm.incus(["list", "--format=json"])
     try:
         containers = json.loads(result.stdout) if result.returncode == 0 else []
     except json.JSONDecodeError:
@@ -534,13 +526,13 @@ def internal_cleanup() -> None:
         src = pathlib.Path(source).resolve()
         if src.is_relative_to(worktrees_root) and not src.exists():
             logger.info("Deleting orphaned container %r (worktree %s is gone).", name, src)
-            incus_exec(["delete", "--force", name])
+            vm.incus(["delete", "--force", name])
             deleted.add(name)
             last_active.pop(name, None)
 
     running = {c["name"] for c in containers if c.get("status", "").lower() == "running"} - deleted
     active: set[str] = set()
-    ops = incus_exec(["operation", "list", "--format=json"])
+    ops = vm.incus(["operation", "list", "--format=json"])
     if ops.returncode == 0 and ops.stdout.strip():
         with contextlib.suppress(json.JSONDecodeError):
             for op in json.loads(ops.stdout):
@@ -556,7 +548,7 @@ def internal_cleanup() -> None:
             last_active[name] = now
         elif now - last_active[name] >= IDLE_TIMEOUT:
             logger.info("Stopping idle container %r (idle %.0fs).", name, now - last_active[name])
-            if incus_exec(["stop", name]).returncode == 0:
+            if vm.incus(["stop", name]).returncode == 0:
                 stopped.add(name)
             last_active.pop(name, None)
     last_active = {n: t for n, t in last_active.items() if n in running}
@@ -574,7 +566,7 @@ def internal_cleanup() -> None:
         VM_IDLE_SINCE_FILE.write_text(str(now))
     if now - idle_since >= VM_IDLE_TIMEOUT:
         logger.info("No running containers for %.0fs — stopping VM.", now - idle_since)
-        subprocess.run([limactl(), "stop", "locki"], capture_output=True, env={**os.environ, **LIMA_ENV})
+        vm.stop(force=False, check=False, quiet=True)
         VM_IDLE_SINCE_FILE.unlink(missing_ok=True)
         sys.exit(1)
 

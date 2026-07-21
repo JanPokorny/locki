@@ -3,8 +3,8 @@ import pwd
 
 import click
 
-from locki.cmd.new import create_sandbox_worktree
-from locki.utils import resolve_sandbox, sandbox_options
+from locki.services.worktree import worktrees
+from locki.utils import sandbox_options
 
 
 @click.command("cd")
@@ -22,15 +22,15 @@ def cd_cmd(match, interactive, create):
       locki cd -n                     # create new sandbox and open shell
     """
 
-    sandbox = resolve_sandbox(
+    worktree = worktrees.resolve(
         match=match,
         interactive=interactive,
         create="force" if create else "allow",
     )
 
-    if not sandbox.wt_path.exists():
-        create_sandbox_worktree(sandbox)
+    if not worktree.wt_path.exists():
+        worktrees.create(worktree)
 
     shell = os.environ.get("SHELL") or pwd.getpwuid(os.getuid()).pw_shell or "/bin/sh"
-    os.chdir(sandbox.wt_path)
+    os.chdir(worktree.wt_path)
     os.execvp(shell, [shell])

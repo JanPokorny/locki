@@ -16,15 +16,8 @@ import click
 
 from locki.paths import WORKTREES
 from locki.runes import INFO, SPINNER, SUCCESS
-from locki.utils import (
-    add_worktree,
-    cwd_git_repo,
-    fail,
-    json_option,
-    resolve_sandbox,
-    run_command,
-    sandbox_options,
-)
+from locki.services.worktree import worktrees
+from locki.utils import fail, json_option, run_command, sandbox_options
 
 
 def _validate_repo(path: pathlib.Path) -> pathlib.Path:
@@ -65,7 +58,7 @@ def include_cmd(match, interactive, repo_path, this_flag, as_json):
 
     # Resolve repo B (the one being added).
     if this_flag:
-        cwd_repo = cwd_git_repo()
+        cwd_repo = worktrees.cwd_repo
         if cwd_repo is None:
             fail("--this requires being inside a git repo.")
         repo_b = cwd_repo
@@ -76,32 +69,32 @@ def include_cmd(match, interactive, repo_path, this_flag, as_json):
         # implicit-target sandbox's repo.  Reject to force the user to be explicit.
         fail("Specify --repo <path> or use --this.")
 
-    sandbox = resolve_sandbox(
+    worktree = worktrees.resolve(
         match=match,
         interactive=interactive,
         create="deny",
         filter_out_current_repo=this_flag,
     )
 
-    if sandbox.repo.resolve() == repo_b.resolve():
+    if worktree.repo.resolve() == repo_b.resolve():
         fail("Cannot include a sandbox's own primary repo.")
 
-    name = f"{repo_b.name}-locki-{sandbox.wt_id}"
-    existing = {inc.name for inc in sandbox.include}
-    if name in existing or sandbox.include_wt_path(name).exists() or sandbox.include_meta_path(name).exists():
-        fail(f"Include {name!r} already exists in sandbox {sandbox.wt_id}. Remove it first.")
+    name = f"{repo_b.name}-locki-{worktree.wt_id}"
+    existing = {inc.name for inc in worktree.include}
+    if name in existing or worktree.include_wt_path(name).exists() or worktree.include_meta_path(name).exists():
+        fail(f"Include {name!r} already exists in sandbox {worktree.wt_id}. Remove it first.")
 
     click.echo(
         f"{SPINNER} Including "
-        f"{click.style(repo_b.name, fg='green')} in sandbox {click.style(sandbox.wt_id, fg='green')}.",
+        f"{click.style(repo_b.name, fg='green')} in sandbox {click.style(worktree.wt_id, fg='green')}.",
         err=True,
     )
-    include_wt = add_worktree(repo_b, sandbox.wt_id, parent_name=sandbox.repo.name)
+    include_wt = worktrees.add(repo_b, worktree.wt_id, parent_name=worktree.repo.name)
     if as_json:
         click.echo(
             json.dumps(
                 {
-                    "id": sandbox.wt_id,
+                    "id": worktree.wt_id,
                     "name": name,
                     "repo": str(repo_b),
                     "path": str(include_wt),
@@ -114,6 +107,6 @@ def include_cmd(match, interactive, repo_path, this_flag, as_json):
         err=True,
     )
     click.echo(
-        f"{INFO} Enter the sandbox with {click.style(f'locki x -m {sandbox.wt_id}', fg='green')}.",
+        f"{INFO} Enter the sandbox with {click.style(f'locki x -m {worktree.wt_id}', fg='green')}.",
         err=True,
     )

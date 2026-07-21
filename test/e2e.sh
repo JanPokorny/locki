@@ -338,7 +338,7 @@ TOML
 assert_output "dict incus_image runs ubuntu" "Ubuntu" locki x --new cat /etc/os-release
 
 # Export Ubuntu image to test local file + glob (split format: metadata + .root)
-LIMACTL=$(python -c 'from locki.utils import limactl; print(limactl())')
+LIMACTL=$(python -c 'from locki.services.vm import vm; print(vm.limactl)')
 UBUNTU_FP=$("$LIMACTL" shell --start --workdir=/ locki -- sudo incus config get "$UBUNTU_SB" volatile.base_image)
 "$LIMACTL" shell --start --workdir=/ locki -- sudo bash -c "
   set -e

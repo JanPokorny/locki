@@ -1,4 +1,4 @@
-"""Self-check for locki.utils.ai_title. Run: uv run python test/ai_title_test.py"""
+"""Self-check for WorktreeService.ai_title. Run: uv run python test/ai_title_test.py"""
 
 import os
 import pathlib
@@ -13,9 +13,10 @@ for var in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_D
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent / "src"))
 
 from locki.paths import SANDBOX_HOME  # noqa: E402
-from locki.utils import SandboxInfo, ai_title  # noqa: E402
+from locki.services.worktree import WorktreeInfo, worktrees  # noqa: E402
 
-s = SandboxInfo(wt_id="abcd1234", branch="x#locki-abcd1234", repo=pathlib.Path("/repo/proj"))
+ai_title = worktrees.ai_title
+s = WorktreeInfo(wt_id="abcd1234", branch="x#locki-abcd1234", repo=pathlib.Path("/repo/proj"))
 project = SANDBOX_HOME / ".claude" / "projects" / re.sub(r"[^a-zA-Z0-9]", "-", str(s.wt_path))
 
 assert ai_title(s) == "", "missing project dir -> empty"

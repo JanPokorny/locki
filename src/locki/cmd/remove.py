@@ -1,23 +1,13 @@
 import json
 import logging
-import shlex
-import shutil
 import subprocess
 
 import click
 
 from locki.runes import INFO, SUCCESS
-from locki.utils import (
-    SandboxInfo,
-    cwd_git_repo,
-    fail,
-    json_option,
-    list_sandboxes,
-    resolve_sandbox,
-    run_command,
-    run_in_vm,
-    sandbox_options,
-)
+from locki.services.container import containers
+from locki.services.worktree import WorktreeInfo, worktrees
+from locki.utils import fail, json_option, run_command, sandbox_options
 
 logger = logging.getLogger(__name__)
 
@@ -43,75 +33,15 @@ def _is_merged(repo_path: str, trunk: str, branch: str) -> bool:
     return cherry.returncode == 0 and cherry.stdout.strip().startswith("-")
 
 
-def _has_uncommitted_changes(sandbox: SandboxInfo, *, quiet: bool = False) -> bool:
+def _has_uncommitted_changes(worktree: WorktreeInfo, *, quiet: bool = False) -> bool:
     return bool(
         run_command(
-            ["git", "-C", str(sandbox.wt_path), "status", "--porcelain"],
+            ["git", "-C", str(worktree.wt_path), "status", "--porcelain"],
             "Checking for uncommitted changes",
             check=False,
             quiet=quiet,
         ).stdout.strip()
     )
-
-
-def _matching_branches(repo: str, wt_id: str) -> list[str]:
-    result = subprocess.run(
-        ["git", "-C", repo, "for-each-ref", "--format=%(refname:short)", f"refs/heads/*#locki-{wt_id}"],
-        capture_output=True,
-        text=True,
-        stdin=subprocess.DEVNULL,
-    )
-    return result.stdout.split()
-
-
-def _remove_sandbox(sandbox: SandboxInfo, *, branches: bool) -> None:
-    for inc in sandbox.include:
-        inc_wt = sandbox.include_wt_path(inc.name)
-        run_command(
-            ["git", "-C", str(inc.repo), "worktree", "remove", "--force", str(inc_wt)],
-            f"Removing include worktree {inc.name}",
-            check=False,
-        )
-        run_command(
-            ["git", "-C", str(inc.repo), "worktree", "prune"],
-            f"Pruning {inc.repo.name}",
-            check=False,
-        )
-        if branches:
-            for b in _matching_branches(str(inc.repo), sandbox.wt_id):
-                run_command(
-                    ["git", "-C", str(inc.repo), "branch", "-D", b],
-                    f"Removing include branch {b}",
-                    check=False,
-                )
-
-    # Delete the container and the sandbox-scoped cache folder in one VM roundtrip.
-    wt_id = shlex.quote(sandbox.wt_id)
-    run_in_vm(
-        [
-            "sh",
-            "-c",
-            f"incus delete --force {wt_id}; rm -rf /var/cache/locki/scoped/{wt_id}",
-        ],
-        "Removing container",
-        check=False,
-    )
-
-    shutil.rmtree(sandbox.wt_path, ignore_errors=True)
-    shutil.rmtree(sandbox.meta_path, ignore_errors=True)
-    run_command(
-        ["git", "-C", str(sandbox.repo), "worktree", "prune"],
-        "Pruning primary worktree",
-        check=False,
-    )
-
-    if branches:
-        for b in _matching_branches(str(sandbox.repo), sandbox.wt_id):
-            run_command(
-                ["git", "-C", str(sandbox.repo), "branch", "-D", b],
-                f"Removing branch {b}",
-                check=False,
-            )
 
 
 @click.command()
@@ -131,8 +61,8 @@ def remove_cmd(match, interactive, force, branches, merged, as_json):
     if merged:
         if match or interactive:
             fail("--merged cannot be combined with --match or --interactive.")
-        cwd_repo = cwd_git_repo()
-        all_sandboxes = list_sandboxes()
+        cwd_repo = worktrees.cwd_repo
+        all_sandboxes = worktrees.list()
         if cwd_repo:
             all_sandboxes = [s for s in all_sandboxes if s.repo.resolve() == cwd_repo.resolve()]
 
@@ -184,22 +114,24 @@ def remove_cmd(match, interactive, force, branches, merged, as_json):
             click.echo(f"     {s.branch}", err=True)
 
         for s in targets:
-            _remove_sandbox(s, branches=branches)
+            containers.remove(s.wt_id)
+            worktrees.remove(s, branches=branches)
             click.echo(f"{SUCCESS} Removed {s.branch}", err=True)
         if as_json:
             click.echo(json.dumps([dict(s) for s in targets]))
         return
 
-    sandbox = resolve_sandbox(match=match, interactive=interactive, create="deny")
+    worktree = worktrees.resolve(match=match, interactive=interactive, create="deny")
 
-    if not sandbox.wt_path.exists():
-        logger.info("Worktree %s no longer on disk; cleaning up metadata.", sandbox.wt_path)
+    if not worktree.wt_path.exists():
+        logger.info("Worktree %s no longer on disk; cleaning up metadata.", worktree.wt_path)
 
-    if sandbox.wt_path.exists() and not force and _has_uncommitted_changes(sandbox):
+    if worktree.wt_path.exists() and not force and _has_uncommitted_changes(worktree):
         fail(
-            f"Worktree for {sandbox.branch} in {sandbox.wt_path} has uncommitted changes. Commit or stash them, or use --force."
+            f"Worktree for {worktree.branch} in {worktree.wt_path} has uncommitted changes. Commit or stash them, or use --force."
         )
 
-    _remove_sandbox(sandbox, branches=branches)
+    containers.remove(worktree.wt_id)
+    worktrees.remove(worktree, branches=branches)
     if as_json:
-        click.echo(json.dumps([dict(sandbox)]))
+        click.echo(json.dumps([dict(worktree)]))

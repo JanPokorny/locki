@@ -4,7 +4,9 @@ import socket
 
 import click
 
-from locki.utils import fail, json_option, resolve_sandbox, run_in_vm, sandbox_options
+from locki.services.vm import vm
+from locki.services.worktree import worktrees
+from locki.utils import fail, json_option, sandbox_options
 
 
 def _parse_port_spec(spec: str) -> tuple[int, int]:
@@ -52,11 +54,11 @@ def port_forward_cmd(ctx, match, interactive, clear, list_forwards, as_json):
       locki pf -m feat --list        # list active forwards
       locki pf -m feat --clear       # remove all forwards
     """
-    sandbox = resolve_sandbox(match=match, interactive=interactive, create="deny")
+    worktree = worktrees.resolve(match=match, interactive=interactive, create="deny")
 
     # Fetch the container's status and devices in a single `incus list` roundtrip.
-    result = run_in_vm(
-        ["incus", "list", "--format=json", sandbox.wt_id],
+    result = vm.run(
+        ["incus", "list", "--format=json", worktree.wt_id],
         "Checking sandbox",
         check=False,
     )
@@ -64,19 +66,19 @@ def port_forward_cmd(ctx, match, interactive, clear, list_forwards, as_json):
         containers = json.loads(result.stdout.decode())
     except json.JSONDecodeError:
         containers = []
-    container = next((c for c in containers if c.get("name") == sandbox.wt_id), None)
+    container = next((c for c in containers if c.get("name") == worktree.wt_id), None)
     if container is None:
         fail("Did not match an existing sandbox.")
     if container.get("status", "").lower() != "running":
-        fail(f"Sandbox is not running. Run {click.style(f'locki x -m {sandbox.wt_id} true', fg='green')} to start it.")
+        fail(f"Sandbox is not running. Run {click.style(f'locki x -m {worktree.wt_id} true', fg='green')} to start it.")
 
     # Proxy devices on the container, tracked in memory as we mutate them.
     devices = {name: dev for name, dev in (container.get("devices") or {}).items() if name.startswith("port-fwd-")}
 
     if clear:
         if devices:
-            wt = shlex.quote(sandbox.wt_id)
-            run_in_vm(
+            wt = shlex.quote(worktree.wt_id)
+            vm.run(
                 ["sh", "-c", "; ".join(f"incus config device remove {wt} {shlex.quote(n)}" for n in devices)],
                 f"Removing {len(devices)} port forward(s)",
             )
@@ -93,19 +95,19 @@ def port_forward_cmd(ctx, match, interactive, clear, list_forwards, as_json):
             fail(f"Host port {host_port} is not allowed (must be >= 1024).")
         name = f"port-fwd-{host_port}"
         if name in devices:
-            run_in_vm(
-                ["incus", "config", "device", "remove", sandbox.wt_id, name],
+            vm.run(
+                ["incus", "config", "device", "remove", worktree.wt_id, name],
                 f"Removing existing forward on host port {host_port}",
                 check=False,
                 quiet=True,
             )
-        run_in_vm(
+        vm.run(
             [
                 "incus",
                 "config",
                 "device",
                 "add",
-                sandbox.wt_id,
+                worktree.wt_id,
                 name,
                 "proxy",
                 f"listen=tcp:0.0.0.0:{host_port}",
