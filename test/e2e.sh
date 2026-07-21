@@ -369,7 +369,7 @@ cat > "$REPO/locki.toml" << 'TOML'
 ide_command = "touch /tmp/locki-e2e-pwned"
 TOML
 assert_ok "repo locki.toml cannot set ide_command" \
-    python -c "import sys; from locki.config import load_config; from pathlib import Path; sys.exit('pwned' in load_config(Path('$REPO'), skip_auto_setup=True).ide_command)"
+    python -c "import sys; from locki.config import load_config; from pathlib import Path; sys.exit('pwned' in load_config(Path('$REPO')).ide_command)"
 
 rm -f "$REPO/locki.toml"
 
@@ -545,6 +545,18 @@ FAKE_SHELL="$TMPDIR_ROOT/fake-shell"
 printf '#!/bin/bash\npwd\n' > "$FAKE_SHELL"
 chmod +x "$FAKE_SHELL"
 assert_output "locki cd opens shell in worktree" "-locki-$AUTH" env SHELL="$FAKE_SHELL" locki cd -m "$AUTH"
+
+# ── locki ai extra args ──────────────────────────────────────────────────────
+
+echo
+echo "Testing locki ai extra args..."
+
+AI_CONFIG="$XDG_CONFIG_HOME/locki/config.toml"
+cp "$AI_CONFIG" "$AI_CONFIG.bak"
+printf 'ai_command = "echo ai-ran"\nide_command = "true"\n' > "$AI_CONFIG"
+assert_output "locki ai runs configured command" "ai-ran" locki ai -m "$LOGIN"
+assert_output "locki ai forwards extra args" "ai-ran --resume extra-arg" locki ai -m "$LOGIN" --resume extra-arg
+mv "$AI_CONFIG.bak" "$AI_CONFIG"
 
 # ── locki list outside git repo ─────────────────────────────────────────────
 

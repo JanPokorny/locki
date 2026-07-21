@@ -16,7 +16,7 @@ import click
 
 from locki.paths import WORKTREES
 from locki.runes import INFO, SPINNER, SUCCESS
-from locki.services.worktree import worktrees
+from locki.services.worktree import worktrees, wt_dir_name
 from locki.utils import fail, json_option, run_command, sandbox_options
 
 
@@ -79,7 +79,7 @@ def include_cmd(match, interactive, repo_path, this_flag, as_json):
     if worktree.repo.resolve() == repo_b.resolve():
         fail("Cannot include a sandbox's own primary repo.")
 
-    name = f"{repo_b.name}-locki-{worktree.wt_id}"
+    name = wt_dir_name(repo_b.name, worktree.wt_id)
     existing = {inc.name for inc in worktree.include}
     if name in existing or worktree.include_wt_path(name).exists() or worktree.include_meta_path(name).exists():
         fail(f"Include {name!r} already exists in sandbox {worktree.wt_id}. Remove it first.")

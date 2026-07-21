@@ -3,6 +3,7 @@ import json
 import click
 
 from locki.runes import INFO
+from locki.services.home import home
 from locki.services.worktree import worktrees
 from locki.utils import format_table, json_option, pretty_path
 
@@ -21,7 +22,7 @@ def list_cmd(show_all: bool, as_json: bool) -> None:
         listed = [s for s in listed if s.repo.resolve() == cwd_repo.resolve()]
 
     if as_json:
-        click.echo(json.dumps([dict(s) | {"title": worktrees.ai_title(s)} for s in listed]))
+        click.echo(json.dumps([dict(s) | {"title": home.ai_title(s.wt_path)} for s in listed]))
         return
 
     if not listed:
@@ -38,7 +39,7 @@ def list_cmd(show_all: bool, as_json: bool) -> None:
 
     rows: list[tuple[str, ...]] = []
     for s in listed:
-        row = [s.wt_id, s.branch, worktrees.ai_title(s), pretty_path(s.wt_path)]
+        row = [s.wt_id, s.branch, home.ai_title(s.wt_path), pretty_path(s.wt_path)]
         if show_all:
             row.append(pretty_path(s.repo))
         if has_includes:

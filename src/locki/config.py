@@ -76,7 +76,7 @@ class LockiConfig:
         fail(f"Ambiguous incus_image glob '{self.incus_image}' for {_arch()}: {[m.name for m in matches]}")
 
 
-def load_config(git_root: pathlib.Path | None, *, skip_auto_setup: bool = False) -> LockiConfig:
+def load_config(git_root: pathlib.Path | None) -> LockiConfig:
     """Load config from user config and repo locki.toml. Repo config wins on conflict.
     *git_root=None* skips repo-specific config (useful when running outside a git repo)."""
     user_data: dict = {}
@@ -102,15 +102,7 @@ def load_config(git_root: pathlib.Path | None, *, skip_auto_setup: bool = False)
                 )
                 del repo_data[key]
 
-    config = LockiConfig.from_dict(deep_merge(user_data, repo_data))
-
-    if not skip_auto_setup and (not config.ai_command or not config.ide_command):
-        from locki.cmd.setup import setup_cmd
-
-        setup_cmd.main([], standalone_mode=False)
-        return load_config(git_root, skip_auto_setup=True)
-
-    return config
+    return LockiConfig.from_dict(deep_merge(user_data, repo_data))
 
 
 def save_user_config(key: str, value: object) -> None:

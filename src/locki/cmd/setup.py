@@ -8,7 +8,7 @@ import time
 
 import click
 
-from locki.config import save_user_config
+from locki.config import LockiConfig, load_config, save_user_config
 from locki.paths import HOME, SANDBOX_HOME, USER_CONFIG
 from locki.runes import INFO, SUCCESS
 
@@ -152,3 +152,12 @@ def setup_cmd(defaults: bool, copy_only: bool):
     if not copy_only:
         click.echo(f"\n{SUCCESS} Config saved to {USER_CONFIG}", err=True)
         click.echo(f"{SUCCESS} Re-run setup anytime with {click.style('locki setup', fg='green')}.", err=True)
+
+
+def ensure_configured(git_root: pathlib.Path | None) -> LockiConfig:
+    """Load config, running the setup wizard first if ai/ide commands are missing."""
+    config = load_config(git_root)
+    if not config.ai_command or not config.ide_command:
+        setup_cmd.main([], standalone_mode=False)
+        config = load_config(git_root)
+    return config

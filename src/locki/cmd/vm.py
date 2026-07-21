@@ -5,7 +5,7 @@ import sys
 
 import click
 
-from locki.paths import WORKTREES, WORKTREES_META
+from locki.paths import WORKTREES
 from locki.runes import INFO
 from locki.services.vm import vm
 from locki.services.worktree import worktrees
@@ -30,21 +30,20 @@ def vm_status_cmd(as_json):
             check=False,
             quiet=True,
         )
+        by_id = {s.wt_id: s for s in worktrees.list()}
         for line in result.stdout.decode().splitlines():
             wt_id, sep, container_status = line.partition(",")
             if not sep:
                 continue
             wt_id = wt_id.strip()
-            meta_dir = next(WORKTREES_META.glob(f"*{wt_id}"), None)
-            wt_path = next(WORKTREES.glob(f"*{wt_id}"), None)
-            repo_file = meta_dir / "repo" if meta_dir else None
+            sandbox = by_id.get(wt_id)
             sandbox_list.append(
                 {
                     "id": wt_id,
                     "status": container_status.strip().lower(),
-                    "repo": repo_file.read_text().strip() if repo_file and repo_file.exists() else "",
-                    "branch": worktrees.live_branch(meta_dir) if meta_dir else "",
-                    "worktree": str(wt_path) if wt_path else "",
+                    "repo": str(sandbox.repo) if sandbox else "",
+                    "branch": sandbox.branch if sandbox else "",
+                    "worktree": str(sandbox.wt_path) if sandbox else "",
                 }
             )
 

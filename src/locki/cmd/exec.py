@@ -1,4 +1,5 @@
 import sys
+import typing
 
 import click
 
@@ -6,9 +7,47 @@ from locki.paths import WORKTREES
 from locki.runes import EXIT, INFO, SPINNER
 from locki.services.container import containers
 from locki.services.daemon import daemon
+from locki.services.home import home
 from locki.services.vm import vm
 from locki.services.worktree import WorktreeInfo, worktrees
 from locki.utils import pretty_path, sandbox_options
+
+
+def enter_sandbox(worktree: WorktreeInfo, command: list[str]) -> typing.NoReturn:
+    """Bring up everything a sandbox needs (home, VM, worktree, container, daemon),
+    run *command* in it interactively, and exit with its return code."""
+    click.echo(f"{SPINNER} Entering a Locki sandbox.", err=True)
+
+    WORKTREES.mkdir(parents=True, exist_ok=True)
+    home.prepare(worktree.wt_path)
+
+    vm.ensure_running()
+
+    if not worktree.wt_path.exists():
+        worktrees.create(worktree)
+    else:
+        worktrees.fix_branches(worktree)
+
+    containers.ensure_running(worktree)
+    daemon.ensure_running()
+
+    result = containers.exec_interactive(worktree, command)
+
+    clear = "\r\033[2K" if sys.stderr.isatty() else ""
+    click.echo(clear, err=True)
+    click.echo(f"{clear}{EXIT} Exited Locki sandbox.", err=True)
+    click.echo(f"{clear}{INFO} Return to this sandbox:", err=True)
+    click.echo(
+        f"{clear}{INFO}      via AI: {click.style(f'locki ai -m {worktree.wt_id}', fg='green')}"
+        f" (or just {click.style('locki ai', fg='green')} and find it in the list)",
+        err=True,
+    )
+    click.echo(
+        f"{clear}{INFO}   via shell: {click.style(f'locki x -m {worktree.wt_id}', fg='green')}",
+        err=True,
+    )
+    click.echo(f"{clear}{INFO}     on disk: {click.style(pretty_path(worktree.wt_path), fg='green')}", err=True)
+    raise SystemExit(result.returncode)
 
 
 @click.command(
@@ -29,42 +68,9 @@ def exec_cmd(ctx, match, interactive, create):
       locki x -n bash                 # create new sandbox
       locki x bash -c "echo hello"    # run a one-liner
     """
-    click.echo(f"{SPINNER} Entering a Locki sandbox.", err=True)
-
-    pre_resolved = ctx.obj if isinstance(ctx.obj, WorktreeInfo) else None
-    worktree = pre_resolved or worktrees.resolve(
+    worktree = worktrees.resolve(
         match=match,
         interactive=interactive,
         create="force" if create else "allow",
     )
-
-    WORKTREES.mkdir(parents=True, exist_ok=True)
-    worktrees.prepare_home(worktree)
-
-    vm.ensure_running()
-
-    if not worktree.wt_path.exists():
-        worktrees.create(worktree)
-    else:
-        worktrees.fix_branches(worktree)
-
-    containers.ensure_running(worktree)
-    daemon.ensure_running()
-
-    result = containers.exec_interactive(worktree, ctx.args or ["bash"])
-
-    clear = "\r\033[2K" if sys.stderr.isatty() else ""
-    click.echo(clear, err=True)
-    click.echo(f"{clear}{EXIT} Exited Locki sandbox.", err=True)
-    click.echo(f"{clear}{INFO} Return to this sandbox:", err=True)
-    click.echo(
-        f"{clear}{INFO}      via AI: {click.style(f'locki ai -m {worktree.wt_id}', fg='green')}"
-        f" (or just {click.style('locki ai', fg='green')} and find it in the list)",
-        err=True,
-    )
-    click.echo(
-        f"{clear}{INFO}   via shell: {click.style(f'locki x -m {worktree.wt_id}', fg='green')}",
-        err=True,
-    )
-    click.echo(f"{clear}{INFO}     on disk: {click.style(pretty_path(worktree.wt_path), fg='green')}", err=True)
-    raise SystemExit(result.returncode)
+    enter_sandbox(worktree, ctx.args or ["bash"])

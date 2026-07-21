@@ -3,7 +3,7 @@ import subprocess
 
 import click
 
-from locki.config import load_config
+from locki.cmd.setup import ensure_configured
 from locki.paths import USER_CONFIG
 from locki.services.worktree import worktrees
 from locki.utils import fail, sandbox_options
@@ -22,7 +22,7 @@ def ide_cmd(match, interactive, create):
       locki ide -n                    # create new sandbox and open editor
     """
 
-    ide_command = load_config(worktrees.cwd_repo).ide_command
+    ide_command = ensure_configured(worktrees.cwd_repo).ide_command
 
     if not ide_command:
         fail(

@@ -6,21 +6,18 @@ worktree can exist without a container (e.g. after `locki vm delete`).
 
 import dataclasses
 import functools
-import json
 import os
 import pathlib
-import re
 import secrets
 import shutil
 import subprocess
 import sys
-from contextlib import suppress
 
 import click
 
-from locki.paths import HOME, PACKAGE_DATA, SANDBOX_HOME, WORKTREES, WORKTREES_META
-from locki.runes import WARNING
-from locki.utils import deep_merge, fail, pretty_path, run_command
+from locki.paths import HOME, PACKAGE_DATA, WORKTREES, WORKTREES_META
+from locki.services.home import home
+from locki.utils import fail, pretty_path, run_command
 
 GIT_HOOKS = [
     "applypatch-msg",
@@ -41,6 +38,23 @@ GIT_HOOKS = [
     "fsmonitor-watchman",
 ]
 
+WT_ID_LEN = 8
+
+
+# The `<repo>-locki-<id>` / `<stem>#locki-<id>` naming convention, single-sourced:
+
+
+def wt_dir_name(repo_name: str, wt_id: str) -> str:
+    return f"{repo_name}-locki-{wt_id}"
+
+
+def wt_id_from_dir(dir_name: str) -> str:
+    return dir_name[-WT_ID_LEN:]
+
+
+def branch_suffix(wt_id: str) -> str:
+    return f"#locki-{wt_id}"
+
 
 @dataclasses.dataclass
 class IncludeInfo:
@@ -59,7 +73,7 @@ class WorktreeInfo:
 
     def __post_init__(self):
         if not self.wt_dir:
-            self.wt_dir = f"{self.repo.name}-locki-{self.wt_id}"
+            self.wt_dir = wt_dir_name(self.repo.name, self.wt_id)
 
     @property
     def wt_path(self) -> pathlib.Path:
@@ -89,7 +103,7 @@ class WorktreeInfo:
 
 def _matching_branches(repo: str, wt_id: str) -> list[str]:
     result = subprocess.run(
-        ["git", "-C", repo, "for-each-ref", "--format=%(refname:short)", f"refs/heads/*#locki-{wt_id}"],
+        ["git", "-C", repo, "for-each-ref", "--format=%(refname:short)", f"refs/heads/*{branch_suffix(wt_id)}"],
         capture_output=True,
         text=True,
         stdin=subprocess.DEVNULL,
@@ -114,13 +128,13 @@ class WorktreeService:
         sandbox repo's name) the worktree becomes an include inside that sandbox;
         without it, the primary worktree.  *from_ref* bases a newly created branch
         on that ref instead of HEAD."""
-        branch = branch or f"untitled#locki-{wt_id}"
-        dir_name = f"{repo.name}-locki-{wt_id}"
+        branch = branch or f"untitled{branch_suffix(wt_id)}"
+        dir_name = wt_dir_name(repo.name, wt_id)
         if parent_name is None:
             wt_path = WORKTREES / dir_name
             meta_path = WORKTREES_META / dir_name
         else:
-            parent_dir = f"{parent_name}-locki-{wt_id}"
+            parent_dir = wt_dir_name(parent_name, wt_id)
             wt_path = WORKTREES / parent_dir / ".locki" / "include" / dir_name
             meta_path = WORKTREES_META / parent_dir / "include" / dir_name
 
@@ -206,51 +220,9 @@ class WorktreeService:
         (locki_dir / ".gitignore").write_text("*\n")
         (locki_dir / "tmp").mkdir(exist_ok=True)
 
-    def prepare_home(self, worktree: WorktreeInfo) -> None:
-        """Seed the shared sandbox home with per-sandbox trust and agent settings."""
-        SANDBOX_HOME.mkdir(parents=True, exist_ok=True)
-        for path, updates in [
-            (SANDBOX_HOME / ".claude.json", {"projects": {str(worktree.wt_path): {"hasTrustDialogAccepted": True}}}),
-            (
-                SANDBOX_HOME / ".claude" / "settings.json",
-                {
-                    "skipDangerousModePermissionPrompt": True,
-                    "permissions": {"defaultMode": "bypassPermissions"},
-                    "hooks": {
-                        "PreToolUse": [
-                            {
-                                "matcher": "*",
-                                "hooks": [
-                                    {"type": "command", "command": "sh /root/.claude/hooks/locki-branch-guard.sh"}
-                                ],
-                            }
-                        ]
-                    },
-                },
-            ),
-            (
-                SANDBOX_HOME / ".config" / "opencode" / "opencode.json",
-                {
-                    "$schema": "https://opencode.ai/config.json",
-                    "permission": "allow",
-                    "instructions": ["/etc/opencode/AGENTS.md"],
-                },
-            ),
-        ]:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            try:
-                existing = json.loads(path.read_text()) if path.exists() else {}
-                path.write_text(json.dumps(deep_merge(existing, updates), indent=2))
-            except json.JSONDecodeError:
-                click.echo(f"{WARNING} Invalid JSON data found in {path}, not updating it.")
-
-        guard = SANDBOX_HOME / ".claude" / "hooks" / "locki-branch-guard.sh"
-        guard.parent.mkdir(parents=True, exist_ok=True)
-        guard.write_bytes((PACKAGE_DATA / "claude-branch-guard.sh").read_bytes())
-
     def fix_branches(self, worktree: WorktreeInfo) -> None:
         """Rename manually-switched branches to carry the sandbox's #locki-<id> suffix."""
-        suffix = f"#locki-{worktree.wt_id}"
+        suffix = branch_suffix(worktree.wt_id)
         for meta_dir, wt_path in [
             (worktree.meta_path, worktree.wt_path),
             *(
@@ -323,9 +295,9 @@ class WorktreeService:
         show the same id as their parent.
         """
         try:
-            wt_id = meta_dir.resolve().relative_to(WORKTREES_META.resolve()).parts[0][-8:]
+            wt_id = wt_id_from_dir(meta_dir.resolve().relative_to(WORKTREES_META.resolve()).parts[0])
         except (ValueError, IndexError):
-            wt_id = meta_dir.name[-8:]
+            wt_id = wt_id_from_dir(meta_dir.name)
         try:
             gitdir_line = (meta_dir / ".git").read_text().strip()
             if gitdir_line.startswith("gitdir:"):
@@ -333,34 +305,10 @@ class WorktreeService:
                 head = (gitdir / "HEAD").read_text().strip()
                 if head.startswith("ref: refs/heads/"):
                     return head.removeprefix("ref: refs/heads/")
-                return f"(detached #locki-{wt_id})"
+                return f"(detached {branch_suffix(wt_id)})"
         except OSError:
             pass
-        return f"(broken #locki-{wt_id})"
-
-    def ai_title(self, worktree: WorktreeInfo) -> str:
-        """Last AI-generated session title from the sandbox's Claude Code transcripts, or "".
-
-        Claude Code appends `{"type":"ai-title","aiTitle":...}` lines to
-        `~/.claude/projects/<munged-cwd>/<session>.jsonl`; the sandbox's `/root` is
-        SANDBOX_HOME, so those are directly readable here. Internal format
-        (observed on 2.1.212) -- fail soft on any surprise.
-        """
-        project = SANDBOX_HOME / ".claude" / "projects" / re.sub(r"[^a-zA-Z0-9]", "-", str(worktree.wt_path))
-        for jsonl in sorted(project.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True):
-            title = ""
-            try:
-                # ceiling: full scan, transcripts reach MBs; upgrade: tail-read (title recurs every ~25 lines)
-                lines = jsonl.read_text().splitlines()
-            except OSError:
-                continue
-            for line in lines:
-                if '"type":"ai-title"' in line:
-                    with suppress(json.JSONDecodeError):  # torn line from a live append
-                        title = json.loads(line).get("aiTitle") or title
-            if title:
-                return title
-        return ""
+        return f"(broken {branch_suffix(wt_id)})"
 
     def list(self) -> list[WorktreeInfo]:
         """Every Locki sandbox on disk, read from the meta directory.
@@ -392,7 +340,7 @@ class WorktreeService:
                         )
             found.append(
                 WorktreeInfo(
-                    wt_id=meta_dir.name[-8:],
+                    wt_id=wt_id_from_dir(meta_dir.name),
                     branch=self.live_branch(meta_dir),
                     repo=pathlib.Path((meta_dir / "repo").read_text().strip()),
                     wt_dir=wt_dir,
@@ -424,8 +372,8 @@ class WorktreeService:
         return pathlib.Path(result.stdout.strip()).resolve()
 
     def new(self, repo: pathlib.Path, branch_stem: str = "untitled") -> WorktreeInfo:
-        wt_id = "".join(secrets.choice("abcdefghijklmnopqrstuvwxyz0123456789") for _ in range(8))
-        return WorktreeInfo(wt_id=wt_id, branch=f"{branch_stem}#locki-{wt_id}", repo=repo)
+        wt_id = "".join(secrets.choice("abcdefghijklmnopqrstuvwxyz0123456789") for _ in range(WT_ID_LEN))
+        return WorktreeInfo(wt_id=wt_id, branch=f"{branch_stem}{branch_suffix(wt_id)}", repo=repo)
 
     def resolve(
         self,
@@ -451,9 +399,6 @@ class WorktreeService:
             repo): return the current sandbox directly.
         """
         cwd_repo = self.cwd_repo
-
-        if sum([create == "force", match is not None, interactive]) > 1:
-            fail("--new, --match, and --interactive are mutually exclusive.")
 
         if create == "force":
             if cwd_repo is None:
@@ -512,7 +457,7 @@ class WorktreeService:
                 choices.append(Choice(value="__create__", name="(create new)"))
             for s in sorted(candidate_sandboxes, key=lambda x: x.branch):
                 label = s.branch + (f" ({pretty_path(s.repo)})" if scope_all else "")
-                if title := self.ai_title(s):
+                if title := home.ai_title(s.wt_path):
                     label += f" — {title}"
                 choices.append(Choice(value=s.wt_id, name=label))
             if not scope_all and not filter_out_current_repo:

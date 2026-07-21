@@ -1,4 +1,5 @@
 import fcntl
+import functools
 import logging
 import os
 import pathlib
@@ -60,13 +61,25 @@ class AliasGroup(click.Group):
 
 
 def sandbox_options(create: bool = False):
-    """Shared `-m/-i[/-n]` sandbox-selection options."""
+    """Shared `-m/-i[/-n]` sandbox-selection options; enforces their mutual exclusivity."""
 
     def deco(f):
+        @functools.wraps(f)
+        def wrapper(*args, **kwargs):
+            if sum([bool(kwargs.get("create")), kwargs["match"] is not None, kwargs["interactive"]]) > 1:
+                fail("--new, --match, and --interactive are mutually exclusive.")
+            return f(*args, **kwargs)
+
         if create:
-            f = click.option("-n", "--new", "create", is_flag=True, default=False, help="Create a new sandbox.")(f)
-        f = click.option("-i", "--interactive", is_flag=True, default=False, help="Force interactive picker.")(f)
-        return click.option("-m", "--match", default=None, help="Match a sandbox by id prefix or branch substring.")(f)
+            wrapper = click.option("-n", "--new", "create", is_flag=True, default=False, help="Create a new sandbox.")(
+                wrapper
+            )
+        wrapper = click.option("-i", "--interactive", is_flag=True, default=False, help="Force interactive picker.")(
+            wrapper
+        )
+        return click.option("-m", "--match", default=None, help="Match a sandbox by id prefix or branch substring.")(
+            wrapper
+        )
 
     return deco
 
