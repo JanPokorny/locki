@@ -6,8 +6,9 @@ import click
 
 from locki.paths import WORKTREES
 from locki.runes import INFO
+from locki.services.container import SCOPED_CACHE
 from locki.services.vm import vm
-from locki.services.worktree import WorktreeInfo, worktrees
+from locki.services.worktree import WT_DIR_TAG, WorktreeInfo, worktrees
 from locki.utils import AliasGroup, fail, format_table, json_option, pretty_path
 
 
@@ -93,28 +94,29 @@ def vm_delete_cmd(yes):
 
 _PRUNE_SCRIPT = r"""
 set -eu
-CACHE=/var/cache/locki
+REGISTRY_CACHE=/var/cache/locki/registry-cache
+SCOPED=__SCOPED_CACHE__
 WORKTREES=__WORKTREES__
 
 size() { du -sb "$@" 2>/dev/null | awk '{s+=$1} END {print s+0}'; }
 
-BEFORE=$(size "$CACHE/registry-cache" "$CACHE/scoped")
+BEFORE=$(size "$REGISTRY_CACHE" "$SCOPED")
 
-if [ -d "$CACHE/registry-cache" ]; then
-  find "$CACHE/registry-cache" -mindepth 1 -delete 2>/dev/null || true
+if [ -d "$REGISTRY_CACHE" ]; then
+  find "$REGISTRY_CACHE" -mindepth 1 -delete 2>/dev/null || true
   systemctl restart nginx 2>/dev/null || true
 fi
 
 # Sandbox-scoped caches live under scoped/<wt-id>/; drop entries whose sandbox
 # worktree no longer exists (the worktrees dir is mounted in the VM at the host path).
-if [ -d "$CACHE/scoped" ]; then
-  for dir in "$CACHE/scoped"/*; do
+if [ -d "$SCOPED" ]; then
+  for dir in "$SCOPED"/*; do
     [ -e "$dir" ] || continue
-    ls -d "$WORKTREES"/*"-locki-$(basename "$dir")" >/dev/null 2>&1 || rm -rf "$dir"
+    ls -d "$WORKTREES"/*"__WT_TAG__$(basename "$dir")" >/dev/null 2>&1 || rm -rf "$dir"
   done
 fi
 
-AFTER=$(size "$CACHE/registry-cache" "$CACHE/scoped")
+AFTER=$(size "$REGISTRY_CACHE" "$SCOPED")
 FREED=$((BEFORE - AFTER))
 [ "$FREED" -lt 0 ] && FREED=0
 echo "$FREED"
@@ -127,9 +129,12 @@ def vm_prune_cmd(as_json):
     if vm.status() != "Running":
         fail("VM is not running.")
 
-    result = vm.run(
-        ["bash", "-c", _PRUNE_SCRIPT.replace("__WORKTREES__", shlex.quote(str(WORKTREES)))], "Pruning caches"
+    script = (
+        _PRUNE_SCRIPT.replace("__WORKTREES__", shlex.quote(str(WORKTREES)))
+        .replace("__SCOPED_CACHE__", SCOPED_CACHE)
+        .replace("__WT_TAG__", WT_DIR_TAG)
     )
+    result = vm.run(["bash", "-c", script], "Pruning caches")
 
     freed = int(result.stdout.decode().strip().splitlines()[-1])
     if as_json:

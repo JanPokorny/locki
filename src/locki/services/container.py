@@ -7,12 +7,16 @@ import typing
 
 from locki.config import load_config
 from locki.paths import PACKAGE_DATA, WORKTREES
-from locki.services.vm import vm
+from locki.services.vm import INTERCEPTED_HOSTS, vm
 from locki.services.worktree import WorktreeInfo
 from locki.utils import fail, file_lock
 
 # The incus disk device that mounts the worktree; cleanup reads its source to map a container to its worktree.
 WORKTREE_DEVICE = "worktree"
+
+# Root of the per-sandbox cache folders (shared caches live in /var/cache/locki directly);
+# shims reach their sandbox's folder via the LOCKI_SCOPED_CACHE env var.
+SCOPED_CACHE = "/var/cache/locki/scoped"
 
 
 class ContainerService:
@@ -48,6 +52,7 @@ class ContainerService:
             "JULIA_DEPOT_PATH": "/var/cache/locki/julia",
             "LEIN_HOME": "/var/cache/locki/lein",
             "LOCKI_SANDBOX_ID": worktree.wt_id,
+            "LOCKI_SCOPED_CACHE": f"{SCOPED_CACHE}/{worktree.wt_id}",
             "LOCKI_WORKTREES_HOME": str(WORKTREES),
             "MAVEN_OPTS": "-Dmaven.repo.local=/var/cache/locki/maven",
             "MISE_CACHE_DIR": "/var/cache/locki/mise",
@@ -62,7 +67,7 @@ class ContainerService:
             "NUGET_PACKAGES": "/var/cache/locki/nuget",
             "PATH": "/opt/locki/bin/high:/root/.local/bin:/usr/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/locki/bin/low",
             "PIP_CACHE_DIR": "/var/cache/locki/pip",
-            "POETRY_VIRTUALENVS_PATH": f"/var/cache/locki/scoped/{worktree.wt_id}/poetry-venvs",
+            "POETRY_VIRTUALENVS_PATH": f"{SCOPED_CACHE}/{worktree.wt_id}/poetry-venvs",
             "POETRY_VIRTUALENVS_IN_PROJECT": "false",
             "PNPM_HOME": "/usr/share/pnpm",
             "PUB_CACHE": "/var/cache/locki/pub",
@@ -191,6 +196,7 @@ class ContainerService:
                 setup_script = (
                     (PACKAGE_DATA / "container-setup.sh")
                     .read_bytes()
+                    .replace(b"__INTERCEPTED_HOSTS__", " ".join(INTERCEPTED_HOSTS).encode())
                     .replace(b"__AGENTS_MD_B64__", base64.b64encode((PACKAGE_DATA / "AGENTS.md").read_bytes()))
                     .replace(
                         b"__LIBATOMIC_B64__",
@@ -218,9 +224,7 @@ class ContainerService:
         """Delete container(s) and their sandbox-scoped cache folders in one VM roundtrip."""
         if not wt_ids:
             return
-        script = "; ".join(
-            f"incus delete --force {q}; rm -rf /var/cache/locki/scoped/{q}" for q in map(shlex.quote, wt_ids)
-        )
+        script = "; ".join(f"incus delete --force {q}; rm -rf {SCOPED_CACHE}/{q}" for q in map(shlex.quote, wt_ids))
         vm.run(
             ["sh", "-c", script],
             "Removing containers" if len(wt_ids) > 1 else "Removing container",

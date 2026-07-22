@@ -104,10 +104,10 @@ EOF
 ## node_modules directory already exists (respect it instead of nesting a junk symlink).
 cat > /opt/locki/bin/high/locki-node-modules-redirect << 'EOF'
 #!/bin/sh
-[ -n "${LOCKI_SANDBOX_ID:-}" ] || exit 0
+[ -n "${LOCKI_SCOPED_CACHE:-}" ] || exit 0
 _dir="$("$(locki-command-real-or-autoinstalled npm)" prefix 2>/dev/null)" || exit 0
 [ -f "$_dir/package.json" ] || exit 0
-_target="/var/cache/locki/scoped/$LOCKI_SANDBOX_ID/node-modules${_dir}/node_modules"
+_target="$LOCKI_SCOPED_CACHE/node-modules${_dir}/node_modules"
 if [ -L "$_dir/node_modules" ] || [ ! -e "$_dir/node_modules" ]; then
   mkdir -p "$_target" 2>/dev/null || exit 0
   ln -sfn "$_target" "$_dir/node_modules" 2>/dev/null || true
@@ -202,9 +202,9 @@ cat > /opt/locki/bin/high/uv << 'EOF'
 #!/bin/bash
 set -eo pipefail
 _real=$(locki-command-real-or-autoinstalled uv) || exit 1
-if [ -n "${LOCKI_SANDBOX_ID:-}" ] && _dir="$("$_real" workspace dir 2>/dev/null)"; then
+if [ -n "${LOCKI_SCOPED_CACHE:-}" ] && _dir="$("$_real" workspace dir 2>/dev/null)"; then
   if [ -L "$_dir/.venv" ] || [ ! -e "$_dir/.venv" ]; then
-    export UV_PROJECT_ENVIRONMENT="/var/cache/locki/scoped/$LOCKI_SANDBOX_ID/uv-venvs${_dir}/.venv"
+    export UV_PROJECT_ENVIRONMENT="$LOCKI_SCOPED_CACHE/uv-venvs${_dir}/.venv"
     ln -sfn "$UV_PROJECT_ENVIRONMENT" "$_dir/.venv" 2>/dev/null || true
   fi
 fi
@@ -286,8 +286,8 @@ if [ -n "$is_build" ] && [ -S "$sock" ]; then
       *) ctx=$a ;;
     esac
   done
-  if [ -d "$ctx" ] && [ -n "${LOCKI_SANDBOX_ID:-}" ]; then
-    pindir="/var/cache/locki/scoped/$LOCKI_SANDBOX_ID/oci-pin"
+  if [ -d "$ctx" ] && [ -n "${LOCKI_SCOPED_CACHE:-}" ]; then
+    pindir="$LOCKI_SCOPED_CACHE/oci-pin"
     while IFS= read -r ref; do
       id=$("$_real" image inspect -f '{{.Id}}' "$ref" 2>/dev/null) || continue
       dir="$pindir/$(printf %s "$ref" | sha256sum | cut -d' ' -f1)"
@@ -521,7 +521,7 @@ if /opt/locki/bin/high/locki-fetch "$ca_url" "$ca_tmp"; then
     ca_installed=1
   fi
   if [ -n "$ca_installed" ]; then
-    echo '10.99.0.1 registry-1.docker.io mirror.gcr.io gcr.io ghcr.io quay.io registry.access.redhat.com registry.k8s.io public.ecr.aws cgr.dev nvcr.io registry.gitlab.com get.k3s.io objects.githubusercontent.com release-assets.githubusercontent.com' >> /etc/hosts
+    echo '10.99.0.1 __INTERCEPTED_HOSTS__' >> /etc/hosts
   fi
 fi
 rm -f "$ca_tmp"

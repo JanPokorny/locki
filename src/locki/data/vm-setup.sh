@@ -53,7 +53,7 @@ profiles:
         type: disk
       home:
         path: /root
-        source: /root/.locki/home
+        source: __SANDBOX_HOME_MOUNT__
         type: disk
 __LOCKI_EOF__
 fi
@@ -67,9 +67,7 @@ if ! command -v nginx >/dev/null 2>&1; then
     openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 3650 \
       -subj "/CN=Locki Registry CA" -keyout /etc/locki/ca.key -out /etc/locki/ca.crt
   fi
-  sans="DNS:registry-1.docker.io,DNS:mirror.gcr.io,DNS:ghcr.io,DNS:gcr.io,DNS:quay.io,DNS:registry.access.redhat.com"
-  sans="$sans,DNS:registry.k8s.io,DNS:public.ecr.aws,DNS:cgr.dev,DNS:nvcr.io,DNS:registry.gitlab.com"
-  sans="$sans,DNS:get.k3s.io,DNS:objects.githubusercontent.com,DNS:release-assets.githubusercontent.com,DNS:docker-io.locki"
+  sans="__SANS__"
   openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
     -keyout /etc/locki/registry.key -subj "/CN=Locki Registry" \
     -addext "subjectAltName=$sans" -addext "extendedKeyUsage=serverAuth" \
@@ -129,8 +127,7 @@ http {
 	server {
 		listen 10.99.0.1:443 ssl;
 		http2 on;
-		server_name registry-1.docker.io mirror.gcr.io ghcr.io gcr.io quay.io registry.access.redhat.com
-			registry.k8s.io public.ecr.aws cgr.dev nvcr.io registry.gitlab.com docker-io.locki;
+		server_name __REGISTRY_HOSTS__ docker-io.locki;
 
 		ssl_certificate     /etc/locki/registry.crt;
 		ssl_certificate_key /etc/locki/registry.key;
@@ -187,7 +184,7 @@ http {
 	server {
 		listen 10.99.0.1:443 ssl;
 		http2 on;
-		server_name get.k3s.io;
+		server_name __K3S_HOSTS__;
 
 		ssl_certificate     /etc/locki/registry.crt;
 		ssl_certificate_key /etc/locki/registry.key;
@@ -209,7 +206,7 @@ http {
 	server {
 		listen 10.99.0.1:443 ssl;
 		http2 on;
-		server_name objects.githubusercontent.com release-assets.githubusercontent.com;
+		server_name __GH_ASSET_HOSTS__;
 
 		ssl_certificate     /etc/locki/registry.crt;
 		ssl_certificate_key /etc/locki/registry.key;

@@ -42,9 +42,11 @@ WT_ID_LEN = 8
 
 # The `<repo>-locki-<id>` / `<stem>#locki-<id>` naming convention, single-sourced:
 
+WT_DIR_TAG = "-locki-"
+
 
 def wt_dir_name(repo_name: str, wt_id: str) -> str:
-    return f"{repo_name}-locki-{wt_id}"
+    return f"{repo_name}{WT_DIR_TAG}{wt_id}"
 
 
 def wt_id_from_dir(dir_name: str) -> str:

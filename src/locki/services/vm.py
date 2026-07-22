@@ -12,6 +12,29 @@ import typing
 from locki.paths import LIMA, PACKAGE_DATA, SANDBOX_HOME, WORKTREES
 from locki.utils import fail, file_lock, run_command
 
+# Where the shared sandbox home lands inside the VM: the Lima mount point and the
+# source of the incus profile's `home` device (substituted into vm-setup.sh).
+SANDBOX_HOME_MOUNT = "/root/.locki/home"
+
+# Hosts hijacked in every sandbox's /etc/hosts and TLS-terminated by the VM's nginx
+# cache, grouped by nginx server block (each group has its own caching rules).
+REGISTRY_HOSTS = [
+    "registry-1.docker.io",
+    "mirror.gcr.io",
+    "ghcr.io",
+    "gcr.io",
+    "quay.io",
+    "registry.access.redhat.com",
+    "registry.k8s.io",
+    "public.ecr.aws",
+    "cgr.dev",
+    "nvcr.io",
+    "registry.gitlab.com",
+]
+K3S_HOSTS = ["get.k3s.io"]
+GH_ASSET_HOSTS = ["objects.githubusercontent.com", "release-assets.githubusercontent.com"]
+INTERCEPTED_HOSTS = [*REGISTRY_HOSTS, *K3S_HOSTS, *GH_ASSET_HOSTS]
+
 
 class VMService:
     """All interaction with the Lima VM ("locki") that hosts the sandbox containers."""
@@ -99,7 +122,15 @@ class VMService:
 
         LIMA.mkdir(exist_ok=True, parents=True)
         with file_lock("vm", "Waiting for VM to start"):
-            vm_setup = (PACKAGE_DATA / "vm-setup.sh").read_text()
+            vm_setup = (
+                (PACKAGE_DATA / "vm-setup.sh")
+                .read_text()
+                .replace("__SANS__", ",".join(f"DNS:{h}" for h in [*INTERCEPTED_HOSTS, "docker-io.locki"]))
+                .replace("__REGISTRY_HOSTS__", " ".join(REGISTRY_HOSTS))
+                .replace("__K3S_HOSTS__", " ".join(K3S_HOSTS))
+                .replace("__GH_ASSET_HOSTS__", " ".join(GH_ASSET_HOSTS))
+                .replace("__SANDBOX_HOME_MOUNT__", SANDBOX_HOME_MOUNT)
+            )
             lima_config = json.dumps(
                 {
                     "minimumLimaVersion": "2.0.0",
@@ -110,7 +141,7 @@ class VMService:
                     "containerd": {"system": False, "user": False},
                     "mounts": [
                         {"location": str(WORKTREES), "writable": True},
-                        {"location": str(SANDBOX_HOME), "mountPoint": "/root/.locki/home", "writable": True},
+                        {"location": str(SANDBOX_HOME), "mountPoint": SANDBOX_HOME_MOUNT, "writable": True},
                     ],
                     "provision": [{"mode": "system", "script": vm_setup}],
                 }
