@@ -74,10 +74,10 @@ def port_forward_cmd(ctx, match, interactive, clear, list_forwards, as_json):
 
     # Proxy devices on the container, tracked in memory as we mutate them.
     devices = {name: dev for name, dev in (container.get("devices") or {}).items() if name.startswith("port-fwd-")}
+    wt = shlex.quote(worktree.wt_id)
 
     if clear:
         if devices:
-            wt = shlex.quote(worktree.wt_id)
             vm.run(
                 ["sh", "-c", "; ".join(f"incus config device remove {wt} {shlex.quote(n)}" for n in devices)],
                 f"Removing {len(devices)} port forward(s)",
@@ -88,35 +88,24 @@ def port_forward_cmd(ctx, match, interactive, clear, list_forwards, as_json):
                 click.echo(json.dumps([]))
             return
 
+    # Validate every spec first, then apply all device changes in one VM roundtrip.
     added = []
+    cmds = []
     for spec in ctx.args:
         host_port, sandbox_port = _parse_port_spec(spec)
         if host_port < 1024:
             fail(f"Host port {host_port} is not allowed (must be >= 1024).")
         name = f"port-fwd-{host_port}"
         if name in devices:
-            vm.run(
-                ["incus", "config", "device", "remove", worktree.wt_id, name],
-                f"Removing existing forward on host port {host_port}",
-                check=False,
-                quiet=True,
-            )
-        vm.run(
-            [
-                "incus",
-                "config",
-                "device",
-                "add",
-                worktree.wt_id,
-                name,
-                "proxy",
-                f"listen=tcp:0.0.0.0:{host_port}",
-                f"connect=tcp:127.0.0.1:{sandbox_port}",
-            ],
-            f"Forwarding host port {host_port} -> sandbox port {sandbox_port}",
+            cmds.append(f"incus config device remove {wt} {shlex.quote(name)}")
+        cmds.append(
+            f"incus config device add {wt} {shlex.quote(name)} proxy"
+            f" listen=tcp:0.0.0.0:{host_port} connect=tcp:127.0.0.1:{sandbox_port}"
         )
         devices[name] = {"listen": f"tcp:0.0.0.0:{host_port}", "connect": f"tcp:127.0.0.1:{sandbox_port}"}
         added.append({"host_port": host_port, "sandbox_port": sandbox_port})
+    if cmds:
+        vm.run(["sh", "-c", " && ".join(cmds)], f"Forwarding {len(added)} port(s)")
 
     if list_forwards:
         forwards = [

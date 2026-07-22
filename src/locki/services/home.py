@@ -2,6 +2,7 @@
 per-sandbox trust and agent settings, and reading agent state back out of it."""
 
 import json
+import os
 import pathlib
 import re
 import uuid
@@ -82,13 +83,17 @@ class HomeService:
         for jsonl in sorted(project.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True):
             title = ""
             try:
-                # ceiling: full scan, transcripts reach MBs; upgrade: tail-read (title recurs every ~25 lines)
-                lines = jsonl.read_text().splitlines()
+                # Transcripts reach MBs, but the title line recurs every ~25 lines, so the
+                # tail is enough (a title older than the last 64KB is lost — acceptable).
+                with jsonl.open("rb") as f:
+                    size = f.seek(0, os.SEEK_END)
+                    f.seek(max(0, size - 65536))
+                    lines = f.read().decode(errors="replace").splitlines()
             except OSError:
                 continue
             for line in lines:
                 if '"type":"ai-title"' in line:
-                    with suppress(json.JSONDecodeError):  # torn line from a live append
+                    with suppress(json.JSONDecodeError):  # torn line from a live append or the seek cut
                         title = json.loads(line).get("aiTitle") or title
             if title:
                 return title

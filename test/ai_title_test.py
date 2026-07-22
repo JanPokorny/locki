@@ -42,4 +42,14 @@ assert ai_title(s) == "Second title", "titleless newest file falls back to older
 new.write_text('{"type":"user"}\n{"type":"ai-title","aiTitle":"Newest title","sessionId":"2"}\n')
 assert ai_title(s) == "Newest title", "newest file with a title wins"
 
+# MB-scale transcript: only the tail is read; the recurring title must still be found
+filler = '{"type":"user","content":"' + "x" * 200 + '"}\n'
+new.write_text(
+    '{"type":"ai-title","aiTitle":"Stale title","sessionId":"3"}\n'
+    + filler * 10000
+    + '{"type":"ai-title","aiTitle":"Tail title","sessionId":"3"}\n'
+    + filler * 50
+)
+assert ai_title(s) == "Tail title", "title within the 64KB tail of a large file wins"
+
 print("ok")
