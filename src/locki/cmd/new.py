@@ -27,7 +27,7 @@ def new_cmd(as_json: bool, from_ref: str | None, branch_stem: str):
     worktree = worktrees.new(cwd_repo, branch_stem)
     worktrees.create(worktree, from_ref)
     if as_json:
-        click.echo(json.dumps(dict(worktree)))
+        click.echo(json.dumps(worktree.as_dict()))
         return
     click.echo(f"{SUCCESS} Created sandbox {click.style(worktree.wt_id, fg='green')}.", err=True)
     click.echo(f"{INFO}    branch: {click.style(worktree.branch, fg='green')}", err=True)

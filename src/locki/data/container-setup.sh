@@ -65,6 +65,25 @@ else
 fi
 EOF
 
+## locki-mise-install: install a package globally via mise (shim-safe env)
+cat > /opt/locki/bin/high/locki-mise-install << 'EOF'
+#!/bin/sh
+export MISE_AUTO_INSTALL=false MISE_NO_HOOKS=true
+mise use -g "$1" && mise install "$1"
+EOF
+
+## locki-fetch <url> <dest>: download with curl -> wget -> python3 fallback
+cat > /opt/locki/bin/high/locki-fetch << 'EOF'
+#!/bin/sh
+if command -v curl >/dev/null 2>&1; then curl -fsSL --retry 3 -o "$2" "$1"
+elif command -v wget >/dev/null 2>&1; then wget -qO "$2" "$1"
+elif command -v python3 >/dev/null 2>&1; then python3 -c 'import sys
+from urllib.request import urlretrieve, install_opener, build_opener
+o = build_opener(); o.addheaders = [("User-Agent", "curl/8")]; install_opener(o)
+urlretrieve(sys.argv[1], sys.argv[2])' "$1" "$2"
+else echo "[Locki] Error: no HTTP client found (need curl, wget, or python3)" >&2; exit 1; fi
+EOF
+
 ## locki-command-real: resolve binary outside ALL /opt/locki/bin/ shim folders
 cat > /opt/locki/bin/high/locki-command-real << 'EOF'
 #!/bin/sh
@@ -99,7 +118,7 @@ EOF
 cat > /opt/locki/bin/high/locki-ensure-node << 'EOF'
 #!/bin/sh
 locki-command-real node >/dev/null 2>&1 && exit 0
-/opt/locki/bin/high/locki-auto-install nodejs sh -c 'export MISE_AUTO_INSTALL=false MISE_NO_HOOKS=true; mise use -g node && mise install node' >/dev/null 2>&1
+/opt/locki/bin/high/locki-auto-install nodejs /opt/locki/bin/high/locki-mise-install node >/dev/null 2>&1
 EOF
 
 ## Command bridge (git, gh, locki → SSH proxy to host)
@@ -319,7 +338,7 @@ if ! locki-command-real claude >/dev/null 2>&1; then
     '
   else
     locki-ensure-node
-    /opt/locki/bin/high/locki-auto-install @anthropic-ai/claude-code sh -c 'export MISE_AUTO_INSTALL=false MISE_NO_HOOKS=true; mise use -g npm:@anthropic-ai/claude-code && mise install npm:@anthropic-ai/claude-code'
+    /opt/locki/bin/high/locki-auto-install @anthropic-ai/claude-code /opt/locki/bin/high/locki-mise-install npm:@anthropic-ai/claude-code
   fi
 fi
 exec "$(locki-command-real claude)" "$@"
@@ -340,7 +359,7 @@ for pair in \
 set -eo pipefail
 if ! locki-command-real $bin >/dev/null 2>&1; then
   locki-ensure-node
-  /opt/locki/bin/high/locki-auto-install $pkg sh -c 'export MISE_AUTO_INSTALL=false MISE_NO_HOOKS=true; mise use -g npm:$pkg && mise install npm:$pkg'
+  /opt/locki/bin/high/locki-auto-install $pkg /opt/locki/bin/high/locki-mise-install npm:$pkg
 fi
 exec "\$(locki-command-real $bin)" "\$@"
 EOF
@@ -391,7 +410,7 @@ for pair in \
 #!/bin/bash
 set -eo pipefail
 if ! locki-command-real $bin >/dev/null 2>&1; then
-  /opt/locki/bin/high/locki-auto-install $pkg sh -c 'export MISE_AUTO_INSTALL=false MISE_NO_HOOKS=true; mise use -g $pkg && mise install $pkg'
+  /opt/locki/bin/high/locki-auto-install $pkg /opt/locki/bin/high/locki-mise-install $pkg
 fi
 exec "\$(locki-command-real $bin)" "\$@"
 EOF
@@ -435,10 +454,7 @@ if ! locki-command-real mise >/dev/null 2>&1; then
       trap "rm -rf \"\$tmpdir\" \"\$unpack\"" EXIT
       mise_file="mise-v$mise_version-linux-$arch.$ext"
       mise_url="https://mise.jdx.dev/v$mise_version/$mise_file"
-      if command -v curl >/dev/null 2>&1; then curl -fsSL -o "$tmpdir/$mise_file" "$mise_url"
-      elif command -v wget >/dev/null 2>&1; then wget -qO "$tmpdir/$mise_file" "$mise_url"
-      elif command -v python3 >/dev/null 2>&1; then python3 -c "from urllib.request import urlretrieve,install_opener,build_opener;o=build_opener();o.addheaders=[(\"User-Agent\",\"curl/8\")];install_opener(o);urlretrieve(\"$mise_url\",\"$tmpdir/$mise_file\")"
-      else echo "[Locki] Error: no HTTP client found (need curl, wget, or python3)" >&2; exit 1; fi
+      /opt/locki/bin/high/locki-fetch "$mise_url" "$tmpdir/$mise_file"
       if [ "$(sha256sum "$tmpdir/$mise_file" | cut -d" " -f1)" != "$checksum" ]; then echo "checksum mismatch" >&2; exit 1; fi
       # Extract into a temp dir and rename: the cache is shared across sandboxes, so a
       # crashed extraction must not leave a half-populated dir that later passes the check.
@@ -491,9 +507,7 @@ timeout 30s sh -c 'while ! ping -c1 -W1 connectivitycheck.gstatic.com >/dev/null
 ## transparent container image registry caching
 ca_tmp=$(mktemp)
 ca_url=http://10.99.0.1/locki-ca.crt
-if { command -v curl >/dev/null 2>&1 && curl -fsS --retry 3 -o "$ca_tmp" "$ca_url"; } \
-  || { command -v wget >/dev/null 2>&1 && wget -qO "$ca_tmp" "$ca_url"; } \
-  || { command -v python3 >/dev/null 2>&1 && python3 -c "from urllib.request import urlretrieve; urlretrieve('$ca_url', '$ca_tmp')"; }; then
+if /opt/locki/bin/high/locki-fetch "$ca_url" "$ca_tmp"; then
   ca_installed=""
   if command -v update-ca-trust >/dev/null 2>&1; then
     mkdir -p /etc/pki/ca-trust/source/anchors

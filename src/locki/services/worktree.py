@@ -6,16 +6,14 @@ worktree can exist without a container (e.g. after `locki vm delete`).
 
 import dataclasses
 import functools
-import os
 import pathlib
 import secrets
 import shutil
-import subprocess
 import sys
 
 import click
 
-from locki.paths import HOME, PACKAGE_DATA, WORKTREES, WORKTREES_META
+from locki.paths import PACKAGE_DATA, WORKTREES, WORKTREES_META, XDG_CONFIG
 from locki.services.home import home
 from locki.utils import fail, pretty_path, run_command
 
@@ -52,8 +50,11 @@ def wt_id_from_dir(dir_name: str) -> str:
     return dir_name[-WT_ID_LEN:]
 
 
+BRANCH_TAG = "#locki-"
+
+
 def branch_suffix(wt_id: str) -> str:
-    return f"#locki-{wt_id}"
+    return f"{BRANCH_TAG}{wt_id}"
 
 
 @dataclasses.dataclass
@@ -89,26 +90,24 @@ class WorktreeInfo:
     def include_meta_path(self, name: str) -> pathlib.Path:
         return self.meta_path / "include" / name
 
-    def __iter__(self):
-        return iter(
-            {
-                "id": self.wt_id,
-                "branch": self.branch,
-                "path": str(self.wt_path),
-                "repo": str(self.repo),
-                "include": [{"name": i.name, "repo": str(i.repo), "branch": i.branch} for i in self.include],
-            }.items()
-        )
+    def as_dict(self) -> dict:
+        return {
+            "id": self.wt_id,
+            "branch": self.branch,
+            "path": str(self.wt_path),
+            "repo": str(self.repo),
+            "include": [{"name": i.name, "repo": str(i.repo), "branch": i.branch} for i in self.include],
+        }
 
 
 def _matching_branches(repo: str, wt_id: str) -> list[str]:
-    result = subprocess.run(
+    result = run_command(
         ["git", "-C", repo, "for-each-ref", "--format=%(refname:short)", f"refs/heads/*{branch_suffix(wt_id)}"],
-        capture_output=True,
-        text=True,
-        stdin=subprocess.DEVNULL,
+        "Listing sandbox branches",
+        check=False,
+        quiet=True,
     )
-    return result.stdout.split()
+    return result.stdout.decode().split()
 
 
 class WorktreeService:
@@ -191,7 +190,7 @@ class WorktreeService:
             )
             .stdout.decode()
             .strip()
-            or pathlib.Path(os.environ.get("XDG_CONFIG_HOME") or (HOME / ".config")) / "git" / "ignore"
+            or XDG_CONFIG / "git" / "ignore"
         )
         exclude = meta_path / "exclude"
         exclude.write_text((global_ignore.read_text() if global_ignore.is_file() else "") + "\nnode_modules\n.venv\n")
@@ -234,7 +233,7 @@ class WorktreeService:
             branch = self.live_branch(meta_dir)
             if branch.startswith("(") or branch.endswith(suffix):
                 continue
-            new_branch = f"{branch.split('#locki-')[0]}{suffix}"
+            new_branch = f"{branch.split(BRANCH_TAG)[0]}{suffix}"
             run_command(
                 ["git", "-C", str(wt_path), "checkout", "-B", new_branch],
                 f"Fixing branch to {click.style(new_branch, fg='green')}",
@@ -255,13 +254,6 @@ class WorktreeService:
                 f"Pruning {inc.repo.name}",
                 check=False,
             )
-            if branches:
-                for b in _matching_branches(str(inc.repo), worktree.wt_id):
-                    run_command(
-                        ["git", "-C", str(inc.repo), "branch", "-D", b],
-                        f"Removing include branch {b}",
-                        check=False,
-                    )
 
         shutil.rmtree(worktree.wt_path, ignore_errors=True)
         shutil.rmtree(worktree.meta_path, ignore_errors=True)
@@ -272,12 +264,13 @@ class WorktreeService:
         )
 
         if branches:
-            for b in _matching_branches(str(worktree.repo), worktree.wt_id):
-                run_command(
-                    ["git", "-C", str(worktree.repo), "branch", "-D", b],
-                    f"Removing branch {b}",
-                    check=False,
-                )
+            for repo in [*(inc.repo for inc in worktree.include), worktree.repo]:
+                for b in _matching_branches(str(repo), worktree.wt_id):
+                    run_command(
+                        ["git", "-C", str(repo), "branch", "-D", b],
+                        f"Removing branch {b}",
+                        check=False,
+                    )
 
     def current_worktree(self) -> pathlib.Path | None:
         """If cwd is inside a Locki-managed worktree, return its path."""
@@ -362,14 +355,11 @@ class WorktreeService:
             meta_repo = WORKTREES_META / wt_path.name / "repo"
             if meta_repo.exists():
                 return pathlib.Path(meta_repo.read_text().strip()).resolve()
-        result = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0 or not result.stdout.strip():
+        result = run_command(["git", "rev-parse", "--show-toplevel"], "Resolving repo root", check=False, quiet=True)
+        top = result.stdout.decode().strip()
+        if result.returncode != 0 or not top:
             return None
-        return pathlib.Path(result.stdout.strip()).resolve()
+        return pathlib.Path(top).resolve()
 
     def new(self, repo: pathlib.Path, branch_stem: str = "untitled") -> WorktreeInfo:
         wt_id = "".join(secrets.choice("abcdefghijklmnopqrstuvwxyz0123456789") for _ in range(WT_ID_LEN))

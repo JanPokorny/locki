@@ -6,13 +6,13 @@ from __future__ import annotations
 
 import re
 import shlex
-import subprocess
 import sys
 from collections.abc import Iterator
 from dataclasses import dataclass
 from functools import cache, cached_property
 
 from locki.services.worktree import branch_suffix
+from locki.utils import run_command
 
 # ── Command bridge grammar engine ───────────────────────────────────────────────
 
@@ -121,33 +121,37 @@ Rule = ArgRule | FlagRule | AlternativeRule | SequenceRule
 class Context:
     """Per-invocation placeholder resolver. Subprocess lookups are cached."""
 
-    def __init__(self, wt_id: str) -> None:
+    def __init__(self, wt_id: str, cwd: str = ".") -> None:
         self.wt_id = wt_id
+        self.cwd = cwd
 
     @cached_property
     def gh_repo(self) -> tuple[str, str]:
-        result = subprocess.run(
+        result = run_command(
             ["gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"],
-            capture_output=True,
-            text=True,
+            "Reading gh repo",
+            cwd=self.cwd,
+            check=False,
+            quiet=True,
         )
+        out = result.stdout.decode().strip()
         if result.returncode != 0:
             sys.exit("Could not determine current gh repo.")
-        owner, _, name = result.stdout.strip().partition("/")
+        owner, _, name = out.partition("/")
         if not owner or not name:
-            sys.exit(f"Invalid repo from gh: {result.stdout.strip()!r}.")
+            sys.exit(f"Invalid repo from gh: {out!r}.")
         return owner, name
 
     @cached_property
     def owned_stash_refs(self) -> list[str]:
         tag = branch_suffix(self.wt_id)
-        result = subprocess.run(["git", "stash", "list"], capture_output=True, text=True)
-        return [line.split(":", 1)[0] for line in result.stdout.splitlines() if tag in line]
+        result = run_command(["git", "stash", "list"], "Listing stashes", cwd=self.cwd, check=False, quiet=True)
+        return [line.split(":", 1)[0] for line in result.stdout.decode().splitlines() if tag in line]
 
     @cached_property
     def remotes(self) -> list[str]:
-        result = subprocess.run(["git", "remote"], capture_output=True, text=True)
-        return result.stdout.split()
+        result = run_command(["git", "remote"], "Listing remotes", cwd=self.cwd, check=False, quiet=True)
+        return result.stdout.decode().split()
 
     def compound(self, parts: list[str | PlaceholderRule]) -> re.Pattern[str]:
         """Build a `re.fullmatch`-ready pattern from literal strings and placeholders."""
@@ -244,12 +248,9 @@ def _parser():
             short: str | None = None
             if tok.startswith("-") and not tok.startswith("--"):
                 if tok[2:3] == "/":  # paired short+long, e.g. "-s/--short"
-                    short = tok[:2]
-                    tok = tok[3:]
+                    short, tok = tok[:2], tok[3:]
                 else:  # short-only flag, e.g. "-r" or "-L=<range>"
-                    name, sep, value_text = tok.partition("=")
-                    value = ArgRule(value=_compound_parts(value_text)) if sep == "=" else None
-                    return FlagRule(short_name=name, long_name=name, value=value)
+                    short = tok.partition("=")[0]
             name, sep, value_text = tok.partition("=")
             value = ArgRule(value=_compound_parts(value_text)) if sep == "=" else None
             return FlagRule(short_name=short, long_name=name, value=value)
@@ -316,7 +317,7 @@ def _split_argv(args: list[str], value_flag_keys: frozenset[str]) -> tuple[list[
             flags[key] = value
         elif len(arg) >= 2 and arg[0] == "-":
             if arg[1:].isdigit():
-                flags["--max-count"] = arg[1:]
+                flags["--max-count"] = arg[1:]  # git-log shorthand (-5 == --max-count=5); harmless for other rulesets
                 i += 1
                 continue
             key = arg[:2]
@@ -418,7 +419,7 @@ class Ruleset:
             }
         )
 
-    def check(self, argv: list[str], wt_id: str) -> str | None:
+    def check(self, argv: list[str], wt_id: str, cwd: str = ".") -> str | None:
         """Return None if allowed, or an error message."""
         if not argv:
             return f"Command not allowed: {shlex.join(argv)!r}"
@@ -442,7 +443,7 @@ class Ruleset:
         positionals, flags = _split_argv(argv[len(prefix) :], group.value_flag_keys)
         effective = {k: v for k, v in flags.items() if k != "--help"}
         all_positionals = [*prefix, *positionals]
-        mc = MatchContext(all_positionals, effective, Context(wt_id))
+        mc = MatchContext(all_positionals, effective, Context(wt_id, cwd))
         expected = set(effective)
         target = len(all_positionals)
 

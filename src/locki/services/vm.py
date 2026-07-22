@@ -115,12 +115,11 @@ class VMService:
                     "provision": [{"mode": "system", "script": vm_setup}],
                 }
             )
-            lima_fd, lima_yaml = tempfile.mkstemp(suffix=".yaml")
+            with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as lima_yaml:
+                lima_yaml.write(lima_config)
             try:
-                os.write(lima_fd, lima_config.encode())
-                os.close(lima_fd)
                 run_command(
-                    [self.limactl, "--tty=false", "create", lima_yaml, "--mount-writable", "--name=locki"],
+                    [self.limactl, "--tty=false", "create", lima_yaml.name, "--mount-writable", "--name=locki"],
                     "Preparing VM",
                     env=self.env,
                     cwd="/",
@@ -128,7 +127,7 @@ class VMService:
                     print_success=False,
                 )
             finally:
-                os.unlink(lima_yaml)
+                os.unlink(lima_yaml.name)
             run_command(
                 [self.limactl, "--tty=false", "start", "locki"],
                 "Starting VM",

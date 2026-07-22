@@ -18,6 +18,8 @@ from locki.runes import ERROR, FUTHARK, SUCCESS
 
 logger = logging.getLogger(__name__)
 
+CLEAR_LINE = "\r\033[2K"
+
 
 def deep_merge(base: dict, override: dict) -> dict:
     result = base.copy()
@@ -126,9 +128,10 @@ def spinner(text: str, print_success: bool = True):
     else:
         _stop_spinner()
         if print_success:
+            # ceiling: naive "-ing"→"-ed" grammar; call sites must pick messages that survive it
             click.echo(f"\r{SUCCESS} {text.replace('ing ', 'ed ', 1)}{_duration()} ", err=True)
         elif thread:
-            sys.stderr.write("\r\033[2K")
+            sys.stderr.write(CLEAR_LINE)
     finally:
         sys.stderr.flush()
 

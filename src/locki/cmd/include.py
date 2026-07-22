@@ -20,18 +20,6 @@ from locki.services.worktree import worktrees, wt_dir_name
 from locki.utils import fail, json_option, run_command, sandbox_options
 
 
-def _validate_repo(path: pathlib.Path) -> pathlib.Path:
-    result = run_command(
-        ["git", "-C", str(path), "rev-parse", "--show-toplevel"],
-        "Resolving repo",
-        check=False,
-        quiet=True,
-    )
-    if result.returncode != 0:
-        fail(f"Not a git repository: {path}")
-    return pathlib.Path(result.stdout.decode().strip()).resolve()
-
-
 @click.command("include")
 @sandbox_options()
 @click.option("--repo", "repo_path", default=None, type=click.Path(exists=True), help="Local path to repo to include.")
@@ -63,7 +51,15 @@ def include_cmd(match, interactive, repo_path, this_flag, as_json):
             fail("--this requires being inside a git repo.")
         repo_b = cwd_repo
     elif repo_path:
-        repo_b = _validate_repo(pathlib.Path(repo_path))
+        result = run_command(
+            ["git", "-C", repo_path, "rev-parse", "--show-toplevel"],
+            "Resolving repo",
+            check=False,
+            quiet=True,
+        )
+        if result.returncode != 0:
+            fail(f"Not a git repository: {repo_path}")
+        repo_b = pathlib.Path(result.stdout.decode().strip()).resolve()
     else:
         # Default: add cwd's repo — only sensible when cwd is in a repo different from the
         # implicit-target sandbox's repo.  Reject to force the user to be explicit.

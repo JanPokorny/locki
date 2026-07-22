@@ -43,6 +43,11 @@ assert_output() {
     rm -f "$stderr_file"
 }
 
+assert_port_assigned() {
+    local desc="$1" port="$2"
+    if [[ -n "$port" && "$port" -ge 1024 ]]; then pass "$desc"; else fail "$desc (got '$port')"; fi
+}
+
 timed() {
     local start end
     start=$(date +%s)
@@ -64,10 +69,8 @@ export XDG_STATE_HOME="$TMPDIR_ROOT/xdg/state"
 export XDG_RUNTIME_DIR="$TMPDIR_ROOT/xdg/run"
 export LIMA_HOME="$XDG_STATE_HOME/locki/lima"
 kill_locki_pids() {
-    local pf
-    for pf in "$XDG_RUNTIME_DIR/locki/daemon.pid"; do
-        [ -f "$pf" ] && kill "$(cat "$pf")" 2>/dev/null || true
-    done
+    local pf="$XDG_RUNTIME_DIR/locki/daemon.pid"
+    [ -f "$pf" ] && kill "$(cat "$pf")" 2>/dev/null || true
 }
 kill_locki_pids
 cleanup() { kill_locki_pids; limactl delete -f locki 2>/dev/null || true; rm -rf "$TMPDIR_ROOT"; }
@@ -79,6 +82,7 @@ PROJECT_ROOT="$(cd "$(dirname "$0")/.."; pwd)"
 
 json_field() { yq -r ".$1"; }
 new_sandbox_id() { locki new --json 2>/dev/null | json_field id; }
+worktree_of() { git worktree list --porcelain | grep -B2 "branch refs/heads/untitled#locki-$1" | head -1 | sed 's/worktree //'; }
 
 echo "Setting up venv and installing locki..."
 uv venv "$VENV" --python 3.14
@@ -128,7 +132,7 @@ echo "Testing hook execution in guest..."
 
 HOOKS_DIR="$REPO/.git/hooks"
 mkdir -p "$HOOKS_DIR"
-WORKTREE=$(git worktree list --porcelain | grep -B2 "branch refs/heads/untitled#locki-$AUTH" | head -1 | sed 's/worktree //')
+WORKTREE=$(worktree_of "$AUTH")
 
 cat > "$HOOKS_DIR/pre-commit" << HOOK
 #!/bin/bash
@@ -164,12 +168,11 @@ assert_ok    "git symbolic-ref -q works"     locki x -m "$AUTH" git symbolic-ref
 assert_ok    "git branch --list works"       locki x -m "$AUTH" git branch --list 'main*'
 assert_ok    "git show --oneline -s works"   locki x -m "$AUTH" git show -s --oneline
 
-# `git clone` from a worktree cwd runs locally (not bridged): it creates a fresh
-# repo elsewhere and never touches the worktree's host-linked .git. If it were
-# bridged it would be rejected (clone is not in the filter).
-# `git clone` from a worktree cwd runs locally (not bridged) and auto-installs git
-# on demand if the base image lacks it. git from a non-worktree cwd (the `cd /tmp`
-# subshell) also runs locally — verifying LOCKI_WORKTREES_HOME gating at runtime.
+# `git clone` from a worktree cwd runs locally (not bridged; clone is not in the
+# filter — it creates a fresh repo elsewhere and never touches the worktree's
+# host-linked .git) and auto-installs git on demand if the base image lacks it.
+# git from a non-worktree cwd (the `cd /tmp` subshell) also runs locally —
+# verifying LOCKI_WORKTREES_HOME gating at runtime.
 assert_ok "git clone runs locally from worktree cwd" locki x -m "$AUTH" sh -c '
   (cd /tmp && rm -rf clone-src && git init -q clone-src)
   rm -rf /tmp/clone-dst && git clone -q /tmp/clone-src /tmp/clone-dst && test -d /tmp/clone-dst/.git
@@ -221,20 +224,19 @@ assert_fail  "remote get-url ext:: blocked"     locki x -m "$AUTH" git remote ge
 echo
 echo "Testing git commit from sandbox..."
 
-WORKTREE_A=$(git worktree list --porcelain | grep -B2 "branch refs/heads/untitled#locki-$AUTH" | head -1 | sed 's/worktree //')
-echo test-content | locki x -m "$AUTH" tee "$WORKTREE_A/commit-test.txt" >/dev/null
+echo test-content | locki x -m "$AUTH" tee "$WORKTREE/commit-test.txt" >/dev/null
 locki x -m "$AUTH" git add --all
 locki x -m "$AUTH" git commit --message='simple commit'
-assert_output "simple commit landed" "simple commit" git -C "$WORKTREE_A" log -1 --format=%s
+assert_output "simple commit landed" "simple commit" git -C "$WORKTREE" log -1 --format=%s
 
 # Multi-line commit message (newlines triggered $'...' quoting bug)
-echo more | locki x -m "$AUTH" tee "$WORKTREE_A/commit-test2.txt" >/dev/null
+echo more | locki x -m "$AUTH" tee "$WORKTREE/commit-test2.txt" >/dev/null
 locki x -m "$AUTH" git add --all
 locki x -m "$AUTH" git commit --message='multi line
 
 second paragraph'
-assert_output "multi-line commit subject" "multi line" git -C "$WORKTREE_A" log -1 --format=%s
-assert_output "multi-line commit body" "second paragraph" git -C "$WORKTREE_A" log -1 --format=%b
+assert_output "multi-line commit subject" "multi line" git -C "$WORKTREE" log -1 --format=%s
+assert_output "multi-line commit body" "second paragraph" git -C "$WORKTREE" log -1 --format=%b
 
 # ── hook modifies COMMIT_EDITMSG ────────────────────────────────────────────
 
@@ -249,11 +251,11 @@ echo "Signed-off-by: Test Bot <test@example.com>" >> "$1"
 HOOK
 chmod +x "$HOOKS_DIR/commit-msg"
 
-echo hook-msg-test | locki x -m "$AUTH" tee "$WORKTREE_A/hook-msg-file.txt" >/dev/null
+echo hook-msg-test | locki x -m "$AUTH" tee "$WORKTREE/hook-msg-file.txt" >/dev/null
 locki x -m "$AUTH" git add --all
 locki x -m "$AUTH" git commit --message='test hook message'
-assert_output "commit-msg hook appended trailer" "Signed-off-by: Test Bot" git -C "$WORKTREE_A" log -1 --format=%b
-assert_output "original message preserved" "test hook message" git -C "$WORKTREE_A" log -1 --format=%s
+assert_output "commit-msg hook appended trailer" "Signed-off-by: Test Bot" git -C "$WORKTREE" log -1 --format=%b
+assert_output "original message preserved" "test hook message" git -C "$WORKTREE" log -1 --format=%s
 
 rm -f "$HOOKS_DIR/commit-msg"
 
@@ -339,8 +341,9 @@ assert_output "dict incus_image runs ubuntu" "Ubuntu" locki x --new cat /etc/os-
 
 # Export Ubuntu image to test local file + glob (split format: metadata + .root)
 LIMACTL=$(python -c 'from locki.services.vm import vm; print(vm.limactl)')
-UBUNTU_FP=$("$LIMACTL" shell --start --workdir=/ locki -- sudo incus config get "$UBUNTU_SB" volatile.base_image)
-"$LIMACTL" shell --start --workdir=/ locki -- sudo bash -c "
+vm_sudo() { "$LIMACTL" shell --start --workdir=/ locki -- sudo "$@"; }
+UBUNTU_FP=$(vm_sudo incus config get "$UBUNTU_SB" volatile.base_image)
+vm_sudo bash -c "
   set -e
   incus image export '$UBUNTU_FP' /tmp/locki-e2e-ubuntu-img
   # Delete cached image so re-import from local file doesn't conflict
@@ -348,7 +351,7 @@ UBUNTU_FP=$("$LIMACTL" shell --start --workdir=/ locki -- sudo incus config get 
 " >/dev/null
 "$LIMACTL" copy locki:/tmp/locki-e2e-ubuntu-img "$TMPDIR_ROOT/ubuntu-img.tar.xz"
 "$LIMACTL" copy locki:/tmp/locki-e2e-ubuntu-img.root "$TMPDIR_ROOT/ubuntu-img.tar.xz.root" 2>/dev/null || true
-"$LIMACTL" shell --start --workdir=/ locki -- sudo rm -f /tmp/locki-e2e-ubuntu-img /tmp/locki-e2e-ubuntu-img.root >/dev/null
+vm_sudo rm -f /tmp/locki-e2e-ubuntu-img /tmp/locki-e2e-ubuntu-img.root >/dev/null
 
 # Local file via string (no glob)
 cat > "$REPO/locki.toml" << TOML
@@ -386,11 +389,7 @@ locki x -m "$LOGIN" bash -c "nohup bash -c 'while true; do echo pf-ok | ncat -l 
 
 # Use a random host port to avoid conflicts with the user's main locki VM
 pf_host_port=$(locki port-forward -m "$LOGIN" --json :9111 2>/dev/null | json_field '[0].host_port' || true)
-if [[ -n "$pf_host_port" && "$pf_host_port" -ge 1024 ]]; then
-    pass "port-forward assigns host port >= 1024"
-else
-    fail "port-forward assigns host port >= 1024 (got '$pf_host_port')"
-fi
+assert_port_assigned "port-forward assigns host port >= 1024" "$pf_host_port"
 
 # Wait for Lima to detect and forward the new listening port
 pf_ok=false
@@ -411,11 +410,7 @@ assert_fail  "cleared forward is unreachable" bash -c "nc -4 -w2 127.0.0.1 $pf_h
 
 # Random host port with :sandbox_port syntax (different sandbox port)
 random_host_port=$(locki port-forward -m "$LOGIN" --json :9222 2>/dev/null | json_field '[0].host_port' || true)
-if [[ -n "$random_host_port" && "$random_host_port" -ge 1024 ]]; then
-    pass ":port assigns random host port >= 1024"
-else
-    fail ":port assigns random host port >= 1024 (got '$random_host_port')"
-fi
+assert_port_assigned ":port assigns random host port >= 1024" "$random_host_port"
 assert_ok    "re-forwarding the same host port is idempotent" locki port-forward -m "$LOGIN" "$random_host_port:9222"
 assert_ok    ":port forward cleaned up" locki port-forward -m "$LOGIN" --clear
 
@@ -449,10 +444,8 @@ assert_output "child image stacks on local base" "locki-e2e" locki x -m "$LOGIN"
 assert_ok "docker API socket responds" locki x -m "$LOGIN" curl -sf --unix-socket /run/docker.sock http://d/_ping
 # Proxied blobs are committed to the cache asynchronously — allow a moment
 sleep 5
-assert_ok "nginx registry proxy is active" "$LIMACTL" shell --start --workdir=/ locki -- \
-    sudo systemctl is-active --quiet nginx
-assert_ok "pulls populate the registry cache" "$LIMACTL" shell --start --workdir=/ locki -- \
-    sudo bash -c 'test -n "$(ls -A /var/cache/locki/registry-cache)"'
+assert_ok "nginx registry proxy is active" vm_sudo systemctl is-active --quiet nginx
+assert_ok "pulls populate the registry cache" vm_sudo bash -c 'test -n "$(ls -A /var/cache/locki/registry-cache)"'
 
 # ── get.k3s.io + GitHub release asset cache ──────────────────────────────────
 
@@ -588,7 +581,7 @@ git -C "$REPO2" commit -m "initial repo2" >/dev/null
 git -C "$REPO2" push >/dev/null 2>&1
 
 INCLUDE_NAME="$(basename "$REPO2")-locki-$AUTH"
-INCLUDE_PATH="$WORKTREE_A/.locki/include/$INCLUDE_NAME"
+INCLUDE_PATH="$WORKTREE/.locki/include/$INCLUDE_NAME"
 
 INCLUDE_OUT=$(locki include -m "$AUTH" --repo "$REPO2" --json 2>/dev/null || true)
 assert_output "locki include --json prints include path" "\"path\": \"$INCLUDE_PATH\"" printf '%s\n' "$INCLUDE_OUT"
@@ -619,7 +612,7 @@ assert_output ".git restored from metadata" "$ORIGINAL_DOTGIT" cat "$INCLUDE_PAT
 echo
 echo "Testing branch verification on non-conforming worktree..."
 
-WORKTREE_B=$(git worktree list --porcelain | grep -B2 "branch refs/heads/untitled#locki-$LOGIN" | head -1 | sed 's/worktree //')
+WORKTREE_B=$(worktree_of "$LOGIN")
 git -C "$WORKTREE_B" checkout -b rogue-branch 2>/dev/null
 assert_output "worktree switched to rogue branch" "rogue-branch" git -C "$WORKTREE_B" branch --show-current
 assert_output "locki x auto-fixes branch" "fix-ok" locki x -m "$LOGIN" echo fix-ok
@@ -658,8 +651,7 @@ assert_fail "include worktree removed from source repo" bash -c "git -C '$REPO2'
 echo
 echo "Testing registry cache hits across sandboxes..."
 
-cache_size() { "$LIMACTL" shell --start --workdir=/ locki -- \
-    sudo bash -c 'du -sb /var/cache/locki/registry-cache 2>/dev/null | cut -f1'; }
+cache_size() { vm_sudo bash -c 'du -sb /var/cache/locki/registry-cache 2>/dev/null | cut -f1'; }
 
 size_before=$(cache_size)
 HIT_SB=$(new_sandbox_id)
@@ -694,8 +686,7 @@ else
     fail "sandbox B reuses sandbox A's build cache (no CACHED in output)"
 fi
 assert_output "built image runs in B" "locki-shared-cache" locki x -m "$BUILD_B" docker run --rm locki-buildtest cat /marker
-assert_ok "shared buildkitd is active on VM" "$LIMACTL" shell --start --workdir=/ locki -- \
-    sudo systemctl is-active --quiet locki-buildkit
+assert_ok "shared buildkitd is active on VM" vm_sudo systemctl is-active --quiet locki-buildkit
 
 # ── disk deduplication ───────────────────────────────────────────────────────
 # Pool is directory-backed on the root btrfs (no loop file, no size cap), and the bees
@@ -705,8 +696,7 @@ echo "Testing disk deduplication..."
 
 assert_fail "incus pool is directory-backed (no loop file)" \
     "$LIMACTL" shell --start --workdir=/ locki -- test -f /var/lib/incus/disks/default.img
-assert_ok "bees dedup daemon is active on VM" "$LIMACTL" shell --start --workdir=/ locki -- \
-    sudo bash -c 'systemctl is-active --quiet "beesd@$(findmnt -no UUID /)"'
+assert_ok "bees dedup daemon is active on VM" vm_sudo bash -c 'systemctl is-active --quiet "beesd@$(findmnt -no UUID /)"'
 
 # ── concurrent first-time docker builds (install race) ───────────────────────
 # Regression: in a fresh sandbox, a `docker build` that arrives while a sibling

@@ -1,5 +1,4 @@
 import json
-import pathlib
 import shlex
 import sys
 
@@ -8,7 +7,7 @@ import click
 from locki.paths import WORKTREES
 from locki.runes import INFO
 from locki.services.vm import vm
-from locki.services.worktree import worktrees
+from locki.services.worktree import WorktreeInfo, worktrees
 from locki.utils import AliasGroup, fail, format_table, json_option, pretty_path
 
 
@@ -22,7 +21,7 @@ def vm_app():
 def vm_status_cmd(as_json):
     status = (vm.status() or "none").lower()
 
-    sandbox_list: list[dict] = []
+    entries: list[tuple[str, str, WorktreeInfo | None]] = []
     if status == "running":
         result = vm.run(
             ["incus", "list", "--format=csv", "--columns=n,s"],
@@ -36,37 +35,38 @@ def vm_status_cmd(as_json):
             if not sep:
                 continue
             wt_id = wt_id.strip()
-            sandbox = by_id.get(wt_id)
-            sandbox_list.append(
-                {
-                    "id": wt_id,
-                    "status": container_status.strip().lower(),
-                    "repo": str(sandbox.repo) if sandbox else "",
-                    "branch": sandbox.branch if sandbox else "",
-                    "worktree": str(sandbox.wt_path) if sandbox else "",
-                }
-            )
+            entries.append((wt_id, container_status.strip().lower(), by_id.get(wt_id)))
 
     if as_json:
+        sandbox_list = [
+            {
+                "id": wt_id,
+                "status": container_status,
+                "repo": str(s.repo) if s else "",
+                "branch": s.branch if s else "",
+                "worktree": str(s.wt_path) if s else "",
+            }
+            for wt_id, container_status, s in entries
+        ]
         click.echo(json.dumps({"vm": status, "sandboxes": sandbox_list}))
         return
 
     click.echo(f"VM: {status}")
     if status != "running":
         return
-    if not sandbox_list:
+    if not entries:
         click.echo("No sandboxes.")
         return
 
     rows = [
         (
-            s["id"],
-            s["status"],
-            pretty_path(pathlib.Path(s["repo"])) if s["repo"] else "",
-            s["branch"],
-            pretty_path(pathlib.Path(s["worktree"])) if s["worktree"] else "",
+            wt_id,
+            container_status,
+            pretty_path(s.repo) if s else "",
+            s.branch if s else "",
+            pretty_path(s.wt_path) if s else "",
         )
-        for s in sandbox_list
+        for wt_id, container_status, s in entries
     ]
     headers = ("SANDBOX ID", "STATUS", "REPO", "BRANCH", "WORKTREE")
     click.echo(format_table(headers, sorted(rows, key=lambda r: (r[1], r[2], r[3]))))

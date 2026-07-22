@@ -10,7 +10,7 @@ from locki.services.daemon import daemon
 from locki.services.home import home
 from locki.services.vm import vm
 from locki.services.worktree import WorktreeInfo, worktrees
-from locki.utils import pretty_path, sandbox_options
+from locki.utils import CLEAR_LINE, pretty_path, sandbox_options
 
 
 def enter_sandbox(worktree: WorktreeInfo, command: list[str]) -> typing.NoReturn:
@@ -33,20 +33,20 @@ def enter_sandbox(worktree: WorktreeInfo, command: list[str]) -> typing.NoReturn
 
     result = containers.exec_interactive(worktree, command)
 
-    clear = "\r\033[2K" if sys.stderr.isatty() else ""
-    click.echo(clear, err=True)
-    click.echo(f"{clear}{EXIT} Exited Locki sandbox.", err=True)
-    click.echo(f"{clear}{INFO} Return to this sandbox:", err=True)
+    # blank separator; on a TTY the clear also wipes leftover container output on the current line
+    click.echo(CLEAR_LINE if sys.stderr.isatty() else "", err=True)
+    click.echo(f"{EXIT} Exited Locki sandbox.", err=True)
+    click.echo(f"{INFO} Return to this sandbox:", err=True)
     click.echo(
-        f"{clear}{INFO}      via AI: {click.style(f'locki ai -m {worktree.wt_id}', fg='green')}"
+        f"{INFO}      via AI: {click.style(f'locki ai -m {worktree.wt_id}', fg='green')}"
         f" (or just {click.style('locki ai', fg='green')} and find it in the list)",
         err=True,
     )
     click.echo(
-        f"{clear}{INFO}   via shell: {click.style(f'locki x -m {worktree.wt_id}', fg='green')}",
+        f"{INFO}   via shell: {click.style(f'locki x -m {worktree.wt_id}', fg='green')}",
         err=True,
     )
-    click.echo(f"{clear}{INFO}     on disk: {click.style(pretty_path(worktree.wt_path), fg='green')}", err=True)
+    click.echo(f"{INFO}     on disk: {click.style(pretty_path(worktree.wt_path), fg='green')}", err=True)
     raise SystemExit(result.returncode)
 
 

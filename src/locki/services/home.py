@@ -4,6 +4,7 @@ per-sandbox trust and agent settings, and reading agent state back out of it."""
 import json
 import pathlib
 import re
+import uuid
 from contextlib import suppress
 
 import click
@@ -61,6 +62,13 @@ class HomeService:
         guard = SANDBOX_HOME / ".claude" / "hooks" / "locki-branch-guard.sh"
         guard.parent.mkdir(parents=True, exist_ok=True)
         guard.write_bytes((PACKAGE_DATA / "claude-branch-guard.sh").read_bytes())
+
+    def ensure_resume_transcript(self, wt_path: pathlib.Path) -> None:
+        """`claude -c` needs an existing transcript; plant an empty one for fresh sandboxes."""
+        project_dir = self.claude_project_dir(wt_path)
+        project_dir.mkdir(parents=True, exist_ok=True)
+        if not any(project_dir.glob("*.jsonl")):
+            (project_dir / f"{uuid.uuid4()}.jsonl").write_text("\n")
 
     def ai_title(self, wt_path: pathlib.Path) -> str:
         """Last AI-generated session title from the sandbox's Claude Code transcripts, or "".

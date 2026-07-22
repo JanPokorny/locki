@@ -39,8 +39,8 @@ def ide_cmd(match, interactive, create):
     if not worktree.wt_path.exists():
         worktrees.create(worktree)
 
+    argv = shlex.split(ide_command)
     try:
-        subprocess.run(shlex.split(ide_command), cwd=str(worktree.wt_path))
+        subprocess.run(argv, cwd=str(worktree.wt_path))
     except FileNotFoundError:
-        executable = shlex.split(ide_command)[0]
-        fail(f"IDE command '{executable}' not found. Is it installed and on your PATH?")
+        fail(f"IDE command '{argv[0]}' not found. Is it installed and on your PATH?")

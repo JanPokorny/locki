@@ -13,24 +13,24 @@ logger = logging.getLogger(__name__)
 
 
 def _is_merged(repo_path: str, trunk: str, branch: str) -> bool:
-    git = ["git", "-C", repo_path]
-    devnull = {"capture_output": True, "text": True, "stdin": subprocess.DEVNULL}
-    if branch in subprocess.run([*git, "branch", "--merged", trunk, "--list", branch], **devnull).stdout:
+    def git(*args: str) -> subprocess.CompletedProcess[bytes]:
+        return run_command(["git", "-C", repo_path, *args], "Checking merge status", check=False, quiet=True)
+
+    if branch in git("branch", "--merged", trunk, "--list", branch).stdout.decode():
         return True
-    merge_base = subprocess.run([*git, "merge-base", trunk, branch], **devnull)
+    merge_base = git("merge-base", trunk, branch)
     if merge_base.returncode != 0:
         return False
-    tree = subprocess.run([*git, "rev-parse", f"{branch}^{{tree}}"], **devnull)
+    tree = git("rev-parse", f"{branch}^{{tree}}")
     if tree.returncode != 0:
         return False
-    squash_commit = subprocess.run(
-        [*git, "commit-tree", tree.stdout.strip(), "-p", merge_base.stdout.strip(), "-m", "squash check"],
-        **devnull,
+    squash_commit = git(
+        "commit-tree", tree.stdout.decode().strip(), "-p", merge_base.stdout.decode().strip(), "-m", "squash check"
     )
     if squash_commit.returncode != 0:
         return False
-    cherry = subprocess.run([*git, "cherry", trunk, squash_commit.stdout.strip()], **devnull)
-    return cherry.returncode == 0 and cherry.stdout.strip().startswith("-")
+    cherry = git("cherry", trunk, squash_commit.stdout.decode().strip())
+    return cherry.returncode == 0 and cherry.stdout.decode().strip().startswith("-")
 
 
 def _has_uncommitted_changes(worktree: WorktreeInfo, *, quiet: bool = False) -> bool:
@@ -73,21 +73,24 @@ def remove_cmd(match, interactive, force, branches, merged, as_json):
             return
 
         repo = all_sandboxes[0].repo
-        ref = subprocess.run(
+        ref = run_command(
             ["git", "-C", str(repo), "symbolic-ref", "refs/remotes/origin/HEAD"],
-            capture_output=True,
-            text=True,
+            "Reading origin HEAD",
+            check=False,
+            quiet=True,
         )
         if ref.returncode == 0:
-            trunk = ref.stdout.strip().removeprefix("refs/remotes/origin/")
+            trunk = ref.stdout.decode().strip().removeprefix("refs/remotes/origin/")
         else:
             trunk = next(
                 (
                     name
                     for name in ("main", "master")
-                    if subprocess.run(
+                    if run_command(
                         ["git", "-C", str(repo), "rev-parse", "--verify", name],
-                        capture_output=True,
+                        "Checking trunk candidate",
+                        check=False,
+                        quiet=True,
                     ).returncode
                     == 0
                 ),
@@ -118,7 +121,7 @@ def remove_cmd(match, interactive, force, branches, merged, as_json):
             worktrees.remove(s, branches=branches)
             click.echo(f"{SUCCESS} Removed {s.branch}", err=True)
         if as_json:
-            click.echo(json.dumps([dict(s) for s in targets]))
+            click.echo(json.dumps([s.as_dict() for s in targets]))
         return
 
     worktree = worktrees.resolve(match=match, interactive=interactive, create="deny")
@@ -134,4 +137,4 @@ def remove_cmd(match, interactive, force, branches, merged, as_json):
     containers.remove(worktree.wt_id)
     worktrees.remove(worktree, branches=branches)
     if as_json:
-        click.echo(json.dumps([dict(worktree)]))
+        click.echo(json.dumps([worktree.as_dict()]))

@@ -10,6 +10,8 @@ from locki.paths import LOG
 
 _log_file_path: pathlib.Path | None = None
 
+FILE_LOG_FORMAT = "%(asctime)s %(levelname)s %(message)s"
+
 
 class _StderrFormatter(logging.Formatter):
     def format(self, record):
@@ -34,7 +36,7 @@ def setup_logging():
     _log_file_path = LOG / f"{timestamp}-{os.getpid()}.log"
     file_handler = logging.FileHandler(_log_file_path)
     file_handler.setLevel(logging.DEBUG)
-    file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    file_handler.setFormatter(logging.Formatter(FILE_LOG_FORMAT))
     root.addHandler(file_handler)
 
     def _mtime(f):

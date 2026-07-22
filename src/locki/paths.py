@@ -3,11 +3,12 @@ import os
 import pathlib
 
 HOME = pathlib.Path.home().resolve()
+XDG_CONFIG = pathlib.Path(os.environ.get("XDG_CONFIG_HOME") or (HOME / ".config")).expanduser().resolve()
 LEGACY = HOME / ".locki"
 if LEGACY.exists():
     CONFIG = DATA = STATE = RUNTIME = LEGACY
 else:
-    CONFIG = pathlib.Path(os.environ.get("XDG_CONFIG_HOME") or (HOME / ".config")).expanduser().resolve() / "locki"
+    CONFIG = XDG_CONFIG / "locki"
     DATA = pathlib.Path(os.environ.get("XDG_DATA_HOME") or (HOME / ".local" / "share")).expanduser().resolve() / "locki"
     STATE = (
         pathlib.Path(os.environ.get("XDG_STATE_HOME") or (HOME / ".local" / "state")).expanduser().resolve() / "locki"

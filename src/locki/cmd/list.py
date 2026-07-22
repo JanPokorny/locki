@@ -22,7 +22,7 @@ def list_cmd(show_all: bool, as_json: bool) -> None:
         listed = [s for s in listed if s.repo.resolve() == cwd_repo.resolve()]
 
     if as_json:
-        click.echo(json.dumps([dict(s) | {"title": home.ai_title(s.wt_path)} for s in listed]))
+        click.echo(json.dumps([s.as_dict() | {"title": home.ai_title(s.wt_path)} for s in listed]))
         return
 
     if not listed:

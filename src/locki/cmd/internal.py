@@ -18,6 +18,7 @@ import time
 
 import click
 
+from locki.logging import FILE_LOG_FORMAT
 from locki.paths import (
     DENIED_LOG,
     PACKAGE_DATA,
@@ -30,6 +31,7 @@ from locki.paths import (
     WORKTREES_META,
 )
 from locki.services.bridge import Ruleset
+from locki.services.container import WORKTREE_DEVICE
 from locki.services.vm import vm
 from locki.services.worktree import wt_id_from_dir
 from locki.utils import AliasGroup
@@ -47,9 +49,9 @@ CLIENT_KEY = SANDBOX_HOME / ".ssh" / "id_locki"
 AUTHORIZED_KEYS_FILE = STATE / "ssh" / "authorized_keys"
 
 
-internal_app = click.group(cls=AliasGroup, help="Internal commands (invoked by Locki itself).", hidden=True)(
-    lambda: None
-)
+@click.group(cls=AliasGroup, help="Internal commands (invoked by Locki itself).", hidden=True)
+def internal_app():
+    pass
 
 
 @internal_app.command("cleanup")
@@ -73,7 +75,7 @@ def internal_cleanup() -> None:
     deleted: set[str] = set()
     for container in containers:
         name = container.get("name", "")
-        source = ((container.get("expanded_devices") or {}).get("worktree") or {}).get("source", "")
+        source = ((container.get("expanded_devices") or {}).get(WORKTREE_DEVICE) or {}).get("source", "")
         if not name or not source:
             continue
         src = pathlib.Path(source).resolve()
@@ -134,7 +136,7 @@ def internal_daemon() -> None:
     log_file = STATE / "logs" / "daemon.log"
     log_file.parent.mkdir(parents=True, exist_ok=True)
     handler = logging.FileHandler(log_file)
-    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    handler.setFormatter(logging.Formatter(FILE_LOG_FORMAT))
     logging.getLogger().addHandler(handler)
 
     async def main() -> None:
@@ -259,7 +261,7 @@ def internal_command_bridge() -> None:
 
     os.chdir(str(cwd))
 
-    if error := Ruleset.from_markdown((PACKAGE_DATA / "AGENTS.md").read_text()).check([exe, *argv], wt_id):
+    if error := Ruleset.from_markdown((PACKAGE_DATA / "AGENTS.md").read_text()).check([exe, *argv], wt_id, str(cwd)):
         with contextlib.suppress(OSError):
             DENIED_LOG.parent.mkdir(parents=True, exist_ok=True)
             with DENIED_LOG.open("a") as fh:

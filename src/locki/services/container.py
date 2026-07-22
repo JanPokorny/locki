@@ -11,6 +11,9 @@ from locki.services.vm import vm
 from locki.services.worktree import WorktreeInfo
 from locki.utils import fail, file_lock
 
+# The incus disk device that mounts the worktree; cleanup reads its source to map a container to its worktree.
+WORKTREE_DEVICE = "worktree"
+
 
 class ContainerService:
     """Per-sandbox Incus containers inside the Locki VM."""
@@ -45,6 +48,7 @@ class ContainerService:
             "JULIA_DEPOT_PATH": "/var/cache/locki/julia",
             "LEIN_HOME": "/var/cache/locki/lein",
             "LOCKI_SANDBOX_ID": worktree.wt_id,
+            "LOCKI_WORKTREES_HOME": str(WORKTREES),
             "MAVEN_OPTS": "-Dmaven.repo.local=/var/cache/locki/maven",
             "MISE_CACHE_DIR": "/var/cache/locki/mise",
             "MISE_DATA_DIR": "/usr/share/mise",
@@ -184,7 +188,7 @@ class ContainerService:
                         "device",
                         "add",
                         worktree.wt_id,
-                        "worktree",
+                        WORKTREE_DEVICE,
                         "disk",
                         f"source={worktree.wt_path}",
                         f"path={worktree.wt_path}",
@@ -216,8 +220,6 @@ class ContainerService:
                         "exec",
                         worktree.wt_id,
                         *env_flags,
-                        "--env",
-                        f"LOCKI_WORKTREES_HOME={WORKTREES}",
                         "--",
                         "/bin/sh",
                     ],
@@ -253,7 +255,6 @@ class ContainerService:
                         shlex.quote(worktree.wt_id),
                         "--cwd",
                         shlex.quote(str(worktree.wt_path)),
-                        f"--env=LOCKI_WORKTREES_HOME={WORKTREES}",
                         *(f"--env={k}={v}" for k, v in self.env(worktree).items()),
                         *(f'--env={env}="${env}"' for env in self.forwarded_env),
                         "--",

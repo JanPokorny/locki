@@ -68,7 +68,7 @@ class LockiConfig:
         if len(matches) <= 1:
             return str(matches[0].relative_to(repo)) if matches else self.incus_image
 
-        for hint in _ARCH_HINTS.get(_arch(), []):
+        for hint in _ARCH_HINTS[_arch()]:
             arch_matches = [m for m in matches if hint in m.name.lower()]
             if len(arch_matches) == 1:
                 return str(arch_matches[0].relative_to(repo))

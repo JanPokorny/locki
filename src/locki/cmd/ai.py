@@ -1,5 +1,4 @@
 import shlex
-import uuid
 
 import click
 
@@ -37,10 +36,6 @@ def ai_cmd(ctx, match, interactive, create):
     ai_command = ensure_configured(worktree.repo).ai_command
 
     if shlex.split(ai_command)[0] == "claude":
-        # claude -c needs an existing transcript; plant an empty one for fresh sandboxes
-        project_dir = home.claude_project_dir(worktree.wt_path)
-        project_dir.mkdir(parents=True, exist_ok=True)
-        if not any(project_dir.glob("*.jsonl")):
-            (project_dir / f"{uuid.uuid4()}.jsonl").write_text("\n")
+        home.ensure_resume_transcript(worktree.wt_path)
 
     enter_sandbox(worktree, [*shlex.split(ai_command), *ctx.args])
