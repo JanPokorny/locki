@@ -1,12 +1,13 @@
 """Internal commands invoked by Locki itself — not for direct end-user use.
 
-* `locki internal cleanup` — one-shot: stop idle containers, remove orphans, power off idle VM.
-* `locki internal daemon`  — long-running host daemon: asyncssh forced-command proxy + cleanup scheduler.
-* `locki internal command-bridge` — SSH forced bridged command handler: validate and run a whitelisted command.
+* `locki internal daemon` — long-running host daemon: asyncssh proxy that validates and
+  runs bridged commands in-process, plus a periodic cleanup scheduler (stop idle
+  containers, remove orphans, power off idle VM).
 """
 
 import contextlib
 import datetime
+import functools
 import json
 import logging
 import os
@@ -30,8 +31,9 @@ from locki.paths import (
     WORKTREES,
     WORKTREES_META,
 )
-from locki.services.bridge import Ruleset
+from locki.services.bridge import BridgeDeniedError, Ruleset
 from locki.services.container import WORKTREE_DEVICE
+from locki.services.daemon import VERSION, VERSION_FILE
 from locki.services.vm import vm
 from locki.services.worktree import wt_id_from_dir
 from locki.utils import AliasGroup
@@ -54,11 +56,10 @@ def internal_app():
     pass
 
 
-@internal_app.command("cleanup")
-def internal_cleanup() -> None:
-    """One-shot: stop idle containers, remove orphans, power off idle VM."""
+def _cleanup_once() -> None:
+    """Stop idle containers, remove orphans, power off the idle VM."""
     if vm.status() != "Running":
-        sys.exit(1)
+        return
 
     try:
         last_active = json.loads(LAST_ACTIVE_FILE.read_text())
@@ -123,7 +124,80 @@ def internal_cleanup() -> None:
         logger.info("No running containers for %.0fs — stopping VM.", now - idle_since)
         vm.stop(force=False, check=False, quiet=True)
         VM_IDLE_SINCE_FILE.unlink(missing_ok=True)
-        sys.exit(1)
+
+
+@functools.cache
+def _ruleset() -> Ruleset:
+    """AGENTS.md is package data — static for this process's lifetime (an upgraded
+    locki restarts the daemon via the version handshake in DaemonService)."""
+    return Ruleset.from_markdown((PACKAGE_DATA / "AGENTS.md").read_text())
+
+
+def _resolve_bridged(cmd: str) -> tuple[list[str], pathlib.Path, dict[str, str]]:
+    """Validate a bridged command line and return (argv, cwd, env) to execute.
+
+    Raises BridgeDeniedError for anything not allowed."""
+    if not cmd:
+        raise BridgeDeniedError("No command specified.")
+    try:
+        cwd_str, exe, *argv = shlex.split(cmd)
+    except ValueError:
+        raise BridgeDeniedError("Usage: <cwd> <exe> [args...]") from None
+
+    cwd = pathlib.Path(cwd_str).resolve()
+    wt_root = WORKTREES.resolve()
+    if not cwd.is_relative_to(wt_root):
+        raise BridgeDeniedError(f"Not inside a locki worktree: {str(cwd)!r}")
+    rel_parts = cwd.relative_to(wt_root).parts
+    if not rel_parts:
+        raise BridgeDeniedError(f"Not inside a locki worktree: {str(cwd)!r}")
+    wt_dir = rel_parts[0]
+    wt_id = wt_id_from_dir(wt_dir)
+
+    sandbox_root = WORKTREES / wt_dir
+    p: pathlib.Path = cwd
+    while True:
+        git_file = p / ".git"
+        if git_file.is_symlink():
+            raise BridgeDeniedError(f"Refusing to follow symlinked .git at {str(git_file)!r}")
+        if git_file.is_file():
+            break
+        if p == sandbox_root:
+            raise BridgeDeniedError(f"No worktree .git found at or above {str(cwd)!r}")
+        p = p.parent
+    match p.relative_to(wt_root).parts:
+        case [wt_dir_] if wt_dir_ == wt_dir:
+            meta_git = WORKTREES_META / wt_dir / ".git"
+        case [wt_dir_, ".locki", "include", included_wt_dir] if wt_dir_ == wt_dir:
+            meta_git = WORKTREES_META / wt_dir / "include" / included_wt_dir / ".git"
+        case _:
+            raise BridgeDeniedError(f"Unexpected worktree layout: {p}")
+    if not meta_git.exists():
+        raise BridgeDeniedError(f"Missing worktree metadata: {meta_git}")
+
+    if error := _ruleset().check([exe, *argv], wt_id, str(cwd)):
+        with contextlib.suppress(OSError):
+            DENIED_LOG.parent.mkdir(parents=True, exist_ok=True)
+            with DENIED_LOG.open("a") as fh:
+                fh.write(
+                    f"{datetime.datetime.now().isoformat(timespec='seconds')}\t{wt_id}\t{shlex.join([exe, *argv])}\n"
+                )
+        raise BridgeDeniedError(error)
+
+    trusted = meta_git.read_text()
+    if git_file.read_text() != trusted:
+        fd = os.open(git_file, os.O_WRONLY | os.O_TRUNC | os.O_NOFOLLOW)
+        try:
+            os.write(fd, trusted.encode())
+        finally:
+            os.close(fd)
+
+    env = dict(os.environ)
+    if exe == "locki":
+        return [sys.executable, "-m", "locki", *argv], cwd, env
+    if exe == "git":
+        env["GIT_EDITOR"] = "true"
+    return [exe, *argv], cwd, env
 
 
 @internal_app.command("daemon")
@@ -154,18 +228,32 @@ def internal_daemon() -> None:
 
         async def handle(process: asyncssh.SSHServerProcess) -> None:
             try:
-                env = {**os.environ, "SSH_ORIGINAL_COMMAND": process.command or ""}
-                sub = await asyncio.create_subprocess_exec(
-                    sys.executable,
-                    "-m",
-                    "locki",
-                    "internal",
-                    "command-bridge",
-                    env=env,
-                    stdin=asyncio.subprocess.PIPE,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
+                try:
+                    argv, cwd, env = await asyncio.to_thread(_resolve_bridged, process.command or "")
+                except (BridgeDeniedError, SystemExit) as e:
+                    # SystemExit covers fail()/sys.exit paths reached from validation
+                    # (e.g. a missing binary); it must not take down the daemon.
+                    msg = (
+                        str(e)
+                        if isinstance(e, BridgeDeniedError) or isinstance(e.code, str)
+                        else "Bridged command failed."
+                    )
+                    process.stderr.write(f"{msg}\n".encode())
+                    process.exit(1)
+                    return
+                try:
+                    sub = await asyncio.create_subprocess_exec(
+                        *argv,
+                        cwd=cwd,
+                        env=env,
+                        stdin=asyncio.subprocess.PIPE,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
+                except FileNotFoundError:
+                    process.stderr.write(f"{argv[0]}: command not found on host\n".encode())
+                    process.exit(1)
+                    return
                 await process.redirect(stdin=sub.stdin, stdout=sub.stdout, stderr=sub.stderr)
                 process.exit(await sub.wait() or 0)
             except Exception:
@@ -187,7 +275,8 @@ def internal_daemon() -> None:
         port = next(iter(server.sockets)).getsockname()[1]
         PORT_FILE.write_text(str(port))
         PID_FILE.write_text(str(os.getpid()))
-        logger.info("Locki daemon listening on 127.0.0.1:%d", port)
+        VERSION_FILE.write_text(VERSION)
+        logger.info("Locki daemon %s listening on 127.0.0.1:%d", VERSION, port)
 
         stop = asyncio.Event()
         loop = asyncio.get_running_loop()
@@ -197,8 +286,10 @@ def internal_daemon() -> None:
 
         async def cleanup_loop() -> None:
             while not stop.is_set():
-                proc = await asyncio.create_subprocess_exec(sys.executable, "-m", "locki", "internal", "cleanup")
-                await proc.wait()
+                try:
+                    await asyncio.to_thread(_cleanup_once)
+                except Exception:
+                    logger.exception("Cleanup failed")
                 with contextlib.suppress(TimeoutError):
                     await asyncio.wait_for(stop.wait(), timeout=CLEANUP_INTERVAL)
 
@@ -215,71 +306,4 @@ def internal_daemon() -> None:
     finally:
         PID_FILE.unlink(missing_ok=True)
         PORT_FILE.unlink(missing_ok=True)
-
-
-@internal_app.command("command-bridge | self-service")
-def internal_command_bridge() -> None:
-    """SSH forced command: validate and execute an allowed bridged command."""
-    cmd = os.environ.get("SSH_ORIGINAL_COMMAND", "")
-    if not cmd:
-        sys.exit("No command specified.")
-    try:
-        cwd_str, exe, *argv = shlex.split(cmd)
-    except ValueError:
-        sys.exit("Usage: <cwd> <exe> [args...]")
-
-    cwd = pathlib.Path(cwd_str).resolve()
-    wt_root = WORKTREES.resolve()
-    if not cwd.is_relative_to(wt_root):
-        sys.exit(f"Not inside a locki worktree: {str(cwd)!r}")
-    rel_parts = cwd.relative_to(wt_root).parts
-    if not rel_parts:
-        sys.exit(f"Not inside a locki worktree: {str(cwd)!r}")
-    wt_dir = rel_parts[0]
-    wt_id = wt_id_from_dir(wt_dir)
-
-    sandbox_root = WORKTREES / wt_dir
-    p: pathlib.Path = cwd
-    while True:
-        git_file = p / ".git"
-        if git_file.is_symlink():
-            sys.exit(f"Refusing to follow symlinked .git at {str(git_file)!r}")
-        if git_file.is_file():
-            break
-        if p == sandbox_root:
-            sys.exit(f"No worktree .git found at or above {str(cwd)!r}")
-        p = p.parent
-    match p.relative_to(wt_root).parts:
-        case [wt_dir_] if wt_dir_ == wt_dir:
-            meta_git = WORKTREES_META / wt_dir / ".git"
-        case [wt_dir_, ".locki", "include", included_wt_dir] if wt_dir_ == wt_dir:
-            meta_git = WORKTREES_META / wt_dir / "include" / included_wt_dir / ".git"
-        case _:
-            sys.exit(f"Unexpected worktree layout: {p}")
-    if not meta_git.exists():
-        sys.exit(f"Missing worktree metadata: {meta_git}")
-
-    os.chdir(str(cwd))
-
-    if error := Ruleset.from_markdown((PACKAGE_DATA / "AGENTS.md").read_text()).check([exe, *argv], wt_id, str(cwd)):
-        with contextlib.suppress(OSError):
-            DENIED_LOG.parent.mkdir(parents=True, exist_ok=True)
-            with DENIED_LOG.open("a") as fh:
-                fh.write(
-                    f"{datetime.datetime.now().isoformat(timespec='seconds')}\t{wt_id}\t{shlex.join([exe, *argv])}\n"
-                )
-        sys.exit(error)
-
-    trusted = meta_git.read_text()
-    if git_file.read_text() != trusted:
-        fd = os.open(git_file, os.O_WRONLY | os.O_TRUNC | os.O_NOFOLLOW)
-        try:
-            os.write(fd, trusted.encode())
-        finally:
-            os.close(fd)
-
-    if exe == "locki":
-        os.execvp(sys.executable, [sys.executable, "-m", "locki", *argv])
-    if exe == "git":
-        os.environ["GIT_EDITOR"] = "true"
-    os.execvp(exe, [exe, *argv])
+        VERSION_FILE.unlink(missing_ok=True)

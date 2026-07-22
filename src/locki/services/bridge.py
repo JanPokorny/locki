@@ -1,18 +1,22 @@
 """Command-bridge grammar engine: parses the allowed-command grammar out of
 AGENTS.md and matches candidate argv lines against it.  Pure matching logic —
-the SSH entry point that invokes it lives in `locki internal command-bridge`."""
+the SSH entry point that invokes it lives in the `locki internal daemon`."""
 
 from __future__ import annotations
 
 import re
 import shlex
-import sys
 from collections.abc import Iterator
 from dataclasses import dataclass
 from functools import cache, cached_property
 
 from locki.services.worktree import branch_suffix
 from locki.utils import run_command
+
+
+class BridgeDeniedError(Exception):
+    """A bridged command was rejected; str(exc) is the message for the sandbox side."""
+
 
 # ── Command bridge grammar engine ───────────────────────────────────────────────
 
@@ -136,10 +140,10 @@ class Context:
         )
         out = result.stdout.decode().strip()
         if result.returncode != 0:
-            sys.exit("Could not determine current gh repo.")
+            raise BridgeDeniedError("Could not determine current gh repo.")
         owner, _, name = out.partition("/")
         if not owner or not name:
-            sys.exit(f"Invalid repo from gh: {out!r}.")
+            raise BridgeDeniedError(f"Invalid repo from gh: {out!r}.")
         return owner, name
 
     @cached_property
