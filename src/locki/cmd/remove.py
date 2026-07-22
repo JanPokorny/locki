@@ -116,8 +116,8 @@ def remove_cmd(match, interactive, force, branches, merged, as_json):
         for s in targets:
             click.echo(f"     {s.branch}", err=True)
 
+        containers.remove(*(s.wt_id for s in targets))
         for s in targets:
-            containers.remove(s.wt_id)
             worktrees.remove(s, branches=branches)
             click.echo(f"{SUCCESS} Removed {s.branch}", err=True)
         if as_json:

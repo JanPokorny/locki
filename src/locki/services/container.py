@@ -123,22 +123,23 @@ class ContainerService:
                 print_success=False,
             )
             if result.returncode != 0:
-                stderr = result.stderr.decode()
-                if "fingerprint" not in stderr:
-                    fail(f"Importing container image failed: {stderr.strip()}")
-                # Same content already imported under another alias (e.g. from another clone
-                # of the repo). The incus fingerprint is the sha256 of the archive (metadata
-                # then rootfs for split images) — compute it and add our alias to that image.
+                # Possibly the same content already imported under another alias (e.g. from
+                # another clone of the repo). The incus fingerprint is the sha256 of the
+                # archive (metadata then rootfs for split images) — try aliasing it, and only
+                # if that also fails report the original import error.
                 digest = hashlib.sha256()
                 for src in sources:
                     with open(src, "rb") as f:
                         while chunk := f.read(1 << 20):
                             digest.update(chunk)
-                vm.run(
+                aliased = vm.run(
                     ["incus", "image", "alias", "create", alias, digest.hexdigest()[:12]],
                     "Aliasing existing image",
+                    check=False,
                     print_success=False,
                 )
+                if aliased.returncode != 0:
+                    fail(f"Importing container image failed: {result.stderr.decode().strip()}")
         finally:
             vm.run(
                 ["rm", "-f", *vm_files],
@@ -154,53 +155,38 @@ class ContainerService:
         config = load_config(worktree.repo)
 
         with file_lock(f"provision-{worktree.wt_id}", "Waiting for another sandbox setup"):
+            wt_id_q = shlex.quote(worktree.wt_id)
+            # One roundtrip for the hot path: start it if it exists (a no-op error when
+            # already running), then report whether it exists at all.
             result = vm.run(
-                ["incus", "list", "--format=csv", "--columns=ns", worktree.wt_id],
+                ["sh", "-c", f"incus start {wt_id_q} 2>/dev/null; incus list --format=csv --columns=n {wt_id_q}"],
                 "Checking container",
                 check=False,
                 print_success=False,
             )
-            listing = result.stdout.decode()
-            if worktree.wt_id in listing:
-                if "RUNNING" not in listing:
-                    vm.run(
-                        ["incus", "start", worktree.wt_id],
-                        "Starting container",
-                        check=False,
-                    )
-            else:
+            if worktree.wt_id not in result.stdout.decode():
                 incus_image = config.get_incus_image(worktree.repo)
 
                 local_path = worktree.repo / incus_image
                 with file_lock("image", "Waiting for another image import"):
                     image_ref = self._import_local_image(local_path) if local_path.is_file() else incus_image
 
+                    wt_path_q = shlex.quote(str(worktree.wt_path))
                     vm.run(
-                        ["incus", "init", image_ref, worktree.wt_id],
-                        "Creating container",
-                        print_success=False,
+                        [
+                            "sh",
+                            "-c",
+                            " && ".join(
+                                [
+                                    f"incus init {shlex.quote(image_ref)} {wt_id_q}",
+                                    f"incus config device add {wt_id_q} {WORKTREE_DEVICE} disk"
+                                    f" source={wt_path_q} path={wt_path_q}",
+                                    f"incus start {wt_id_q}",
+                                ]
+                            ),
+                        ],
+                        "Starting container",
                     )
-
-                vm.run(
-                    [
-                        "incus",
-                        "config",
-                        "device",
-                        "add",
-                        worktree.wt_id,
-                        WORKTREE_DEVICE,
-                        "disk",
-                        f"source={worktree.wt_path}",
-                        f"path={worktree.wt_path}",
-                    ],
-                    "Mounting worktree into container",
-                    print_success=False,
-                )
-
-                vm.run(
-                    ["incus", "start", worktree.wt_id],
-                    "Starting container",
-                )
 
                 setup_script = (
                     (PACKAGE_DATA / "container-setup.sh")
@@ -228,16 +214,16 @@ class ContainerService:
                     print_success=False,
                 )
 
-    def remove(self, wt_id: str) -> None:
-        """Delete the container and the sandbox-scoped cache folder in one VM roundtrip."""
-        quoted = shlex.quote(wt_id)
+    def remove(self, *wt_ids: str) -> None:
+        """Delete container(s) and their sandbox-scoped cache folders in one VM roundtrip."""
+        if not wt_ids:
+            return
+        script = "; ".join(
+            f"incus delete --force {q}; rm -rf /var/cache/locki/scoped/{q}" for q in map(shlex.quote, wt_ids)
+        )
         vm.run(
-            [
-                "sh",
-                "-c",
-                f"incus delete --force {quoted}; rm -rf /var/cache/locki/scoped/{quoted}",
-            ],
-            "Removing container",
+            ["sh", "-c", script],
+            "Removing containers" if len(wt_ids) > 1 else "Removing container",
             check=False,
         )
 
