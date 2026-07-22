@@ -9,6 +9,7 @@ import functools
 import pathlib
 import secrets
 import shutil
+import subprocess
 import sys
 
 import click
@@ -77,15 +78,15 @@ class WorktreeInfo:
             self.wt_dir = wt_dir_name(self.repo.name, self.wt_id)
 
     @property
-    def wt_path(self) -> pathlib.Path:
+    def path(self) -> pathlib.Path:
         return WORKTREES / self.wt_dir
 
     @property
     def meta_path(self) -> pathlib.Path:
         return WORKTREES_META / self.wt_dir
 
-    def include_wt_path(self, name: str) -> pathlib.Path:
-        return self.wt_path / ".locki" / "include" / name
+    def include_path(self, name: str) -> pathlib.Path:
+        return self.path / ".locki" / "include" / name
 
     def include_meta_path(self, name: str) -> pathlib.Path:
         return self.meta_path / "include" / name
@@ -94,10 +95,23 @@ class WorktreeInfo:
         return {
             "id": self.wt_id,
             "branch": self.branch,
-            "path": str(self.wt_path),
+            "path": str(self.path),
             "repo": str(self.repo),
             "include": [{"name": i.name, "repo": str(i.repo), "branch": i.branch} for i in self.include],
         }
+
+
+@functools.cache
+def _merged_branches(repo: str, trunk: str) -> frozenset[str]:
+    """All branches merged into *trunk* — one git call answers the common case
+    for every sandbox of the repo."""
+    result = run_command(
+        ["git", "-C", repo, "branch", "--merged", trunk, "--format=%(refname:short)"],
+        "Listing merged branches",
+        check=False,
+        quiet=True,
+    )
+    return frozenset(result.stdout.decode().split())
 
 
 def _matching_branches(repo: str, wt_id: str) -> list[str]:
@@ -214,7 +228,7 @@ class WorktreeService:
             print_success=False,
         )
         self.add(worktree.repo, worktree.wt_id, branch=worktree.branch, from_ref=from_ref)
-        locki_dir = worktree.wt_path / ".locki"
+        locki_dir = worktree.path / ".locki"
         locki_dir.mkdir(parents=True, exist_ok=True)
         (locki_dir / ".gitignore").write_text("*\n")
         (locki_dir / "tmp").mkdir(exist_ok=True)
@@ -223,11 +237,11 @@ class WorktreeService:
         """Rename manually-switched branches to carry the sandbox's #locki-<id> suffix."""
         suffix = branch_suffix(worktree.wt_id)
         for meta_dir, wt_path in [
-            (worktree.meta_path, worktree.wt_path),
+            (worktree.meta_path, worktree.path),
             *(
-                (worktree.include_meta_path(i.name), worktree.include_wt_path(i.name))
+                (worktree.include_meta_path(i.name), worktree.include_path(i.name))
                 for i in worktree.include
-                if worktree.include_wt_path(i.name).exists() and worktree.include_meta_path(i.name).exists()
+                if worktree.include_path(i.name).exists() and worktree.include_meta_path(i.name).exists()
             ),
         ]:
             branch = self.live_branch(meta_dir)
@@ -243,7 +257,7 @@ class WorktreeService:
         """Remove the worktree, its includes, and metadata; optionally its branches.
         The container half is ContainerService.remove's job."""
         for inc in worktree.include:
-            inc_wt = worktree.include_wt_path(inc.name)
+            inc_wt = worktree.include_path(inc.name)
             run_command(
                 ["git", "-C", str(inc.repo), "worktree", "remove", "--force", str(inc_wt)],
                 f"Removing include worktree {inc.name}",
@@ -255,7 +269,7 @@ class WorktreeService:
                 check=False,
             )
 
-        shutil.rmtree(worktree.wt_path, ignore_errors=True)
+        shutil.rmtree(worktree.path, ignore_errors=True)
         shutil.rmtree(worktree.meta_path, ignore_errors=True)
         run_command(
             ["git", "-C", str(worktree.repo), "worktree", "prune"],
@@ -271,6 +285,63 @@ class WorktreeService:
                         f"Removing branch {b}",
                         check=False,
                     )
+
+    def trunk(self, repo: pathlib.Path) -> str | None:
+        """The repo's trunk branch: origin/HEAD's target, falling back to main/master."""
+        ref = run_command(
+            ["git", "-C", str(repo), "symbolic-ref", "refs/remotes/origin/HEAD"],
+            "Reading origin HEAD",
+            check=False,
+            quiet=True,
+        )
+        if ref.returncode == 0:
+            return ref.stdout.decode().strip().removeprefix("refs/remotes/origin/")
+        return next(
+            (
+                name
+                for name in ("main", "master")
+                if run_command(
+                    ["git", "-C", str(repo), "rev-parse", "--verify", name],
+                    "Checking trunk candidate",
+                    check=False,
+                    quiet=True,
+                ).returncode
+                == 0
+            ),
+            None,
+        )
+
+    def is_merged(self, repo: pathlib.Path, trunk: str, branch: str) -> bool:
+        """Whether *branch* is merged into *trunk*, including squash merges."""
+        if branch in _merged_branches(str(repo), trunk):
+            return True
+
+        def git(*args: str) -> subprocess.CompletedProcess[bytes]:
+            return run_command(["git", "-C", str(repo), *args], "Checking merge status", check=False, quiet=True)
+
+        merge_base = git("merge-base", trunk, branch)
+        if merge_base.returncode != 0:
+            return False
+        tree = git("rev-parse", f"{branch}^{{tree}}")
+        if tree.returncode != 0:
+            return False
+        squash_commit = git(
+            "commit-tree", tree.stdout.decode().strip(), "-p", merge_base.stdout.decode().strip(), "-m", "squash check"
+        )
+        if squash_commit.returncode != 0:
+            return False
+        cherry = git("cherry", trunk, squash_commit.stdout.decode().strip())
+        return cherry.returncode == 0 and cherry.stdout.decode().strip().startswith("-")
+
+    def has_uncommitted_changes(self, worktree: WorktreeInfo, *, quiet: bool = False) -> bool:
+        return bool(
+            run_command(
+                ["git", "-C", str(worktree.path), "status", "--porcelain"],
+                "Checking for uncommitted changes",
+                check=False,
+                quiet=quiet,
+            ).stdout.strip()
+        )
 
     def current_worktree(self) -> pathlib.Path | None:
         """If cwd is inside a Locki-managed worktree, return its path."""
@@ -447,7 +518,7 @@ class WorktreeService:
                 choices.append(Choice(value="__create__", name="(create new)"))
             for s in sorted(candidate_sandboxes, key=lambda x: x.branch):
                 label = s.branch + (f" ({pretty_path(s.repo)})" if scope_all else "")
-                if title := home.ai_title(s.wt_path):
+                if title := home.ai_title(s.path):
                     label += f" — {title}"
                 choices.append(Choice(value=s.wt_id, name=label))
             if not scope_all and not filter_out_current_repo:

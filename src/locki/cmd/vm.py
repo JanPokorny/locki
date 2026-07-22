@@ -44,7 +44,7 @@ def vm_status_cmd(as_json):
                 "status": container_status,
                 "repo": str(s.repo) if s else "",
                 "branch": s.branch if s else "",
-                "worktree": str(s.wt_path) if s else "",
+                "worktree": str(s.path) if s else "",
             }
             for wt_id, container_status, s in entries
         ]
@@ -64,7 +64,7 @@ def vm_status_cmd(as_json):
             container_status,
             pretty_path(s.repo) if s else "",
             s.branch if s else "",
-            pretty_path(s.wt_path) if s else "",
+            pretty_path(s.path) if s else "",
         )
         for wt_id, container_status, s in entries
     ]

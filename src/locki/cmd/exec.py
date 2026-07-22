@@ -19,11 +19,11 @@ def enter_sandbox(worktree: WorktreeInfo, command: list[str]) -> typing.NoReturn
     click.echo(f"{SPINNER} Entering a Locki sandbox.", err=True)
 
     WORKTREES.mkdir(parents=True, exist_ok=True)
-    home.prepare(worktree.wt_path)
+    home.prepare(worktree.path)
 
     vm.ensure_running()
 
-    if not worktree.wt_path.exists():
+    if not worktree.path.exists():
         worktrees.create(worktree)
     else:
         worktrees.fix_branches(worktree)
@@ -46,7 +46,7 @@ def enter_sandbox(worktree: WorktreeInfo, command: list[str]) -> typing.NoReturn
         f"{INFO}   via shell: {click.style(f'locki x -m {worktree.wt_id}', fg='green')}",
         err=True,
     )
-    click.echo(f"{INFO}     on disk: {click.style(pretty_path(worktree.wt_path), fg='green')}", err=True)
+    click.echo(f"{INFO}     on disk: {click.style(pretty_path(worktree.path), fg='green')}", err=True)
     raise SystemExit(result.returncode)
 
 

@@ -28,9 +28,9 @@ def cd_cmd(match, interactive, create):
         create="force" if create else "allow",
     )
 
-    if not worktree.wt_path.exists():
+    if not worktree.path.exists():
         worktrees.create(worktree)
 
     shell = os.environ.get("SHELL") or pwd.getpwuid(os.getuid()).pw_shell or "/bin/sh"
-    os.chdir(worktree.wt_path)
+    os.chdir(worktree.path)
     os.execvp(shell, [shell])

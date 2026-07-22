@@ -15,8 +15,8 @@ from locki.services.home import home  # noqa: E402
 from locki.services.worktree import WorktreeInfo  # noqa: E402
 
 s = WorktreeInfo(wt_id="abcd1234", branch="x#locki-abcd1234", repo=pathlib.Path("/repo/proj"))
-ai_title = lambda s: home.ai_title(s.wt_path)  # noqa: E731
-project = home.claude_project_dir(s.wt_path)
+ai_title = lambda s: home.ai_title(s.path)  # noqa: E731
+project = home.claude_project_dir(s.path)
 
 assert ai_title(s) == "", "missing project dir -> empty"
 

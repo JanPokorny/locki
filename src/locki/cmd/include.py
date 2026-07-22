@@ -77,7 +77,7 @@ def include_cmd(match, interactive, repo_path, this_flag, as_json):
 
     name = wt_dir_name(repo_b.name, worktree.wt_id)
     existing = {inc.name for inc in worktree.include}
-    if name in existing or worktree.include_wt_path(name).exists() or worktree.include_meta_path(name).exists():
+    if name in existing or worktree.include_path(name).exists() or worktree.include_meta_path(name).exists():
         fail(f"Include {name!r} already exists in sandbox {worktree.wt_id}. Remove it first.")
 
     click.echo(

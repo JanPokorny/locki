@@ -171,7 +171,7 @@ class ContainerService:
                 with file_lock("image", "Waiting for another image import"):
                     image_ref = self._import_local_image(local_path) if local_path.is_file() else incus_image
 
-                    wt_path_q = shlex.quote(str(worktree.wt_path))
+                    wt_path_q = shlex.quote(str(worktree.path))
                     vm.run(
                         [
                             "sh",
@@ -240,7 +240,7 @@ class ContainerService:
                         "exec",
                         shlex.quote(worktree.wt_id),
                         "--cwd",
-                        shlex.quote(str(worktree.wt_path)),
+                        shlex.quote(str(worktree.path)),
                         *(f"--env={k}={v}" for k, v in self.env(worktree).items()),
                         *(f'--env={env}="${env}"' for env in self.forwarded_env),
                         "--",

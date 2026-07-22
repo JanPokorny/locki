@@ -31,7 +31,7 @@ def new_cmd(as_json: bool, from_ref: str | None, branch_stem: str):
         return
     click.echo(f"{SUCCESS} Created sandbox {click.style(worktree.wt_id, fg='green')}.", err=True)
     click.echo(f"{INFO}    branch: {click.style(worktree.branch, fg='green')}", err=True)
-    click.echo(f"{INFO}   on disk: {click.style(pretty_path(worktree.wt_path), fg='green')}", err=True)
+    click.echo(f"{INFO}   on disk: {click.style(pretty_path(worktree.path), fg='green')}", err=True)
     click.echo(
         f"{INFO}  enter it: {click.style(f'locki x -m {worktree.wt_id}', fg='green')}"
         f" (or {click.style(f'locki ai -m {worktree.wt_id}', fg='green')})",
