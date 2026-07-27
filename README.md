@@ -115,7 +115,7 @@ Each sandbox gets its own [worktree](https://git-scm.com/docs/git-worktree) (a f
 
 - Something is broken? Try `locki vm delete` -- it will preserve your worktrees and settings, but the VM and sandboxes will be recreated from scratch on next run.
 
-- Sandboxes run on Fedora 43. Want a different OS? Create a `locki.toml` file in repo root referencing either [an available OS image](https://images.linuxcontainers.org/), or a local Incus image archive by path. For the local archive format, see the [Incus image format documentation](https://linuxcontainers.org/incus/docs/main/reference/image_format/). Example:
+- Sandboxes run on Fedora 44. Want a different OS? Create a `locki.toml` file in repo root referencing either [an available OS image](https://images.linuxcontainers.org/), or a local Incus image archive by path. For the local archive format, see the [Incus image format documentation](https://linuxcontainers.org/incus/docs/main/reference/image_format/). Example:
 
   ```toml
   # locki.toml

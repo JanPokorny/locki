@@ -116,6 +116,17 @@ echo "  cold start: ${cold_start}s"
 LOGIN=$(new_sandbox_id)
 assert_output "locki x b runs" "2" locki x -m "$LOGIN" echo 2
 
+# ── nested virtualization ────────────────────────────────────────────────────
+
+echo
+echo "Testing nested virtualization..."
+
+if "$VENV/bin/python" -c "import sys; from locki.services.vm import nested_virt_supported; sys.exit(0 if nested_virt_supported() else 1)"; then
+    assert_ok "/dev/kvm present in VM" limactl shell --tty=false locki -- test -e /dev/kvm
+else
+    pass "host lacks nested virt support, skipped"
+fi
+
 # ── cache persistence across invocations ─────────────────────────────────────
 
 echo
@@ -391,15 +402,20 @@ locki x -m "$LOGIN" bash -c "nohup bash -c 'while true; do echo pf-ok | ncat -l 
 pf_host_port=$(locki port-forward -m "$LOGIN" --json :9111 2>/dev/null | json_field '[0].host_port' || true)
 assert_port_assigned "port-forward assigns host port >= 1024" "$pf_host_port"
 
-# Wait for Lima to detect and forward the new listening port
+# Wait for Lima to detect and forward the new listening port. Retried with a fresh
+# port because the random host port is only probe-bound: if anything grabs it before
+# Lima binds it, Lima logs the failure and never retries that port.
 pf_ok=false
-for i in $(seq 1 10); do
-    if result=$(nc -4 -w2 127.0.0.1 "$pf_host_port" 2>/dev/null) && [[ "$result" == *"pf-ok"* ]]; then
-        pf_ok=true; break
-    fi
-    sleep 1
+for attempt in 1 2; do
+    for i in $(seq 1 15); do
+        if result=$(nc -4 -w2 127.0.0.1 "$pf_host_port" 2>/dev/null) && [[ "$result" == *"pf-ok"* ]]; then
+            pf_ok=true; break 2
+        fi
+        sleep 1
+    done
+    pf_host_port=$(locki port-forward -m "$LOGIN" --json :9111 2>/dev/null | json_field '[0].host_port' || true)
 done
-if $pf_ok; then pass "port-forward is reachable"; else fail "port-forward is reachable (timed out after 10s)"; fi
+if $pf_ok; then pass "port-forward is reachable"; else fail "port-forward is reachable (timed out, 2 ports tried)"; fi
 
 assert_output "port-forward --list --json shows forward" "9111" bash -c "locki port-forward -m '$LOGIN' --list --json 2>/dev/null | yq -r '.[].sandbox_port'"
 

@@ -33,7 +33,7 @@ _USER_ONLY_KEYS = frozenset({"ide_command"})
 
 @dataclasses.dataclass
 class LockiConfig:
-    incus_image: str | dict[str, str] = "images:fedora/43"
+    incus_image: str | dict[str, str] = "images:fedora/44"
     ai_command: str = ""
     ide_command: str = ""
 

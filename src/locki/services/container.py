@@ -60,6 +60,7 @@ class ContainerService:
             "MISE_GLOBAL_CONFIG_FILE": "/opt/locki/mise.toml",
             "MISE_INSTALL_PATH": "/usr/local/bin/mise",
             "MISE_NODE_VERIFY": "false",
+            "MISE_PYTHON_GITHUB_ATTESTATIONS": "false",
             "MISE_TRUSTED_CONFIG_PATHS": "/",
             "MIX_HOME": "/var/cache/locki/mix",
             "NIMBLE_DIR": "/var/cache/locki/nimble",

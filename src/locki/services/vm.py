@@ -3,6 +3,7 @@ import json
 import os
 import pathlib
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -34,6 +35,18 @@ REGISTRY_HOSTS = [
 K3S_HOSTS = ["get.k3s.io"]
 GH_ASSET_HOSTS = ["objects.githubusercontent.com", "release-assets.githubusercontent.com"]
 INTERCEPTED_HOSTS = [*REGISTRY_HOSTS, *K3S_HOSTS, *GH_ASSET_HOSTS]
+
+
+def nested_virt_supported() -> bool:
+    """Nested virt needs vz (macOS 15+, M3+); Lima's qemu driver ignores the field, and on
+    Linux the guest inherits it from host KVM via -cpu host anyway, so no field needed there."""
+    if sys.platform != "darwin":
+        return False
+    # naive heuristic: parses "Apple M<n>" from the brand string; the real probe is
+    # vz's IsNestedVirtualizationSupported, which Lima only calls at VM start
+    brand = subprocess.run(["sysctl", "-n", "machdep.cpu.brand_string"], capture_output=True, text=True).stdout
+    chip = re.search(r"Apple M(\d+)", brand)
+    return int(platform.mac_ver()[0].split(".")[0]) >= 15 and chip is not None and int(chip[1]) >= 3
 
 
 class VMService:
@@ -139,6 +152,7 @@ class VMService:
                     "cpus": os.cpu_count(),
                     "disk": "200GiB",
                     "containerd": {"system": False, "user": False},
+                    **({"nestedVirtualization": True} if nested_virt_supported() else {}),
                     "mounts": [
                         {"location": str(WORKTREES), "writable": True},
                         {"location": str(SANDBOX_HOME), "mountPoint": SANDBOX_HOME_MOUNT, "writable": True},
