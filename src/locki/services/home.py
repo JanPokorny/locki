@@ -45,6 +45,15 @@ class HomeService:
                 },
             ),
             (
+                SANDBOX_HOME / ".gemini" / "antigravity-cli" / "settings.json",
+                {
+                    "toolPermission": "always-proceed",
+                    "artifactReviewPolicy": "always-proceed",
+                    "allowNonWorkspaceAccess": True,
+                    "enableTerminalSandbox": False,
+                },
+            ),
+            (
                 SANDBOX_HOME / ".config" / "opencode" / "opencode.json",
                 {
                     "$schema": "https://opencode.ai/config.json",
@@ -59,6 +68,10 @@ class HomeService:
                 path.write_text(json.dumps(deep_merge(existing, updates), indent=2))
             except json.JSONDecodeError:
                 click.echo(f"{WARNING} Invalid JSON data found in {path}, not updating it.")
+
+        # agy's only non-workspace context file; overwrites a global GEMINI.md copied in
+        # from the host (agy has no way to load an extra instructions path).
+        (SANDBOX_HOME / ".gemini" / "GEMINI.md").write_bytes((PACKAGE_DATA / "AGENTS.md").read_bytes())
 
         guard = SANDBOX_HOME / ".claude" / "hooks" / "locki-branch-guard.sh"
         guard.parent.mkdir(parents=True, exist_ok=True)

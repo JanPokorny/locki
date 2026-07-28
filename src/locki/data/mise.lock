@@ -72,6 +72,20 @@ checksum = "sha256:d304ef66c0c1d2de7d736b3653b36557e80b4f40a0bf8c4a71e7215f3aff7
 url = "https://github.com/github/copilot-cli/releases/download/v1.0.75/copilot-linux-x64.tar.gz"
 url_api = "https://api.github.com/repos/github/copilot-cli/releases/assets/488765353"
 
+[[tools."github:google-antigravity/antigravity-cli"]]
+version = "1.1.7"
+backend = "github:google-antigravity/antigravity-cli"
+
+[tools."github:google-antigravity/antigravity-cli"."platforms.linux-arm64"]
+checksum = "sha256:0d6d488851745e80e69b8935d063e742945811b47111994b1a6dbd27df3010d5"
+url = "https://github.com/google-antigravity/antigravity-cli/releases/download/1.1.7/agy_cli_linux_arm64.tar.gz"
+url_api = "https://api.github.com/repos/google-antigravity/antigravity-cli/releases/assets/488927631"
+
+[tools."github:google-antigravity/antigravity-cli"."platforms.linux-x64"]
+checksum = "sha256:946cd06258d0ede72d0311550c914315798821f6a397f53ac760919826a19af4"
+url = "https://github.com/google-antigravity/antigravity-cli/releases/download/1.1.7/agy_cli_linux_x64.tar.gz"
+url_api = "https://api.github.com/repos/google-antigravity/antigravity-cli/releases/assets/488927640"
+
 [[tools."github:keilerkonzept/dockerfile-json"]]
 version = "1.2.2"
 backend = "github:keilerkonzept/dockerfile-json"

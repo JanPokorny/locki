@@ -14,7 +14,7 @@ from locki.runes import INFO, SUCCESS
 
 AI_TEMPLATES = {
     "Claude": "claude --dangerously-skip-permissions -c",
-    "Gemini": "gemini --yolo -r",
+    "Antigravity": "agy --dangerously-skip-permissions -c",
     "Codex": "codex --yolo resume",
     "OpenCode": "opencode",
     "Pi": "pi -c",

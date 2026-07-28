@@ -32,6 +32,8 @@ class ContainerService:
         and pruning can delete the whole folder without knowing the individual cache
         types."""
         return {
+            # agy self-updates in the background; mise owns its install path here
+            "AGY_CLI_DISABLE_AUTO_UPDATE": "true",
             "BUN_INSTALL_CACHE_DIR": "/var/cache/locki/bun",
             "BUNDLE_PATH": "/var/cache/locki/bundle",
             "CABAL_DIR": "/var/cache/locki/cabal",
@@ -43,7 +45,6 @@ class ContainerService:
             "COREPACK_ENABLE_DOWNLOAD_PROMPT": "0",
             "COURSIER_CACHE": "/var/cache/locki/coursier",
             "DENO_DIR": "/var/cache/locki/deno",
-            "GEMINI_FORCE_ENCRYPTED_FILE_STORAGE": "true",
             "GOCACHE": "/var/cache/locki/go/build",
             "GOMODCACHE": "/var/cache/locki/go/mod",
             "GRADLE_USER_HOME": "/var/cache/locki/gradle",
@@ -60,6 +61,9 @@ class ContainerService:
             "MISE_GLOBAL_CONFIG_FILE": "/opt/locki/mise.toml",
             "MISE_INSTALL_PATH": "/usr/local/bin/mise",
             "MISE_NODE_VERIFY": "false",
+            # Provenance stays on, but an unreachable/rate-limited api.github.com must not be
+            # fatal -- that is exactly when the lockfile fallback runs, and checksums still hold.
+            "MISE_PROVENANCE_API_FAILURES_FATAL": "false",
             "MISE_TRUSTED_CONFIG_PATHS": "/",
             "MIX_HOME": "/var/cache/locki/mix",
             "NIMBLE_DIR": "/var/cache/locki/nimble",

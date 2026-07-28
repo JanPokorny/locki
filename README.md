@@ -41,7 +41,7 @@ https://github.com/user-attachments/assets/27c0aeb2-c5ef-4e7f-a293-519499215cc8
 
 &nbsp;
 
-- **AI-agnostic**: Supports Claude Code, Codex, Gemini, Pi, Copilot, OpenCode and more.
+- **AI-agnostic**: Supports Claude Code, Codex, Antigravity, Pi, Copilot, OpenCode and more.
 - **Fast**: After the initial VM setup, spawning a new sandbox takes seconds.
 - **Worktree-backed**: Code lives in a git worktree on disk, fully under your control.
 - **No compromises**: Each agent gets a brand new, full-featured machine to develop in.
@@ -105,7 +105,7 @@ Each sandbox gets its own [worktree](https://git-scm.com/docs/git-worktree) (a f
 
 - While `locki ai` opens a coding agent, `locki exec` (or short `locki x`) is the low-level version which can run any command. Pass a command to run in a sandbox, use `--match`/`-m` to select by branch substring or sandbox id: `locki exec -m big-refactor -- pytest`.
 
-- The first `locki ai` run prompts you to pick a default harness and editor. Re-run `locki setup` to change them, or edit `~/.config/locki/config.toml` directly — the keys are full command lines, e.g. `ai_command = "gemini --yolo -r"` and `ide_command = "code ."`. A repo can override `ai_command` via a `locki.toml` in its root; `ide_command` is user-only (it launches on your host).
+- The first `locki ai` run prompts you to pick a default harness and editor. Re-run `locki setup` to change them, or edit `~/.config/locki/config.toml` directly — the keys are full command lines, e.g. `ai_command = "agy --dangerously-skip-permissions -c"` and `ide_command = "code ."`. A repo can override `ai_command` via a `locki.toml` in its root; `ide_command` is user-only (it launches on your host).
 
 - Ask your agent to forward ports, or use `locki port-forward` for more control.
 

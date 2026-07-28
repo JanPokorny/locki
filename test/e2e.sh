@@ -675,6 +675,19 @@ assert_ok   "guard lets the rename command through" locki x -m "$LOGIN" sh -c "e
 locki x -m "$LOGIN" git branch "guarded#locki-$LOGIN" --move
 assert_ok   "guard passes after rename" locki x -m "$LOGIN" sh -c "echo '{}' | $GUARD"
 
+# ── Antigravity CLI (agy) ────────────────────────────────────────────────────
+# agy reads neither a system-wide settings file nor a system-wide instructions
+# path, so both are seeded into the sandbox home instead of /etc.
+
+echo
+echo "Testing Antigravity CLI setup..."
+
+assert_ok     "agy shim installs and runs" locki x -m "$RELEASE" agy --version
+assert_output "agy runs unattended" "always-proceed" \
+    locki x -m "$RELEASE" cat /root/.gemini/antigravity-cli/settings.json
+assert_output "agy gets the sandbox instructions" "Locki sandbox" \
+    locki x -m "$RELEASE" cat /root/.gemini/GEMINI.md
+
 # ── worktree cleanup ─────────────────────────────────────────────────────────
 
 echo

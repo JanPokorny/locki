@@ -4,14 +4,12 @@ set -eux
 # MARK: AI CLIs
 
 # AGENTS.md is injected as base64 (silenced to keep xtrace output readable).
-mkdir -p /etc/claude-code /etc/gemini-cli /etc/codex /etc/opencode /etc/copilot/.github/instructions/
+## agy reads no system-wide config: its instructions and settings are seeded into the
+## sandbox home instead (see HomeService.prepare).
+mkdir -p /etc/claude-code /etc/codex /etc/opencode /etc/copilot/.github/instructions/
 set +x
-echo '__AGENTS_MD_B64__' | base64 -d | tee /etc/claude-code/CLAUDE.md /etc/gemini-cli/GEMINI.md /etc/codex/AGENTS.md /etc/opencode/AGENTS.md /etc/copilot/.github/instructions/system.instructions.md > /dev/null
+echo '__AGENTS_MD_B64__' | base64 -d | tee /etc/claude-code/CLAUDE.md /etc/codex/AGENTS.md /etc/opencode/AGENTS.md /etc/copilot/.github/instructions/system.instructions.md > /dev/null
 set -x
-
-cat > /etc/gemini-cli/settings.json << 'EOF'
-{"security": {"folderTrust": {"enabled": false}}, "tools": {"sandbox": false}}
-EOF
 
 cat > /etc/codex/config.toml << EOF
 approval_policy = "never"
@@ -105,17 +103,19 @@ else echo "[Locki] Error: no HTTP client found (need curl, wget, or python3)" >&
 EOF
 
 ## locki-command-real: resolve binary outside ALL /opt/locki/bin/ shim folders
+## MISE_LOCKFILE=false to match locki-mise-install: installs resolve current versions, so a
+## lockfile lagging upstream would pin `which` to a version that was never installed.
 cat > /opt/locki/bin/high/locki-command-real << 'EOF'
 #!/bin/sh
 _mise="${MISE_INSTALL_PATH:-/usr/local/bin/mise}"
-PATH=$(printf '%s' "$PATH" | tr ':' '\n' | grep -v -e '^/opt/locki/bin/' -e '/mise/shims' | paste -sd:) command -v "$1" || "$_mise" which "$1" 2>/dev/null || exit 1
+PATH=$(printf '%s' "$PATH" | tr ':' '\n' | grep -v -e '^/opt/locki/bin/' -e '/mise/shims' | paste -sd:) command -v "$1" || MISE_LOCKFILE=false "$_mise" which "$1" 2>/dev/null || exit 1
 EOF
 
 ## locki-command-real-or-autoinstalled: resolve binary outside /opt/locki/bin/high (low shims still reachable)
 cat > /opt/locki/bin/high/locki-command-real-or-autoinstalled << 'EOF'
 #!/bin/sh
 _mise="${MISE_INSTALL_PATH:-/usr/local/bin/mise}"
-"$_mise" which "$1" 2>/dev/null || PATH=$(printf '%s' "${PATH#*/opt/locki/bin/high:}" | tr ':' '\n' | grep -v '/mise/shims' | paste -sd:) command -v "$1" || exit 1
+MISE_LOCKFILE=false "$_mise" which "$1" 2>/dev/null || PATH=$(printf '%s' "${PATH#*/opt/locki/bin/high:}" | tr ':' '\n' | grep -v '/mise/shims' | paste -sd:) command -v "$1" || exit 1
 EOF
 
 ## locki-node-modules-redirect: point the project's node_modules at the btrfs cache
@@ -366,7 +366,6 @@ EOF
 
 ## NPM packages
 for pair in \
-  "@google/gemini-cli=gemini" \
   "@mariozechner/pi-coding-agent=pi" \
   "@openai/codex=codex" \
   "agent-browser=agent-browser" \
@@ -409,6 +408,7 @@ for pair in \
   "bun=bun" \
   "fd=fd" \
   "github:anomalyco/opencode=opencode" \
+  "github:google-antigravity/antigravity-cli=antigravity" \
   "github:github/copilot-cli=copilot" \
   "github:keilerkonzept/dockerfile-json=dockerfile-json" \
   "jq=jq" \
@@ -435,6 +435,10 @@ fi
 exec "\$(locki-command-real $bin)" "\$@"
 EOF
 done
+
+## The release tarball's only binary is `antigravity`; `agy` (the name upstream's own
+## installer uses, and what users type) is a symlink shipped in the macOS archive only.
+ln -sf antigravity /opt/locki/bin/low/agy
 
 cat > /opt/locki/bin/low/bwrap << 'EOF'
 #!/bin/sh
