@@ -459,7 +459,9 @@ set -eo pipefail
 if ! locki-command-real mise >/dev/null 2>&1; then
   /opt/locki/bin/high/locki-auto-install mise sh -c '
     set -eu
-    mise_version="2026.4.10"
+    # >=2026.5 for MISE_PROVENANCE_API_FAILURES_FATAL: older mise ignores it and the
+    # lockfile fallback dies verifying provenance against the API it is working around.
+    mise_version="2026.7.15"
     musl=""; if ldd /bin/ls 2>/dev/null | grep musl; then musl="-musl"; fi
     case "$(uname -m)" in x86_64) arch="x64$musl";; aarch64|arm64) arch="arm64$musl";; esac
     dest="/var/cache/locki/mise-install/mise-v${mise_version}-linux-${arch}"
@@ -467,14 +469,14 @@ if ! locki-command-real mise >/dev/null 2>&1; then
       ext="tar.gz"
       if command -v zstd >/dev/null 2>&1 && tar --version 2>/dev/null | grep -q "1\.\(3[1-9]\|[4-9][0-9]\)"; then ext="tar.zst"; fi
       case "$arch.$ext" in
-        x64.tar.gz)         checksum="78e91794c9139ab787c9a4de5e9e63a56d65b16bce60912884cb09f7114f7275";;
-        x64-musl.tar.gz)    checksum="6a5fe535fd05e6ac7c525c70a1e05d9b1489ad735a6259c5ff29c7aeb4904b44";;
-        arm64.tar.gz)       checksum="03ebfb523239e4f202b19983d0a435e06edae7217694d61b08580ad6afa7a6b4";;
-        arm64-musl.tar.gz)  checksum="20876268118bb54471fd3701143f902f48272e59830eeaa2cb06e73012580236";;
-        x64.tar.zst)        checksum="d6e9cde12a4b4f38a34d5f9172e1efa4d3522f55b5ce1d42006262b61cf06aa6";;
-        x64-musl.tar.zst)   checksum="ac16b3864753836eae7cd9d02ae392abfa4c8a07a65e868217991b820449adb3";;
-        arm64.tar.zst)      checksum="3ea02ac3c1354ba69a4d5cebb1416c505206080cfdf58b6019929cc5981e44b8";;
-        arm64-musl.tar.zst) checksum="e9180302e01e2586c32f97004022cf924cd39f46b9853679e979efdabc4187a8";;
+        x64.tar.gz)         checksum="0785821a617e85197104c021835072ca3f4fcdda143538293a30593acc258969";;
+        x64-musl.tar.gz)    checksum="4ed34fb8af855de81504bc669c95bdd31966a43418f35829f240d96faf6d89b7";;
+        arm64.tar.gz)       checksum="0c2ca4d4ee79720a08d2c5f54c986450348b0fe25ace2bf9998dbe6c6761bf16";;
+        arm64-musl.tar.gz)  checksum="6067a008b6e87ca9c50a63a1c38cbc9ae478191f92f511ea71aa8e6108832205";;
+        x64.tar.zst)        checksum="78a67a8a7edc5292cc74d2ac6c160cb2936b09e8bdbb327804bcb2b6afae8e02";;
+        x64-musl.tar.zst)   checksum="000d4410432f58b9398ba3f6796ca23ad285e0a222e0d19c93a78f2e30cdc608";;
+        arm64.tar.zst)      checksum="192ff3d6d07b772592cbce7103187f6508fed7207c7ac6d351642c0f3a8b995b";;
+        arm64-musl.tar.zst) checksum="349a1a6cfae38a22dd5096ce8b8ab27d869babde7ceafbfe9b8de9154a84bcb8";;
         *) echo "no checksum for linux-$arch.$ext" >&2; exit 1;;
       esac
       tmpdir=$(mktemp -d)
