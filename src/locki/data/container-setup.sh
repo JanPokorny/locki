@@ -38,10 +38,10 @@ if ! ldconfig -p 2>/dev/null | grep -q libatomic; then
 fi
 
 # MARK: mise lockfile
-## Pinned resolutions for every tool the shims install. Without it each install
-## resolves versions through api.github.com, whose 60/hr anonymous limit is shared
-## by every sandbox behind the VM's IP — once exhausted, installs fail. Regenerate
-## with `mise run lock-tools`. Content stays verified: the lock carries checksums.
+## Pinned resolutions for every tool the shims install. Only locki-mise-install reads it,
+## and only after a normal install fails — typically because api.github.com's 60/hr
+## anonymous limit, shared by every sandbox behind the VM's IP, is exhausted. Regenerate
+## with `mise run lock-tools`; versions are as old as the last regeneration.
 
 mkdir -p /opt/locki
 set +x
@@ -79,7 +79,16 @@ EOF
 ## locki-mise-install: install a package globally via mise (shim-safe env)
 cat > /opt/locki/bin/high/locki-mise-install << 'EOF'
 #!/bin/sh
-export MISE_AUTO_INSTALL=false MISE_NO_HOOKS=true
+# MISE_LOCKFILE=false so installs resolve current versions and ignore /opt/locki/mise.lock.
+# Scoped to this script: setting it in the container env would make mise ignore the
+# lockfiles of the repos worked on in the sandbox.
+export MISE_AUTO_INSTALL=false MISE_NO_HOOKS=true MISE_LOCKFILE=false
+mise use -g "$1" && mise install "$1" && exit 0
+# Version resolution goes through api.github.com, so it dies once that anonymous rate
+# limit is spent. Fall back to the shipped lockfile: MISE_LOCKED demands its pre-resolved
+# URLs, needing no API at all, at the cost of a possibly stale version.
+printf '\033[1;33mᛚ\033[0m Retrying %s from Locki'"'"'s pinned lockfile\n' "$1" >&2
+export MISE_LOCKFILE=true MISE_LOCKED=true
 mise use -g "$1" && mise install "$1"
 EOF
 
@@ -405,7 +414,7 @@ for pair in \
   "jq=jq" \
   "k9s=k9s" \
   "kubectl=kubectl" \
-  "poetry=poetry" \
+  "pipx:poetry=poetry" \
   "python=pip" \
   "python=pip3" \
   "python=python" \

@@ -57,13 +57,9 @@ class ContainerService:
             "MAVEN_OPTS": "-Dmaven.repo.local=/var/cache/locki/maven",
             "MISE_CACHE_DIR": "/var/cache/locki/mise",
             "MISE_DATA_DIR": "/usr/share/mise",
-            "MISE_GITHUB_ATTESTATIONS": "false",
             "MISE_GLOBAL_CONFIG_FILE": "/opt/locki/mise.toml",
             "MISE_INSTALL_PATH": "/usr/local/bin/mise",
             "MISE_NODE_VERIFY": "false",
-            # Attestation/SLSA checks call api.github.com per install, so a rate limit turns
-            # them into install failures; /opt/locki/mise.lock keeps content checksum-verified.
-            "MISE_SLSA": "false",
             "MISE_TRUSTED_CONFIG_PATHS": "/",
             "MIX_HOME": "/var/cache/locki/mix",
             "NIMBLE_DIR": "/var/cache/locki/nimble",

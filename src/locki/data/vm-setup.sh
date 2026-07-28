@@ -5,6 +5,11 @@ set -eux
 # while /var/cache/locki and friends are accessed through the root mount.
 mount -o remount,noatime / || true
 
+# /dev/vhost-net only exists once vhost_net is loaded, and nested VMs need it for
+# accelerated networking (KubeVirt VMIs fall back to slow userspace nets without it).
+modprobe vhost_net || true
+echo vhost_net > /etc/modules-load.d/locki.conf
+
 if ! command -v incus >/dev/null 2>&1; then
   echo "root:1000000:1000000000" >> /etc/subuid
   echo "root:1000000:1000000000" >> /etc/subgid
@@ -47,6 +52,20 @@ profiles:
         path: /dev/kmsg
         source: /dev/kmsg
         type: unix-char
+      # Lets sandboxes run VMs themselves (needs host nested virt); required=false
+      # keeps them startable where the host has none, so /dev/kvm is absent.
+      kvm:
+        path: /dev/kvm
+        source: /dev/kvm
+        type: unix-char
+        required: "false"
+      # Accelerated networking for those VMs; absent unless vhost_net is loaded, so the
+      # same required=false applies.
+      vhost-net:
+        path: /dev/vhost-net
+        source: /dev/vhost-net
+        type: unix-char
+        required: "false"
       cache:
         path: /var/cache/locki
         source: /var/cache/locki

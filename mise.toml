@@ -168,10 +168,10 @@ trap 'rm -rf "$tmpdir"' EXIT
     | grep -oE '"[^"=]+=' | tr -d '"=' | sort -u | sed 's/.*/"&" = "latest"/'
 } >"$tmpdir/mise.toml"
 mise trust -q "$tmpdir"
-# Lock with the same attestation settings the sandboxes use: mise refuses to install an
-# entry whose lock demands provenance while verification is off. Sandboxes are glibc
-# Linux; mise throws in a few musl/baseline variants regardless, which is harmless.
-(cd "$tmpdir" && MISE_GITHUB_ATTESTATIONS=false MISE_SLSA=false mise lock --platform linux-x64,linux-arm64)
+# Sandboxes are glibc Linux; mise throws in a few musl/baseline variants regardless,
+# which is harmless. Provenance is recorded and verified here, and sandboxes verify it
+# again whenever api.github.com answers (see MISE_PROVENANCE_API_FAILURES_FATAL).
+(cd "$tmpdir" && mise lock --platform linux-x64,linux-arm64)
 cp "$tmpdir/mise.lock" src/locki/data/mise.lock
 '''
 

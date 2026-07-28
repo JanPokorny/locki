@@ -123,9 +123,15 @@ echo "Testing nested virtualization..."
 
 if "$VENV/bin/python" -c "import sys; from locki.services.vm import nested_virt_supported; sys.exit(0 if nested_virt_supported() else 1)"; then
     assert_ok "/dev/kvm present in VM" limactl shell --tty=false locki -- test -e /dev/kvm
+    assert_ok "/dev/kvm present in sandbox" locki x -m "$AUTH" test -e /dev/kvm
 else
     pass "host lacks nested virt support, skipped"
 fi
+
+# vhost-net accelerates a nested VM's own networking, independent of host nested virt,
+# so the passthrough is expected everywhere (KubeVirt VMIs crawl on userspace nets).
+assert_ok "/dev/vhost-net present in VM" limactl shell --tty=false locki -- test -e /dev/vhost-net
+assert_ok "/dev/vhost-net present in sandbox" locki x -m "$AUTH" test -e /dev/vhost-net
 
 # ── cache persistence across invocations ─────────────────────────────────────
 
@@ -321,6 +327,10 @@ echo "Testing tool installs with the GitHub API unreachable..."
 NOAPI=$(new_sandbox_id)
 locki x -m "$NOAPI" sh -c 'echo "0.0.0.0 api.github.com" >> /etc/hosts'
 assert_ok     "lockfile shipped into the sandbox" locki x -m "$NOAPI" test -s /opt/locki/mise.lock
+# Verification must stay on: disabling it sandbox-wide breaks any repo whose own
+# lockfile records provenance ("Lockfile requires ... but no verification was used").
+assert_output "provenance verification stays enabled" "true" \
+    locki x -m "$NOAPI" mise settings get github_attestations
 assert_output "aqua-backend tool installs (jq)" "jq-1" locki x -m "$NOAPI" jq --version
 assert_output "github-backend tool installs (dockerfile-json)" "alpine:3.20" \
     locki x -m "$NOAPI" sh -c 'printf "FROM alpine:3.20\n" >/tmp/D; dockerfile-json -quiet /tmp/D'
