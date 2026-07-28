@@ -138,6 +138,10 @@ EOF
 cat > /opt/locki/bin/high/locki-ensure-node << 'EOF'
 #!/bin/sh
 locki-command-real node >/dev/null 2>&1 && exit 0
+# mise resolves npm-backed tools (npm:foo) by shelling out to `npm`, which lands back on the
+# npm shim while node is still missing -> unbounded recursion. Only the outermost call installs.
+[ -z "${LOCKI_ENSURING_NODE:-}" ] || exit 0
+export LOCKI_ENSURING_NODE=1
 /opt/locki/bin/high/locki-auto-install nodejs /opt/locki/bin/high/locki-mise-install node >/dev/null 2>&1
 EOF
 
