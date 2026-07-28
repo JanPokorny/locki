@@ -154,6 +154,27 @@ for arch in x86_64 aarch64; do
 done
 '''
 
+[tasks.lock-tools]
+description = "Regenerate the sandbox mise lockfile (pinned tool resolutions, dodges the GitHub API rate limit)"
+run = '''
+#!/usr/bin/env bash
+set -euxo pipefail
+tmpdir=$(mktemp -d)
+trap 'rm -rf "$tmpdir"' EXIT
+{
+  echo '[tools]'
+  # single source: the package list the sandbox's mise-package shims install
+  sed -n '/^## Mise packages/,/^; do$/p' src/locki/data/container-setup.sh \
+    | grep -oE '"[^"=]+=' | tr -d '"=' | sort -u | sed 's/.*/"&" = "latest"/'
+} >"$tmpdir/mise.toml"
+mise trust -q "$tmpdir"
+# Lock with the same attestation settings the sandboxes use: mise refuses to install an
+# entry whose lock demands provenance while verification is off. Sandboxes are glibc
+# Linux; mise throws in a few musl/baseline variants regardless, which is harmless.
+(cd "$tmpdir" && MISE_GITHUB_ATTESTATIONS=false MISE_SLSA=false mise lock --platform linux-x64,linux-arm64)
+cp "$tmpdir/mise.lock" src/locki/data/mise.lock
+'''
+
 [tasks.build]
 description = "Build sdist, universal wheel, and platform-specific wheels with bundled limactl"
 depends = ["setup", "build:*"]

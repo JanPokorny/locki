@@ -37,6 +37,17 @@ if ! ldconfig -p 2>/dev/null | grep -q libatomic; then
   fi
 fi
 
+# MARK: mise lockfile
+## Pinned resolutions for every tool the shims install. Without it each install
+## resolves versions through api.github.com, whose 60/hr anonymous limit is shared
+## by every sandbox behind the VM's IP — once exhausted, installs fail. Regenerate
+## with `mise run lock-tools`. Content stays verified: the lock carries checksums.
+
+mkdir -p /opt/locki
+set +x
+echo '__MISE_LOCK_B64__' | base64 -d > /opt/locki/mise.lock
+set -x
+
 # MARK: High-priority shims
 
 mkdir -p /opt/locki/bin/high

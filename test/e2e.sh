@@ -310,6 +310,21 @@ assert_ok "python resolves" locki x -m "$RELEASE" python --version
 assert_ok "pip3 resolves" locki x -m "$RELEASE" pip3 --version
 assert_ok "pip resolves" locki x -m "$RELEASE" pip --version
 
+# ── tool installs without the GitHub API ─────────────────────────────────────
+# /opt/locki/mise.lock pins each shim tool's version, URL and checksum, so installs
+# never call api.github.com — whose 60/hr anonymous limit every sandbox shares. When
+# that broke, the docker shim silently stopped pinning local base images.
+
+echo
+echo "Testing tool installs with the GitHub API unreachable..."
+
+NOAPI=$(new_sandbox_id)
+locki x -m "$NOAPI" sh -c 'echo "0.0.0.0 api.github.com" >> /etc/hosts'
+assert_ok     "lockfile shipped into the sandbox" locki x -m "$NOAPI" test -s /opt/locki/mise.lock
+assert_output "aqua-backend tool installs (jq)" "jq-1" locki x -m "$NOAPI" jq --version
+assert_output "github-backend tool installs (dockerfile-json)" "alpine:3.20" \
+    locki x -m "$NOAPI" sh -c 'printf "FROM alpine:3.20\n" >/tmp/D; dockerfile-json -quiet /tmp/D'
+
 # ── cache symlinks git-ignored per-worktree ──────────────────────────────────
 # "node_modules/" style .gitignore rules don't match symlinks; the per-worktree
 # core.excludesFile set at worktree creation must hide them from git status.
