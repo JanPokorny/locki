@@ -10,7 +10,8 @@ import click
 
 from locki.config import LockiConfig, load_config, save_user_config
 from locki.paths import HOME, SANDBOX_HOME, USER_CONFIG
-from locki.runes import INFO, SUCCESS
+from locki.runes import INFO, SUCCESS, WARNING
+from locki.utils import pretty_path
 
 AI_TEMPLATES = {
     "Claude": "claude --dangerously-skip-permissions -c",
@@ -129,15 +130,35 @@ def setup_cmd(defaults: bool, copy_only: bool):
         backup_suffix = f".{int(time.time())}.backup"
 
         def copy_with_backup(src: pathlib.Path, dst: pathlib.Path) -> None:
+            """Copy *src* into the sandbox home as an independent, writable file.
+
+            Symlinks are always dereferenced: a symlink here would point back at a host
+            path, and the settings merge in `HomeService.prepare` would then follow it and
+            write *outside* the sandbox -- silently pushing `bypassPermissions` into the
+            user's real agent config. Store-managed dotfiles (Nix, ...) also arrive
+            read-only and unresolvable from inside the guest.
+            """
+            if src.is_symlink() and not src.exists():
+                click.echo(f"{WARNING} Skipping {pretty_path(src)}: symlink target does not exist.", err=True)
+                return
             with contextlib.suppress(OSError):
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 if dst.exists() or dst.is_symlink():
                     dst.rename(dst.with_name(dst.name + backup_suffix))
-                shutil.copy2(src, dst, follow_symlinks=False)
+                shutil.copy2(src, dst, follow_symlinks=True)
+                dst.chmod(dst.stat().st_mode | 0o600)  # read-only in a store, writable here
 
         for rel in COPY_DIRS:
             src_root = HOME / rel
-            for dirpath, _dirnames, filenames in os.walk(src_root):
+            walked: set[pathlib.Path] = set()
+            # symlinked subdirectories are followed too (store-managed dotfiles are often
+            # symlink farms), so loops have to be guarded against explicitly
+            for dirpath, dirnames, filenames in os.walk(src_root, followlinks=True):
+                real = pathlib.Path(dirpath).resolve()
+                if real in walked:
+                    dirnames.clear()
+                    continue
+                walked.add(real)
                 for name in filenames:
                     src = pathlib.Path(dirpath) / name
                     copy_with_backup(src, SANDBOX_HOME / rel / src.relative_to(src_root))
