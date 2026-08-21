@@ -133,11 +133,15 @@ def setup_cmd(defaults: bool, copy_only: bool):
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 if dst.exists() or dst.is_symlink():
                     dst.rename(dst.with_name(dst.name + backup_suffix))
-                shutil.copy2(src, dst, follow_symlinks=False)
+                # Follow symlinks: a symlinked "copy" would let sandbox settings
+                # writes escape to the host target (e.g. bypassPermissions merged
+                # into the real ~/.claude/settings.json).
+                shutil.copy2(src, dst)
+                dst.chmod(dst.stat().st_mode | 0o600)  # store-sourced files arrive mode 444
 
         for rel in COPY_DIRS:
             src_root = HOME / rel
-            for dirpath, _dirnames, filenames in os.walk(src_root):
+            for dirpath, _dirnames, filenames in os.walk(src_root, followlinks=True):
                 for name in filenames:
                     src = pathlib.Path(dirpath) / name
                     copy_with_backup(src, SANDBOX_HOME / rel / src.relative_to(src_root))
