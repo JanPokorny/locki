@@ -37,6 +37,16 @@ GH_ASSET_HOSTS = ["objects.githubusercontent.com", "release-assets.githubusercon
 INTERCEPTED_HOSTS = [*REGISTRY_HOSTS, *K3S_HOSTS, *GH_ASSET_HOSTS]
 
 
+# ponytail: add a `vm_memory` config knob to override the computed sizing
+def vm_memory_gib(total_gib: int) -> int:
+    """Guest RAM ceiling: total minus headroom reserved for the host (the larger of 2 GiB
+    or 12.5% of total), never below a 2 GiB guest floor. Applies on both platforms —
+    macOS/vz never returns freed guest memory to the host (Lima attaches a balloon device
+    but never drives it), so it needs the headroom at least as much as Linux/QEMU."""
+    reserve = max(2, total_gib // 8)
+    return max(total_gib - reserve, 2)
+
+
 def nested_virt_supported() -> bool:
     """Nested virt needs vz (macOS 15+, M3+); Lima's qemu driver ignores the field, and on
     Linux the guest inherits it from host KVM via -cpu host anyway, so no field needed there."""
@@ -148,7 +158,7 @@ class VMService:
                 {
                     "minimumLimaVersion": "2.0.0",
                     "base": ["template:fedora"],
-                    "memory": f"{os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES') // (1024**3)}GiB",
+                    "memory": f"{vm_memory_gib(os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES') // (1024**3))}GiB",
                     "cpus": os.cpu_count(),
                     "disk": "200GiB",
                     "containerd": {"system": False, "user": False},
