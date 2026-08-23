@@ -1,6 +1,6 @@
 [tools]
 uv = "latest"
-lima = "2.1.0"
+lima = "2.2.0"
 yq = "latest"
 
 [settings]
@@ -86,20 +86,28 @@ base="https://github.com/lima-vm/lima/releases/download/v${LIMA_VERSION}"
 sums=$(curl -fsL "$base/SHA256SUMS")
 sha256() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -d' ' -f1; }
 
-fetch() { # <wheel_tag> <lima_os_arch>
-  local dest="./vendor/lima-$LIMA_VERSION/$1" file="lima-${LIMA_VERSION}-$2.tar.gz"
-  test -f "$dest/bin/limactl" && return 0
+fetch() { # <wheel_tag> <lima_os_arch> <archive_extension> <limactl_name>
+  local dest="./vendor/lima-$LIMA_VERSION/$1" file="lima-${LIMA_VERSION}-$2.$3"
+  test -f "$dest/bin/$4" && return 0
   local want; want=$(awk -v f="$file" '$2==f {print $1}' <<<"$sums")
   [ -n "$want" ] || { echo "no checksum for $file" >&2; return 1; }
   local tmp; tmp=$(mktemp)
   curl -fsL -o "$tmp" "$base/$file"
   [ "$(sha256 "$tmp")" = "$want" ] || { echo "checksum mismatch for $file" >&2; return 1; }
-  mkdir -p "$dest" && tar -xzf "$tmp" -C "$dest" && rm -f "$tmp"
+  mkdir -p "$dest"
+  case "$3" in
+    tar.gz) tar -xzf "$tmp" -C "$dest" ;;
+    zip) unzip -q "$tmp" -d "$dest" ;;
+    *) echo "unsupported archive extension: $3" >&2; return 1 ;;
+  esac
+  rm -f "$tmp"
 }
-fetch manylinux_2_34_x86_64  Linux-x86_64  &
-fetch manylinux_2_34_aarch64 Linux-aarch64 &
-fetch macosx_12_0_x86_64     Darwin-x86_64 &
-fetch macosx_12_0_arm64      Darwin-arm64  &
+fetch manylinux_2_34_x86_64  Linux-x86_64  tar.gz limactl     &
+fetch manylinux_2_34_aarch64 Linux-aarch64 tar.gz limactl     &
+fetch macosx_12_0_x86_64     Darwin-x86_64 tar.gz limactl     &
+fetch macosx_12_0_arm64      Darwin-arm64  tar.gz limactl     &
+fetch win_amd64               Windows-AMD64 zip    limactl.exe &
+fetch win_arm64               Windows-ARM64 zip    limactl.exe &
 for job in $(jobs -p); do wait "$job"; done
 '''
 
@@ -215,23 +223,27 @@ fi
 
 build_wheel() {
   wheel_tag="$1"
-  hostagent_arch="$2"
+  guest_arch="$2"
+  limactl_name="$3"
   tmpdir="$(mktemp -d)"
   unzip -q "$universal_wheel" -d "$tmpdir"
   find "$tmpdir" -type f -exec chmod +r {} \;
   mkdir -p "$tmpdir/locki/data/bin" "$tmpdir/locki/data/share/lima"
-  cp "./vendor/lima-$lima_version/$wheel_tag/bin/limactl" "$tmpdir/locki/data/bin/"
+  cp "./vendor/lima-$lima_version/$wheel_tag/bin/$limactl_name" "$tmpdir/locki/data/bin/"
   cp -R "./vendor/lima-$lima_version/$wheel_tag/share/lima/." "$tmpdir/locki/data/share/lima/"
-  cp "./vendor/libatomic/${hostagent_arch}/libatomic.so.1" "$tmpdir/locki/data/"
+  # The Windows host also runs Linux guests; this library is injected into the sandbox container.
+  cp "./vendor/libatomic/${guest_arch}/libatomic.so.1" "$tmpdir/locki/data/"
   perl -pi -e "s/Root-Is-Purelib: true/Root-Is-Purelib: false/" "$tmpdir/locki-$version.dist-info/WHEEL"
   perl -pi -e "s/Tag: .*/Tag: py3-none-$wheel_tag/" "$tmpdir/locki-$version.dist-info/WHEEL"
   uv run -m wheel pack "$tmpdir" --dest-dir ./dist >/dev/null
   rm -rf "$tmpdir"
 }
-build_wheel manylinux_2_34_x86_64  x86_64  &
-build_wheel manylinux_2_34_aarch64 aarch64 &
-build_wheel macosx_12_0_x86_64     x86_64  &
-build_wheel macosx_12_0_arm64      aarch64 &
+build_wheel manylinux_2_34_x86_64  x86_64  limactl     &
+build_wheel manylinux_2_34_aarch64 aarch64 limactl     &
+build_wheel macosx_12_0_x86_64     x86_64  limactl     &
+build_wheel macosx_12_0_arm64      aarch64 limactl     &
+build_wheel win_amd64               x86_64  limactl.exe &
+build_wheel win_arm64               aarch64 limactl.exe &
 for job in $(jobs -p); do wait $job; done
 '''
 

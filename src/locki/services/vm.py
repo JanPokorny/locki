@@ -10,7 +10,7 @@ import sys
 import tempfile
 import typing
 
-from locki.paths import LIMA, PACKAGE_DATA, SANDBOX_HOME, WORKTREES
+from locki.paths import GUEST_WORKTREES, LIMA, PACKAGE_DATA, SANDBOX_HOME, WORKTREES
 from locki.utils import fail, file_lock, run_command
 
 # Where the shared sandbox home lands inside the VM: the Lima mount point and the
@@ -37,6 +37,36 @@ GH_ASSET_HOSTS = ["objects.githubusercontent.com", "release-assets.githubusercon
 INTERCEPTED_HOSTS = [*REGISTRY_HOSTS, *K3S_HOSTS, *GH_ASSET_HOSTS]
 
 
+def _host_memory_gib() -> int:
+    if os.name != "nt":
+        return max(1, os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") // (1024**3))
+
+    import ctypes
+
+    class MemoryStatus(ctypes.Structure):
+        _fields_ = [
+            ("length", ctypes.c_ulong),
+            ("memory_load", ctypes.c_ulong),
+            ("total_physical", ctypes.c_ulonglong),
+            ("available_physical", ctypes.c_ulonglong),
+            ("total_page_file", ctypes.c_ulonglong),
+            ("available_page_file", ctypes.c_ulonglong),
+            ("total_virtual", ctypes.c_ulonglong),
+            ("available_virtual", ctypes.c_ulonglong),
+            ("available_extended_virtual", ctypes.c_ulonglong),
+        ]
+
+    status = MemoryStatus()
+    status.length = ctypes.sizeof(status)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
+    global_memory_status = kernel32.GlobalMemoryStatusEx
+    global_memory_status.argtypes = [ctypes.POINTER(MemoryStatus)]
+    global_memory_status.restype = ctypes.c_int
+    if not global_memory_status(ctypes.byref(status)):
+        raise OSError(ctypes.get_last_error(), "GlobalMemoryStatusEx failed")  # type: ignore[attr-defined]
+    return max(1, status.total_physical // (1024**3))
+
+
 def nested_virt_supported() -> bool:
     """Nested virt needs vz (macOS 15+, M3+); Lima's qemu driver ignores the field, and on
     Linux the guest inherits it from host KVM via -cpu host anyway, so no field needed there."""
@@ -49,6 +79,31 @@ def nested_virt_supported() -> bool:
     return int(platform.mac_ver()[0].split(".")[0]) >= 15 and chip is not None and int(chip[1]) >= 3
 
 
+def _lima_configuration(vm_setup: str) -> dict[str, typing.Any]:
+    """Build the Lima instance configuration for the current host platform."""
+    windows = os.name == "nt"
+    mounts: list[dict[str, typing.Any]] = [
+        {"location": str(WORKTREES), "mountPoint": str(GUEST_WORKTREES), "writable": True},
+        {"location": str(SANDBOX_HOME), "mountPoint": SANDBOX_HOME_MOUNT, "writable": True},
+    ]
+    if windows:
+        for mount in mounts:
+            mount["sshfs"] = {"sftpDriver": "builtin"}
+
+    return {
+        "minimumLimaVersion": "2.2.0" if windows else "2.0.0",
+        "base": ["template:fedora"],
+        "memory": f"{_host_memory_gib()}GiB",
+        "cpus": os.cpu_count(),
+        "disk": "200GiB",
+        "containerd": {"system": False, "user": False},
+        **({"nestedVirtualization": True} if nested_virt_supported() else {}),
+        "mounts": mounts,
+        **({"mountType": "reverse-sshfs"} if windows else {}),
+        "provision": [{"mode": "system", "script": vm_setup}],
+    }
+
+
 class VMService:
     """All interaction with the Lima VM ("locki") that hosts the sandbox containers."""
 
@@ -56,7 +111,7 @@ class VMService:
 
     @functools.cached_property
     def limactl(self) -> str:
-        bundled = PACKAGE_DATA / "bin" / "limactl"
+        bundled = PACKAGE_DATA / "bin" / ("limactl.exe" if os.name == "nt" else "limactl")
         if bundled.is_file():
             return str(bundled)
         system = shutil.which("limactl")
@@ -123,12 +178,20 @@ class VMService:
 
     def ensure_running(self) -> None:
         """Create the VM if needed and start it, unless it is already running."""
-        if sys.platform == "linux" and (
-            missing := [b for b in [f"qemu-system-{platform.machine()}", "qemu-img"] if not shutil.which(b)]
-        ):
-            fail(
-                f"Locki requires QEMU on Linux, but {', '.join(missing)} not found in PATH. Install QEMU: https://www.qemu.org/download/#linux"
+        if sys.platform in {"linux", "win32"}:
+            qemu_arch = (
+                platform.machine()
+                if sys.platform == "linux"
+                else ("aarch64" if platform.machine().lower() in {"aarch64", "arm64"} else "x86_64")
             )
+            missing = [b for b in [f"qemu-system-{qemu_arch}", "qemu-img"] if not shutil.which(b)]
+            if missing:
+                install_hint = (
+                    "Run: winget install SoftwareFreedomConservancy.QEMU"
+                    if sys.platform == "win32"
+                    else "See https://www.qemu.org/download/#linux"
+                )
+                fail(f"Locki requires QEMU, but {', '.join(missing)} not found in PATH. {install_hint}")
 
         if self.status() == "Running":
             return
@@ -144,22 +207,7 @@ class VMService:
                 .replace("__GH_ASSET_HOSTS__", " ".join(GH_ASSET_HOSTS))
                 .replace("__SANDBOX_HOME_MOUNT__", SANDBOX_HOME_MOUNT)
             )
-            lima_config = json.dumps(
-                {
-                    "minimumLimaVersion": "2.0.0",
-                    "base": ["template:fedora"],
-                    "memory": f"{os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES') // (1024**3)}GiB",
-                    "cpus": os.cpu_count(),
-                    "disk": "200GiB",
-                    "containerd": {"system": False, "user": False},
-                    **({"nestedVirtualization": True} if nested_virt_supported() else {}),
-                    "mounts": [
-                        {"location": str(WORKTREES), "writable": True},
-                        {"location": str(SANDBOX_HOME), "mountPoint": SANDBOX_HOME_MOUNT, "writable": True},
-                    ],
-                    "provision": [{"mode": "system", "script": vm_setup}],
-                }
-            )
+            lima_config = json.dumps(_lima_configuration(vm_setup))
             with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as lima_yaml:
                 lima_yaml.write(lima_config)
             try:

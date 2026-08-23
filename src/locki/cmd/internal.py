@@ -14,6 +14,7 @@ import os
 import pathlib
 import shlex
 import signal
+import stat
 import sys
 import time
 
@@ -22,6 +23,7 @@ import click
 from locki.logging import FILE_LOG_FORMAT
 from locki.paths import (
     DENIED_LOG,
+    GUEST_WORKTREES,
     PACKAGE_DATA,
     PID_FILE,
     PORT_FILE,
@@ -30,6 +32,8 @@ from locki.paths import (
     STATE,
     WORKTREES,
     WORKTREES_META,
+    HostWorktreePathTranslator,
+    host_worktree_path,
 )
 from locki.services.bridge import BridgeDeniedError, Ruleset
 from locki.services.container import WORKTREE_DEVICE
@@ -79,7 +83,10 @@ def _cleanup_once() -> None:
         source = ((container.get("expanded_devices") or {}).get(WORKTREE_DEVICE) or {}).get("source", "")
         if not name or not source:
             continue
-        src = pathlib.Path(source).resolve()
+        try:
+            src = pathlib.Path(host_worktree_path(source)).resolve()
+        except ValueError:
+            continue
         if src.is_relative_to(worktrees_root) and not src.exists():
             logger.info("Deleting orphaned container %r (worktree %s is gone).", name, src)
             vm.incus(["delete", "--force", name])
@@ -144,7 +151,10 @@ def _resolve_bridged(cmd: str) -> tuple[list[str], pathlib.Path, dict[str, str]]
     except ValueError:
         raise BridgeDeniedError("Usage: <cwd> <exe> [args...]") from None
 
-    cwd = pathlib.Path(cwd_str).resolve()
+    try:
+        cwd = pathlib.Path(host_worktree_path(cwd_str)).resolve()
+    except ValueError:
+        raise BridgeDeniedError(f"Not inside a locki worktree: {cwd_str!r}") from None
     wt_root = WORKTREES.resolve()
     if not cwd.is_relative_to(wt_root):
         raise BridgeDeniedError(f"Not inside a locki worktree: {str(cwd)!r}")
@@ -175,29 +185,46 @@ def _resolve_bridged(cmd: str) -> tuple[list[str], pathlib.Path, dict[str, str]]
     if not meta_git.exists():
         raise BridgeDeniedError(f"Missing worktree metadata: {meta_git}")
 
-    if error := _ruleset().check([exe, *argv], wt_id, str(cwd)):
+    host_argv = []
+    for arg in argv:
+        try:
+            host_argv.append(str(host_worktree_path(arg)))
+        except ValueError:
+            if pathlib.PurePosixPath(arg).is_relative_to(GUEST_WORKTREES):
+                raise BridgeDeniedError(f"Path escapes locki worktrees: {arg!r}") from None
+            host_argv.append(arg)
+
+    if error := _ruleset().check([exe, *host_argv], wt_id, str(cwd)):
         with contextlib.suppress(OSError):
             DENIED_LOG.parent.mkdir(parents=True, exist_ok=True)
             with DENIED_LOG.open("a") as fh:
                 fh.write(
-                    f"{datetime.datetime.now().isoformat(timespec='seconds')}\t{wt_id}\t{shlex.join([exe, *argv])}\n"
+                    f"{datetime.datetime.now().isoformat(timespec='seconds')}\t{wt_id}\t{shlex.join([exe, *host_argv])}\n"
                 )
         raise BridgeDeniedError(error)
 
     trusted = meta_git.read_text()
     if git_file.read_text() != trusted:
-        fd = os.open(git_file, os.O_WRONLY | os.O_TRUNC | os.O_NOFOLLOW)
+        before = os.lstat(git_file)
+        if stat.S_ISLNK(before.st_mode):
+            raise BridgeDeniedError(f"Refusing to follow symlinked .git at {str(git_file)!r}")
+        fd = os.open(git_file, os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0))
         try:
+            current = os.lstat(git_file)
+            opened = os.fstat(fd)
+            if stat.S_ISLNK(current.st_mode) or (current.st_dev, current.st_ino) != (opened.st_dev, opened.st_ino):
+                raise BridgeDeniedError(f"Refusing changed .git at {str(git_file)!r}")
+            os.ftruncate(fd, 0)
             os.write(fd, trusted.encode())
         finally:
             os.close(fd)
 
     env = dict(os.environ)
     if exe == "locki":
-        return [sys.executable, "-m", "locki", *argv], cwd, env
+        return [sys.executable, "-m", "locki", *host_argv], cwd, env
     if exe == "git":
         env["GIT_EDITOR"] = "true"
-    return [exe, *argv], cwd, env
+    return [exe, *host_argv], cwd, env
 
 
 @internal_app.command("daemon")
@@ -254,8 +281,44 @@ def internal_daemon() -> None:
                     process.stderr.write(f"{argv[0]}: command not found on host\n".encode())
                     process.exit(1)
                     return
-                await process.redirect(stdin=sub.stdin, stdout=sub.stdout, stderr=sub.stderr)
-                process.exit(await sub.wait() or 0)
+
+                if os.name != "nt":
+                    await process.redirect(stdin=sub.stdin, stdout=sub.stdout, stderr=sub.stderr)
+                    process.exit(await sub.wait() or 0)
+                    return
+
+                async def forward_stdin() -> None:
+                    assert sub.stdin is not None
+                    try:
+                        while data := await process.stdin.read(65536):
+                            sub.stdin.write(data)
+                            await sub.stdin.drain()
+                    except (BrokenPipeError, ConnectionResetError):
+                        pass
+                    finally:
+                        sub.stdin.close()
+
+                async def forward_output(reader, writer) -> None:
+                    translator = HostWorktreePathTranslator()
+                    try:
+                        while data := await reader.read(65536):
+                            writer.write(translator.feed(data))
+                            await writer.drain()
+                        writer.write(translator.feed(b"", final=True))
+                        await writer.drain()
+                    except (BrokenPipeError, ConnectionResetError):
+                        pass
+
+                assert sub.stdout is not None and sub.stderr is not None
+                stdin_task = asyncio.create_task(forward_stdin())
+                stdout_task = asyncio.create_task(forward_output(sub.stdout, process.stdout))
+                stderr_task = asyncio.create_task(forward_output(sub.stderr, process.stderr))
+                returncode = await sub.wait()
+                await asyncio.gather(stdout_task, stderr_task)
+                stdin_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await stdin_task
+                process.exit(returncode or 0)
             except Exception:
                 logger.exception("SSH session failed")
                 with contextlib.suppress(Exception):

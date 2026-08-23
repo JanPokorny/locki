@@ -36,6 +36,6 @@ def ai_cmd(ctx, match, interactive, create):
     ai_command = ensure_configured(worktree.repo).ai_command
 
     if shlex.split(ai_command)[0] == "claude":
-        home.ensure_resume_transcript(worktree.path)
+        home.ensure_resume_transcript(worktree.sandbox_path)
 
     enter_sandbox(worktree, [*shlex.split(ai_command), *ctx.args])

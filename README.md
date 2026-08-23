@@ -25,6 +25,7 @@
   
 ![](https://badgen.net/badge/_/macOS%20%E2%9C%94/green?icon=apple&label)
 ![](https://badgen.net/badge/_/Linux%20%E2%9C%94/green?icon=linux&label)
+![](https://badgen.net/badge/_/Windows%20experimental/yellow?icon=windows&label)
 ![](https://badgen.net/badge/_/uv%20tool%20install%20locki/DE5FE9?icon=uv&label)
 [![](https://img.shields.io/pypi/v/locki?color=DE5FE9&label=PyPI)](https://pypi.org/project/locki/)
 ![](https://img.shields.io/pypi/l/locki?color=green&label=License)
@@ -56,7 +57,9 @@ https://github.com/user-attachments/assets/27c0aeb2-c5ef-4e7f-a293-519499215cc8
 ## Get Started
 
 1. Install: `uv tool install locki`. ([Install uv](https://docs.astral.sh/uv/getting-started/installation/) first if you don't have it.)
-1. If on Linux, install [QEMU](https://www.qemu.org/download/#linux). (Not needed on macOS.)
+1. Install QEMU on Linux or Windows. (Not needed on macOS.)
+   - Linux: use your distribution package or see [QEMU downloads](https://www.qemu.org/download/#linux).
+   - Windows (PowerShell): `winget install SoftwareFreedomConservancy.QEMU`, then open a new terminal. Locki uses Lima's QEMU driver directly on Windows; running Locki inside WSL is neither required nor recommended.
 1. `cd` to your Git repository, run: `locki ai`, follow interactive setup and choose to create a new sandbox. Wait a few minutes for the initial start.
 1. Follow prompts to log in to the AI CLI. Login will be persisted across sandboxes.
 1. Build! Your agent is already instructed on how to behave in the sandbox. Agent can create any branch with `#locki-<worktree-id>` suffix, and if `gh` is available on host, even create a pull request.
@@ -89,6 +92,8 @@ Each sandbox gets its own [worktree](https://git-scm.com/docs/git-worktree) (a f
 - **Shared sandbox home** (`~/.local/share/locki/home/`) — Visible from every sandbox as `~`. Save your agent configuration here to use it in sandboxes.
 - **Your actual home** (`~`) — ❌ Not visible from any sandbox. Sandboxes can't mess up your global config.
 
+On Windows, Locki stores these directories below `%LOCALAPPDATA%\locki` and presents worktrees inside the Linux VM below `/mnt/locki/worktrees`; commands and output are translated across that boundary automatically.
+
 &nbsp;
 
 ## Pro-tips for power users
@@ -105,13 +110,13 @@ Each sandbox gets its own [worktree](https://git-scm.com/docs/git-worktree) (a f
 
 - While `locki ai` opens a coding agent, `locki exec` (or short `locki x`) is the low-level version which can run any command. Pass a command to run in a sandbox, use `--match`/`-m` to select by branch substring or sandbox id: `locki exec -m big-refactor -- pytest`.
 
-- The first `locki ai` run prompts you to pick a default harness and editor. Re-run `locki setup` to change them, or edit `~/.config/locki/config.toml` directly — the keys are full command lines, e.g. `ai_command = "agy --dangerously-skip-permissions -c"` and `ide_command = "code ."`. A repo can override `ai_command` via a `locki.toml` in its root; `ide_command` is user-only (it launches on your host).
+- The first `locki ai` run prompts you to pick a default harness and editor. Re-run `locki setup` to change them, or edit `~/.config/locki/config.toml` directly (`%APPDATA%\locki\config.toml` on Windows) — the keys are full command lines, e.g. `ai_command = "agy --dangerously-skip-permissions -c"` and `ide_command = "code ."`. A repo can override `ai_command` via a `locki.toml` in its root; `ide_command` is user-only (it launches on your host).
 
 - Ask your agent to forward ports, or use `locki port-forward` for more control.
 
 - Locki sandboxes provide [Mise](https://mise.jdx.dev) for tool version management -- replacing `nvm`, `rbenv`, `brew` etc. with a single tool. Adding `mise.toml` to your repo with tool versions and task definitions will help agents and humans alike: ask your agent to do it!
 
-- Want to use custom AI configuration in the VM -- instructions, skills, MCP servers, ...? Sandboxes share a home folder accessible at `~/.local/share/locki/home` on host (or `$XDG_DATA_HOME/locki/home`). For example, you can edit `~/.local/share/locki/home/.claude/CLAUDE.md` for sandbox-specific instructions.
+- Want to use custom AI configuration in the VM -- instructions, skills, MCP servers, ...? Sandboxes share a home folder accessible at `~/.local/share/locki/home` on host (or `$XDG_DATA_HOME/locki/home`; `%LOCALAPPDATA%\locki\home` on Windows). For example, you can edit its `.claude/CLAUDE.md` for sandbox-specific instructions.
 
 - Something is broken? Try `locki vm delete` -- it will preserve your worktrees and settings, but the VM and sandboxes will be recreated from scratch on next run.
 
@@ -146,9 +151,11 @@ Locki instead runs **one Lima VM hosting many lightweight Incus containers** —
 
 ## Security
 
-Locki uses a single Lima VM which can only access the `~/.local/share/locki/worktrees` and `~/.local/share/locki/home` folders (honoring `$XDG_DATA_HOME`), which forms the security boundary. The sandboxed programs can read and write to these folders, and also access anything on the internet and local network. Furthermore, a guest-to-host SSH server exposes a limited set of `git` and `gh` subcommands, with write access restricted to the sandbox's own namespaced branches and stashes (so an agent in one sandbox cannot alter another sandbox's branch, the main branch, or unrelated stashes). `.git` files are checked for tampering when hooks are executed against them.
+Locki uses a single Lima VM with the worktree and sandbox-home folders mounted into it (`~/.local/share/locki` by default on macOS/Linux and `%LOCALAPPDATA%\locki` on Windows). These mounts form the intended filesystem security boundary. The sandboxed programs can read and write to them, and also access anything on the internet and local network. Furthermore, a guest-to-host SSH server exposes a limited set of `git` and `gh` subcommands, with write access restricted to the sandbox's own namespaced branches and stashes (so an agent in one sandbox cannot alter another sandbox's branch, the main branch, or unrelated stashes). `.git` files are checked for tampering when hooks are executed against them.
 
 Locki is designed to provide protection for the host operating system and files from being messed up by a malfunctioning AI agent. There is no exfiltration protection, so be aware that API keys exposed to the agents need to be treated as potentially exposed and disposable, with limited scope. (This is no different from running the agent locally, just specifying that Locki does not help here.)
+
+Windows support is experimental. Lima currently uses `reverse-sshfs` for QEMU-hosted filesystem mounts on Windows, and [Lima documents](https://lima-vm.io/docs/config/mount/#reverse-sshfs) that a compromised guest-side `sshfs` process may be able to access host directories which were not explicitly mounted. This means the intended mount boundary above is weaker on Windows. Until Lima offers a stronger Windows mount backend, use a dedicated Windows training account or a disposable Windows VM when the host contains sensitive files.
 
 Locki may not provide perfect security, however it is certainly much better than going full `--yolo` on your bare machine and hoping for the best.
 
@@ -156,7 +163,7 @@ Locki may not provide perfect security, however it is certainly much better than
 
 ## How it works
 
-- **Python CLI** driving a single [Lima](https://lima-vm.io/) VM (both `limactl` and Lima's guest agents are bundled in the platform wheels — no separate install) that hosts many lightweight [Incus](https://linuxcontainers.org/incus/introduction/) containers, one per sandbox. The VM is sized to your full host RAM and CPU count with a 200 GiB sparse disk.
+- **Python CLI** driving a single [Lima](https://lima-vm.io/) VM (both `limactl` and Lima's guest agents are bundled in the platform wheels — no separate Lima install) that hosts many lightweight [Incus](https://linuxcontainers.org/incus/introduction/) containers, one per sandbox. The VM is sized to your full host RAM and CPU count with a 200 GiB sparse disk. On Windows, host paths such as `C:\Users\…` are mounted at a stable POSIX path inside the VM and translated back by the command bridge.
 - **A host daemon** provides the `git`/`gh`/port-forward command bridge (over an SSH forced command bound to loopback) and idles containers and the VM back down when unused.
 - **Shared caches across all sandboxes** keep repeat work fast: a pull-through container-registry cache (nginx), a shared BuildKit daemon (Docker layers cached across sandboxes), package caches for [Mise](https://mise.jdx.dev), cargo, npm/pnpm, pip/uv, go, and more, plus GitHub-release and k3s-installer caching.
 - **btrfs with [bees](https://github.com/Zygo/bees) deduplication** for the container pool, so many similar sandboxes cost little disk. `node_modules` and `.venv` are redirected to the shared cache via a per-sandbox symlink (so opening a worktree on the host shows a symlink, not a real directory).
@@ -166,10 +173,20 @@ Locki may not provide perfect security, however it is certainly much better than
 
 ## Uninstall
 
+macOS/Linux:
+
 ```sh
 locki vm delete
 uv tool uninstall locki
 rm -rf ~/.local/share/locki ~/.config/locki
+```
+
+Windows (PowerShell):
+
+```powershell
+locki vm delete
+uv tool uninstall locki
+Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "$env:LOCALAPPDATA\locki", "$env:APPDATA\locki"
 ```
 
 &nbsp;

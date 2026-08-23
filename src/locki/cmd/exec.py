@@ -19,7 +19,7 @@ def enter_sandbox(worktree: WorktreeInfo, command: list[str]) -> typing.NoReturn
     click.echo(f"{SPINNER} Entering a Locki sandbox.", err=True)
 
     WORKTREES.mkdir(parents=True, exist_ok=True)
-    home.prepare(worktree.path)
+    home.prepare(worktree.sandbox_path)
 
     vm.ensure_running()
 

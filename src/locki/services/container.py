@@ -6,7 +6,7 @@ import subprocess
 import typing
 
 from locki.config import load_config
-from locki.paths import PACKAGE_DATA, WORKTREES
+from locki.paths import GUEST_WORKTREES, PACKAGE_DATA
 from locki.services.vm import INTERCEPTED_HOSTS, vm
 from locki.services.worktree import WorktreeInfo
 from locki.utils import fail, file_lock
@@ -54,7 +54,7 @@ class ContainerService:
             "LEIN_HOME": "/var/cache/locki/lein",
             "LOCKI_SANDBOX_ID": worktree.wt_id,
             "LOCKI_SCOPED_CACHE": f"{SCOPED_CACHE}/{worktree.wt_id}",
-            "LOCKI_WORKTREES_HOME": str(WORKTREES),
+            "LOCKI_WORKTREES_HOME": str(GUEST_WORKTREES),
             "MAVEN_OPTS": "-Dmaven.repo.local=/var/cache/locki/maven",
             "MISE_CACHE_DIR": "/var/cache/locki/mise",
             "MISE_DATA_DIR": "/usr/share/mise",
@@ -180,7 +180,7 @@ class ContainerService:
                 with file_lock("image", "Waiting for another image import"):
                     image_ref = self._import_local_image(local_path) if local_path.is_file() else incus_image
 
-                    wt_path_q = shlex.quote(str(worktree.path))
+                    wt_path_q = shlex.quote(str(worktree.sandbox_path))
                     vm.run(
                         [
                             "sh",
@@ -249,7 +249,7 @@ class ContainerService:
                         "exec",
                         shlex.quote(worktree.wt_id),
                         "--cwd",
-                        shlex.quote(str(worktree.path)),
+                        shlex.quote(str(worktree.sandbox_path)),
                         *(f"--env={k}={v}" for k, v in self.env(worktree).items()),
                         *(f'--env={env}="${env}"' for env in self.forwarded_env),
                         "--",

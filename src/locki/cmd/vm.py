@@ -4,7 +4,7 @@ import sys
 
 import click
 
-from locki.paths import WORKTREES
+from locki.paths import GUEST_WORKTREES
 from locki.runes import INFO
 from locki.services.container import SCOPED_CACHE
 from locki.services.vm import vm
@@ -130,7 +130,7 @@ def vm_prune_cmd(as_json):
         fail("VM is not running.")
 
     script = (
-        _PRUNE_SCRIPT.replace("__WORKTREES__", shlex.quote(str(WORKTREES)))
+        _PRUNE_SCRIPT.replace("__WORKTREES__", shlex.quote(str(GUEST_WORKTREES)))
         .replace("__SCOPED_CACHE__", SCOPED_CACHE)
         .replace("__WT_TAG__", WT_DIR_TAG)
     )
