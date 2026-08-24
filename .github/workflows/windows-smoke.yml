@@ -47,6 +47,6 @@ jobs:
         shell: pwsh
         run: |
           $wheel = (Get-ChildItem dist\*win_amd64.whl).FullName
-          uv pip install --python .venv\Scripts\python.exe --force $wheel
+          uv pip install --python .venv\Scripts\python.exe --reinstall $wheel
           & .venv\Scripts\locki.exe --help
           & .venv\Scripts\python.exe -c "from locki.services.vm import vm; import subprocess; subprocess.run([vm.limactl, '--version'], check=True)"
