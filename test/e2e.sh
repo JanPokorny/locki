@@ -105,6 +105,23 @@ cd "$REPO"
 
 locki setup --defaults
 
+# ── log pruning spares daemon.log ────────────────────────────────────────────
+# VM-independent: every locki invocation prunes per-run logs to the 20 newest,
+# which must never touch the cleanup daemon's long-lived daemon.log.
+
+echo
+echo "Testing log pruning..."
+
+mkdir -p "$LOGS_DIR"
+echo "daemon history" > "$LOGS_DIR/daemon.log"
+touch -t 202001010000 "$LOGS_DIR/daemon.log"        # oldest file → prime pruning victim
+for i in $(seq 1 25); do touch "$LOGS_DIR/20260101-000000-$i.log"; done   # 25 fake per-run logs
+locki --version >/dev/null                          # every invocation runs setup_logging() → prune
+
+assert_ok "daemon.log survives log pruning" test -f "$LOGS_DIR/daemon.log"
+kept=$(find "$LOGS_DIR" -name '2[0-9]*.log' | wc -l | tr -d ' ')
+if [[ "$kept" -eq 20 ]]; then pass "per-run logs pruned to 20 ($kept)"; else fail "per-run logs pruned to 20 (got $kept)"; fi
+
 # ── cold start + parallel VM creation ────────────────────────────────────────
 
 echo
