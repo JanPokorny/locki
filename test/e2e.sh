@@ -49,11 +49,12 @@ assert_port_assigned() {
 }
 
 timed() {
-    local start end
+    local start end rc
     start=$(date +%s)
-    "$@" >/dev/null
+    "$@" >/dev/null; rc=$?
     end=$(date +%s)
     echo $((end - start))
+    return $rc
 }
 
 # ── setup ────────────────────────────────────────────────────────────────────
@@ -68,6 +69,7 @@ export XDG_DATA_HOME="$TMPDIR_ROOT/xdg/data"
 export XDG_STATE_HOME="$TMPDIR_ROOT/xdg/state"
 export XDG_RUNTIME_DIR="$TMPDIR_ROOT/xdg/run"
 export LIMA_HOME="$XDG_STATE_HOME/locki/lima"
+LOGS_DIR="$XDG_STATE_HOME/locki/logs"
 kill_locki_pids() {
     local pf="$XDG_RUNTIME_DIR/locki/daemon.pid"
     [ -f "$pf" ] && kill "$(cat "$pf")" 2>/dev/null || true
@@ -109,8 +111,20 @@ echo
 echo "Testing cold start + parallel VM creation..."
 
 AUTH=$(new_sandbox_id)
-cold_start=$(timed locki x -m "$AUTH" echo 1) || true
+cold_start=$(timed locki x -m "$AUTH" echo 1) && pass "cold start exec succeeded" || fail "cold start exec succeeded"
 echo "  cold start: ${cold_start}s"
+
+# run_command debug-logs each command line before running it, so "Command:" line
+# order is issue order: the readiness wait must precede any incus use. Post-boot
+# incus commands are issued through sh -c wrappers, so match bare "incus" — but
+# only on Command: lines, since logged command *output* may mention incus too.
+cold_log=$(grep -rlF "waitready" "$LOGS_DIR" | head -1) || true
+assert_ok   "cold start waited for incus readiness" test -n "$cold_log"
+assert_ok   "readiness wait precedes first incus command" \
+    awk "/Command: .*waitready/{ok=1; exit} /Command: .*incus/{exit} END{exit !ok}" "${cold_log:-/dev/null}"
+# checked here and not only in the suite-end sweep: the ~180 later locki runs
+# prune this log away long before the suite ends
+assert_fail "no 'Failed instance creation' in logs" grep -rq "Failed instance creation" "$LOGS_DIR"
 
 # branch b in parallel with a (VM already exists, but tests lock waiting)
 LOGIN=$(new_sandbox_id)
@@ -282,8 +296,14 @@ echo
 echo "Testing warm start..."
 
 RELEASE=$(new_sandbox_id)
+touch "$TMPDIR_ROOT/warm-marker"
 warm_start=$(timed locki x -m "$RELEASE" echo 3) || true
 echo "  warm start: ${warm_start}s"
+
+# scoped to logs born during the warm run — the daemon writes a per-run log too
+warm_logs=$(find "$LOGS_DIR" -name '2[0-9]*.log' -newer "$TMPDIR_ROOT/warm-marker")
+assert_ok   "warm start produced a run log" test -n "$warm_logs"
+assert_fail "warm start skips waitready" grep -q "waitready" $warm_logs /dev/null
 
 # ── hot start (existing container) ───────────────────────────────────────────
 
@@ -824,6 +844,10 @@ if [[ -n "$nrec_calls" && "$nrec_calls" -le 5 ]]; then
 else
     fail "node auto-install recursed ($nrec_calls mise calls; reentrancy guard broken)"
 fi
+
+# ── no incus failures anywhere ───────────────────────────────────────────────
+
+assert_fail "no 'Failed instance creation' in any remaining log" grep -rq "Failed instance creation" "$LOGS_DIR"
 
 # ── summary ──────────────────────────────────────────────────────────────────
 
