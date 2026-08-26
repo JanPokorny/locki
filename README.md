@@ -71,9 +71,10 @@ Commands act on the current worktree if inside one, letting you select interacti
 Most important commands are:
 
 ```bash
-locki ai   # open AI agent in sandbox (pick existing or new)
-locki x    # open Bash in sandbox (pick existing or new)
-locki rm   # remove sandbox
+locki ai          # open AI agent in sandbox (pick existing or new)
+locki x           # open Bash in sandbox (pick existing or new)
+locki file pull   # copy files from a sandbox into your repo
+locki rm          # remove sandbox
 ```
 
 See the "pro-tips" section below for more advanced usage like IDE integration, port forwarding, working on multiple repos at once and more! You can also use `locki --help` anytime for a refresher.
@@ -97,6 +98,12 @@ Each sandbox gets its own [worktree](https://git-scm.com/docs/git-worktree) (a f
   *(The IDE runs on host: you still need to run `locki ai` / `locki x -- <cmd>` in the built-in terminal to run commands in the sandbox. This is intentional: running your IDE inside the sandbox (using "remote SSH" or similar features) is unsafe, since the agent could potentially access authentication tokens stored in the IDE's memory.)*
 
 - When `cd`'d into a worktree folder (`~/.local/share/locki/worktrees/.../`), `locki` commands use it by default -- otherwise they show an interactive picker. Use `--match`/`-m` to select by sandbox id or branch substring. `locki list` (alias `ls`) shows every sandbox and its worktree path.
+
+- Copy files between a sandbox and your repo (the host repo) with `locki file pull` / `locki file push` (modeled on `incus file`) -- paths map 1:1, so `locki file pull tools/gen.py` lands at `tools/gen.py` in your repo. Run bare to pick files from a checklist, including the sandbox's `.locki/tmp/` artifacts (screenshots, debug dumps). A source outside your repo -- `locki file push /tmp/dump.bin` -- has no 1:1 path and lands in the sandbox's `.locki/tmp/` exchange area instead. A destination holding uncommitted content is never overwritten without `--force`.
+
+- Start a sandbox from your uncommitted state with `--dirty` (`locki new --dirty`, `locki ai --dirty`, ...): staged, unstaged, and untracked files are replicated into the fresh worktree; your repo is left untouched. Without `-m`/`-i`, `--dirty`/`--raw` implies `-n` -- they can only seed a new sandbox. `--raw` goes one further and also copies gitignored files (`.env`, caches, ...) -- the raw repo folder, which can be big. Careful: gitignored files often hold credentials, and anything copied in is usable by the sandboxed agent -- the command bridge scopes what `git push` can touch, but it can't police what a leaked token allows.
+
+- `locki rm` on a sandbox with unsaved work (uncommitted changes, `.locki/tmp/` artifacts, dirty includes) lists what would be lost and offers to pull it into your repo first -- a pre-checked file picker, so unchecking a file accepts its loss. Files whose identical copy already sits at the host path (e.g. after a `locki file pull`) don't count as unsaved. Non-interactive runs (scripts, `--json`) fail instead of prompting when uncommitted changes would be lost; leftover `.locki/tmp/` artifacts alone never block them. `locki rm --merged` is batch cleanup and never prompts: it skips sandboxes with uncommitted changes and only warns about `.locki/tmp/` artifacts it destroys.
 
 - Editors like VSCode show worktrees in the sidebar, useful as a quick UI for reviewing and modifying changes.\
   *(⚠️ VSCode 1.115.0+ requires setting `"git.detectWorktrees": true` for this to work.)*
