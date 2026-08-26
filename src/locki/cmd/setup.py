@@ -136,7 +136,13 @@ def setup_cmd(defaults: bool, copy_only: bool):
                 # Follow symlinks: a symlinked "copy" would let sandbox settings
                 # writes escape to the host target (e.g. bypassPermissions merged
                 # into the real ~/.claude/settings.json).
-                shutil.copy2(src, dst)
+                # Plugin state JSONs record absolute host paths (installLocation,
+                # installPath); the sandbox home is /root, so rewrite the prefix
+                # or Claude Code reports "cache-miss" for every marketplace.
+                if ".claude/plugins/" in str(src) and src.suffix == ".json":
+                    dst.write_text(src.read_text().replace(str(HOME), "/root"))
+                else:
+                    shutil.copy2(src, dst)
                 dst.chmod(dst.stat().st_mode | 0o600)  # store-sourced files arrive mode 444
 
         for rel in COPY_DIRS:
