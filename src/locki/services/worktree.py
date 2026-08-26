@@ -18,7 +18,7 @@ import click
 
 from locki.paths import PACKAGE_DATA, WORKTREES, WORKTREES_META, XDG_CONFIG
 from locki.services.home import home
-from locki.utils import fail, pretty_path, run_command
+from locki.utils import fail, format_age, pretty_path, run_command
 
 GIT_HOOKS = [
     "applypatch-msg",
@@ -550,10 +550,11 @@ class WorktreeService:
             choices: list = []
             if allow_create:
                 choices.append(Choice(value="__create__", name="(create new)"))
-            for s in sorted(candidate_sandboxes, key=lambda x: x.branch):
+            for s in sorted(candidate_sandboxes, key=lambda x: x.last_used or 0, reverse=True):
                 label = s.branch + (f" ({pretty_path(s.repo)})" if scope_all else "")
                 if title := home.ai_title(s.path):
                     label += f" — {title}"
+                label += f" · {format_age(s.last_used)}"
                 choices.append(Choice(value=s.wt_id, name=label))
             if not scope_all and not filter_out_current_repo:
                 choices.append(Choice(value="__all__", name="(show sandboxes from all repos)"))
