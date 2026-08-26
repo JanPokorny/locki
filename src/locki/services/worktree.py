@@ -4,6 +4,7 @@ A sandbox is a worktree plus its Incus container (services.container); a
 worktree can exist without a container (e.g. after `locki vm delete`).
 """
 
+import contextlib
 import dataclasses
 import functools
 import pathlib
@@ -11,6 +12,7 @@ import secrets
 import shutil
 import subprocess
 import sys
+import time
 
 import click
 
@@ -60,6 +62,16 @@ def branch_suffix(wt_id: str) -> str:
     return f"{BRANCH_TAG}{wt_id}"
 
 
+# Last-used stamp file in each sandbox's metadata dir (see WorktreeService.touch).
+LAST_USED_FILE = "last-used"
+
+
+def meta_dir_for_id(wt_id: str) -> pathlib.Path | None:
+    """The metadata dir of the sandbox *wt_id*, or None. Cheap — no git access,
+    so callers that only know a container name (= wt_id) can avoid a full list()."""
+    return next(iter(WORKTREES_META.glob(f"*{WT_DIR_TAG}{wt_id}")), None)
+
+
 @dataclasses.dataclass
 class IncludeInfo:
     name: str  # basename used as directory name in .locki/include/
@@ -93,12 +105,26 @@ class WorktreeInfo:
     def include_meta_path(self, name: str) -> pathlib.Path:
         return self.meta_path / "include" / name
 
+    @property
+    def last_used(self) -> float | None:
+        """Unix timestamp of last use (see `WorktreeService.touch`), falling back to
+        the metadata dir's mtime for sandboxes that predate stamping."""
+        try:
+            return float((self.meta_path / LAST_USED_FILE).read_text())
+        except (OSError, ValueError):
+            pass
+        try:
+            return self.meta_path.stat().st_mtime
+        except OSError:
+            return None
+
     def as_dict(self) -> dict:
         return {
             "id": self.wt_id,
             "branch": self.branch,
             "path": str(self.path),
             "repo": str(self.repo),
+            "last_used": self.last_used,
             "include": [{"name": i.name, "repo": str(i.repo), "branch": i.branch} for i in self.include],
         }
 
@@ -334,6 +360,12 @@ class WorktreeService:
             return False
         cherry = git("cherry", trunk, squash_commit.stdout.decode().strip())
         return cherry.returncode == 0 and cherry.stdout.decode().strip().startswith("-")
+
+    def touch(self, wt_id: str) -> None:
+        """Stamp the sandbox as used now. Never fatal — staleness display only."""
+        if meta_dir := meta_dir_for_id(wt_id):
+            with contextlib.suppress(OSError):
+                (meta_dir / LAST_USED_FILE).write_text(str(time.time()))
 
     def has_uncommitted_changes(self, worktree: WorktreeInfo, *, quiet: bool = False) -> bool:
         return bool(

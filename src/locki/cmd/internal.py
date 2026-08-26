@@ -35,7 +35,7 @@ from locki.services.bridge import BridgeDeniedError, Ruleset
 from locki.services.container import WORKTREE_DEVICE
 from locki.services.daemon import VERSION, VERSION_FILE
 from locki.services.vm import vm
-from locki.services.worktree import wt_id_from_dir
+from locki.services.worktree import worktrees, wt_id_from_dir
 from locki.utils import AliasGroup
 
 logger = logging.getLogger(__name__)
@@ -96,6 +96,9 @@ def _cleanup_once() -> None:
                     for key in ("containers", "instances"):
                         for path in (op.get("resources") or {}).get(key) or []:
                             active.add(path.rsplit("/", 1)[-1])
+
+    for name in active & running:
+        worktrees.touch(name)  # keep last-used fresh through long unattended sessions
 
     now = time.time()
     stopped: set[str] = set()

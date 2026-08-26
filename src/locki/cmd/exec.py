@@ -31,7 +31,9 @@ def enter_sandbox(worktree: WorktreeInfo, command: list[str]) -> typing.NoReturn
     containers.ensure_running(worktree)
     daemon.ensure_running()
 
+    worktrees.touch(worktree.wt_id)  # at open — the daemon can't stamp if it dies mid-session
     result = containers.exec_interactive(worktree, command)
+    worktrees.touch(worktree.wt_id)  # and at close, so a long session reads as fresh
 
     # blank separator; on a TTY the clear also wipes leftover container output on the current line
     click.echo(CLEAR_LINE if sys.stderr.isatty() else "", err=True)

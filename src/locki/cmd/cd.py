@@ -31,6 +31,8 @@ def cd_cmd(match, interactive, create):
     if not worktree.path.exists():
         worktrees.create(worktree)
 
+    # cd never touches the VM, so stamp here or host-side work reads as stale
+    worktrees.touch(worktree.wt_id)
     shell = os.environ.get("SHELL") or pwd.getpwuid(os.getuid()).pw_shell or "/bin/sh"
     os.chdir(worktree.path)
     os.execvp(shell, [shell])

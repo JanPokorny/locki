@@ -5,7 +5,7 @@ import click
 from locki.runes import INFO
 from locki.services.home import home
 from locki.services.worktree import worktrees
-from locki.utils import format_table, json_option, pretty_path
+from locki.utils import format_age, format_table, json_option, pretty_path
 
 
 @click.command()
@@ -20,6 +20,8 @@ def list_cmd(show_all: bool, as_json: bool) -> None:
     if not show_all:
         assert cwd_repo is not None
         listed = [s for s in listed if s.repo.resolve() == cwd_repo.resolve()]
+
+    listed.sort(key=lambda s: s.last_used or 0, reverse=True)
 
     if as_json:
         click.echo(json.dumps([s.as_dict() | {"title": home.ai_title(s.path)} for s in listed]))
@@ -39,14 +41,14 @@ def list_cmd(show_all: bool, as_json: bool) -> None:
 
     rows: list[tuple[str, ...]] = []
     for s in listed:
-        row = [s.wt_id, s.branch, home.ai_title(s.path), pretty_path(s.path)]
+        row = [s.wt_id, s.branch, home.ai_title(s.path), format_age(s.last_used), pretty_path(s.path)]
         if show_all:
             row.append(pretty_path(s.repo))
         if has_includes:
             row.append(",".join(pretty_path(i.repo) for i in s.include) if s.include else "")
         rows.append(tuple(row))
 
-    headers_list = ["WORKTREE ID", "WORKTREE BRANCH", "SESSION TITLE", "WORKTREE DIRECTORY"]
+    headers_list = ["WORKTREE ID", "WORKTREE BRANCH", "SESSION TITLE", "LAST USED", "WORKTREE DIRECTORY"]
     if show_all:
         headers_list.append("PARENT REPO")
     if has_includes:

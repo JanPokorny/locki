@@ -688,6 +688,21 @@ assert_output "agy runs unattended" "always-proceed" \
 assert_output "agy gets the sandbox instructions" "Locki sandbox" \
     locki x -m "$RELEASE" cat /root/.gemini/GEMINI.md
 
+# ── last-used staleness ──────────────────────────────────────────────────────
+
+echo
+echo "Testing last-used staleness..."
+
+last_used_of() { locki ls --all --json 2>/dev/null | yq -r ".[] | select(.id == \"$1\") | .last_used"; }
+
+LU1=$(last_used_of "$AUTH")
+assert_ok "locki ls --json carries numeric last_used" bash -c "echo '$LU1' | grep -Eq '^[0-9]+(\.[0-9]+)?$'"
+sleep 1.1
+locki x -m "$AUTH" true >/dev/null 2>&1 || true
+LU2=$(last_used_of "$AUTH")
+assert_ok "last_used advances after locki x" awk "BEGIN { exit !($LU2 > $LU1) }"
+assert_output "locki ls shows LAST USED column" "LAST USED" locki ls --all
+
 # ── worktree cleanup ─────────────────────────────────────────────────────────
 
 echo
