@@ -160,6 +160,19 @@ class WorktreeService:
             quiet=True,
         )
         if exists.returncode != 0:
+            # Branching off an unborn HEAD (fresh `git init`, no commits) can't work;
+            # an explicit *from_ref* stands on its own, as does an existing branch.
+            if (
+                from_ref is None
+                and run_command(
+                    ["git", "-C", str(repo), "rev-parse", "--verify", "--quiet", "HEAD"],
+                    "Checking repo has commits",
+                    check=False,
+                    quiet=True,
+                ).returncode
+                != 0
+            ):
+                fail(f"Repo {pretty_path(repo)} has no commits yet — make an initial commit first.")
             run_command(
                 ["git", "-C", str(repo), "branch", branch] + ([from_ref] if from_ref else []),
                 f"Creating branch {click.style(branch, fg='green')}",
