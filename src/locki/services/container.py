@@ -225,6 +225,41 @@ class ContainerService:
                     print_success=False,
                 )
 
+    def statuses(self) -> dict[str, str] | None:
+        """wt_id -> lowercase incus status for every container, or None when the VM
+        is not running. Never boots the VM (vm.incus omits --start)."""
+        if vm.status() != "Running":
+            return None
+        result = vm.incus(["list", "--format=csv", "--columns=n,s"])
+        if result.returncode != 0:
+            fail(f"Listing containers failed: {result.stderr.strip()}")
+        return {
+            name.strip(): status.strip().lower()
+            for name, sep, status in (line.partition(",") for line in result.stdout.splitlines())
+            if sep
+        }
+
+    def stop(self, *wt_ids: str) -> set[str]:
+        """Stop container(s) without deleting anything — rootfs and caches survive.
+        One VM roundtrip; returns the wt_ids that failed to stop. Pass only running
+        containers (incus errors on already-stopped ones)."""
+        if not wt_ids:
+            return set()
+        # `|| echo` marks failures on stdout so a single roundtrip still reports per
+        # container; the caller prints the outcome, so no success rune here.
+        script = "; ".join(f"incus stop {q} || echo {q}" for q in map(shlex.quote, wt_ids))
+        result = vm.run(
+            ["sh", "-c", script],
+            "Stopping containers" if len(wt_ids) > 1 else "Stopping container",
+            check=False,
+            print_success=False,
+        )
+        if result.returncode != 0:
+            # the script itself always exits 0 (it ends in `|| echo`) — a nonzero code
+            # means the roundtrip failed, so no container can be assumed stopped
+            return set(wt_ids)
+        return set(result.stdout.decode().split()) & set(wt_ids)
+
     def remove(self, *wt_ids: str) -> None:
         """Delete container(s) and their sandbox-scoped cache folders in one VM roundtrip."""
         if not wt_ids:

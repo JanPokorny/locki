@@ -73,7 +73,8 @@ Most important commands are:
 ```bash
 locki ai     # open AI agent in sandbox (pick existing or new)
 locki x      # open Bash in sandbox (pick existing or new)
-locki ls     # list sandboxes with last-used age
+locki ls     # list sandboxes with last-used age (--status adds container state)
+locki stop   # stop a sandbox's container; everything survives (--all stops all)
 locki rm     # remove sandbox (--merged removes all clean merged sandboxes)
 ```
 

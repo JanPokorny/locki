@@ -6,7 +6,7 @@ import click
 
 from locki.paths import WORKTREES
 from locki.runes import INFO
-from locki.services.container import SCOPED_CACHE
+from locki.services.container import SCOPED_CACHE, containers
 from locki.services.vm import vm
 from locki.services.worktree import WT_DIR_TAG, WorktreeInfo, worktrees
 from locki.utils import AliasGroup, fail, format_table, json_option, pretty_path
@@ -24,19 +24,9 @@ def vm_status_cmd(as_json):
 
     entries: list[tuple[str, str, WorktreeInfo | None]] = []
     if status == "running":
-        result = vm.run(
-            ["incus", "list", "--format=csv", "--columns=n,s"],
-            "Listing containers",
-            check=False,
-            quiet=True,
-        )
         by_id = {s.wt_id: s for s in worktrees.list()}
-        for line in result.stdout.decode().splitlines():
-            wt_id, sep, container_status = line.partition(",")
-            if not sep:
-                continue
-            wt_id = wt_id.strip()
-            entries.append((wt_id, container_status.strip().lower(), by_id.get(wt_id)))
+        for wt_id, container_status in (containers.statuses() or {}).items():
+            entries.append((wt_id, container_status, by_id.get(wt_id)))
 
     if as_json:
         sandbox_list = [

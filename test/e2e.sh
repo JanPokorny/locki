@@ -688,10 +688,10 @@ assert_output "agy runs unattended" "always-proceed" \
 assert_output "agy gets the sandbox instructions" "Locki sandbox" \
     locki x -m "$RELEASE" cat /root/.gemini/GEMINI.md
 
-# ── last-used staleness ──────────────────────────────────────────────────────
+# ── last-used staleness + locki stop ─────────────────────────────────────────
 
 echo
-echo "Testing last-used staleness..."
+echo "Testing last-used staleness and locki stop..."
 
 last_used_of() { locki ls --all --json 2>/dev/null | yq -r ".[] | select(.id == \"$1\") | .last_used"; }
 
@@ -702,6 +702,14 @@ locki x -m "$AUTH" true >/dev/null 2>&1 || true
 LU2=$(last_used_of "$AUTH")
 assert_ok "last_used advances after locki x" awk "BEGIN { exit !($LU2 > $LU1) }"
 assert_output "locki ls shows LAST USED column" "LAST USED" locki ls --all
+assert_output "locki stop stops the sandbox" "\"id\": \"$AUTH\"" bash -c "locki stop -m '$AUTH' --json 2>/dev/null"
+assert_output "locki ls --status reports stopped" "stopped" \
+    bash -c "locki ls --all --status --json 2>/dev/null | yq -r '.[] | select(.id == \"$AUTH\") | .status'"
+assert_output "stopping again is a no-op" "[]" bash -c "locki stop -m '$AUTH' --json 2>/dev/null"
+assert_ok "stopped worktree still on disk" test -d "$WORKTREE"
+assert_output "stopped sandbox restarts on demand" "7" locki x -m "$AUTH" echo 7
+assert_output "stop --all stops the restarted sandbox" "\"id\": \"$AUTH\"" bash -c "locki stop --all --json 2>/dev/null"
+assert_output "stop --all again has nothing to stop" "[]" bash -c "locki stop --all --json 2>/dev/null"
 
 # ── worktree cleanup ─────────────────────────────────────────────────────────
 

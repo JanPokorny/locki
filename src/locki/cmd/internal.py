@@ -107,6 +107,7 @@ def _cleanup_once() -> None:
             last_active[name] = now
         elif now - last_active[name] >= IDLE_TIMEOUT:
             logger.info("Stopping idle container %r (idle %.0fs).", name, now - last_active[name])
+            # vm.incus, not containers.stop: daemon-safe (never boots the VM), per-container code
             if vm.incus(["stop", name]).returncode == 0:
                 stopped.add(name)
             last_active.pop(name, None)
