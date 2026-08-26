@@ -365,6 +365,14 @@ if ! locki-command-real claude >/dev/null 2>&1; then
     /opt/locki/bin/high/locki-auto-install @anthropic-ai/claude-code /opt/locki/bin/high/locki-mise-install npm:@anthropic-ai/claude-code
   fi
 fi
+## Claude Code plugins run their hooks with `node` under short per-hook timeouts (~5s).
+## The RPM claude brings no node, so on a fresh home the first hooks -- including
+## one-shot SessionStart ones -- land on the node shim's install and are killed
+## mid-download together with the hook. Install node up front instead: visible and
+## blocking, like any other shim, so hooks work from the first session.
+if ! locki-command-real node >/dev/null 2>&1; then
+  /opt/locki/bin/high/locki-auto-install nodejs /opt/locki/bin/high/locki-mise-install node
+fi
 exec "$(locki-command-real claude)" "$@"
 EOF
 

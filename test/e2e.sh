@@ -675,6 +675,20 @@ assert_ok   "guard lets the rename command through" locki x -m "$LOGIN" sh -c "e
 locki x -m "$LOGIN" git branch "guarded#locki-$LOGIN" --move
 assert_ok   "guard passes after rename" locki x -m "$LOGIN" sh -c "echo '{}' | $GUARD"
 
+# ── Claude Code node warm-up ─────────────────────────────────────────────────
+# Claude Code plugins run their hooks with `node` under ~5s per-hook timeouts, and the
+# RPM claude ships no node — the shim must install node before exec'ing claude, or the
+# first session's hooks (including one-shot SessionStart) get killed mid-install.
+
+echo
+echo "Testing claude shim node warm-up..."
+
+# Fake the real binary ahead of the shim's resolution so no actual claude install/run happens.
+locki x -m "$LOGIN" sh -c 'printf "#!/bin/sh\necho claude-ok\n" > /usr/local/bin/claude && chmod +x /usr/local/bin/claude'
+assert_output "claude shim installs node, then execs" "claude-ok" locki x -m "$LOGIN" timeout 300 claude
+assert_ok "node is ready before claude starts" locki x -m "$LOGIN" locki-command-real node
+locki x -m "$LOGIN" rm -f /usr/local/bin/claude
+
 # ── Antigravity CLI (agy) ────────────────────────────────────────────────────
 # agy reads neither a system-wide settings file nor a system-wide instructions
 # path, so both are seeded into the sandbox home instead of /etc.
