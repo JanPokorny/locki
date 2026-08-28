@@ -10,12 +10,16 @@ from locki.services.daemon import daemon
 from locki.services.home import home
 from locki.services.vm import vm
 from locki.services.worktree import WorktreeInfo, worktrees
-from locki.utils import CLEAR_LINE, pretty_path, sandbox_options
+from locki.utils import CLEAR_LINE, check_dirty_applies, pretty_path, sandbox_options
 
 
-def enter_sandbox(worktree: WorktreeInfo, command: list[str]) -> typing.NoReturn:
+def enter_sandbox(
+    worktree: WorktreeInfo, command: list[str], *, dirty: bool = False, raw: bool = False
+) -> typing.NoReturn:
     """Bring up everything a sandbox needs (home, VM, worktree, container, daemon),
     run *command* in it interactively, and exit with its return code."""
+    check_dirty_applies(dirty or raw, worktree.path.exists())  # fail fast, before the VM spin-up
+
     click.echo(f"{SPINNER} Entering a Locki sandbox.", err=True)
 
     WORKTREES.mkdir(parents=True, exist_ok=True)
@@ -23,9 +27,7 @@ def enter_sandbox(worktree: WorktreeInfo, command: list[str]) -> typing.NoReturn
 
     vm.ensure_running()
 
-    if not worktree.path.exists():
-        worktrees.create(worktree)
-    else:
+    if not worktrees.ensure_created(worktree, dirty=dirty, raw=raw):
         worktrees.fix_branches(worktree)
 
     containers.ensure_running(worktree)
@@ -56,7 +58,7 @@ def enter_sandbox(worktree: WorktreeInfo, command: list[str]) -> typing.NoReturn
 )
 @sandbox_options(create=True)
 @click.pass_context
-def exec_cmd(ctx, match, interactive, create):
+def exec_cmd(ctx, match, interactive, create, dirty, raw):
     """Run a command in the per-branch sandbox container.
 
     \b
@@ -66,11 +68,13 @@ def exec_cmd(ctx, match, interactive, create):
       locki x -m feat bash            # match sandbox by substring
       locki x -i bash                 # force sandbox picker even inside a worktree
       locki x -n bash                 # create new sandbox
+      locki x -n --dirty bash         # new sandbox carrying uncommitted host changes
       locki x bash -c "echo hello"    # run a one-liner
     """
+    create = create or ((dirty or raw) and not match and not interactive)  # --dirty/--raw can only seed a new sandbox
     worktree = worktrees.resolve(
         match=match,
         interactive=interactive,
         create="force" if create else "allow",
     )
-    enter_sandbox(worktree, ctx.args or ["bash"])
+    enter_sandbox(worktree, ctx.args or ["bash"], dirty=dirty, raw=raw)
