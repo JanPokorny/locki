@@ -134,6 +134,11 @@ class VMService:
             return
 
         LIMA.mkdir(exist_ok=True, parents=True)
+        if sys.platform == "linux" and shutil.which("chattr"):
+            # btrfs: the VM disk under here must be NOCOW or random writes fragment it
+            # badly; must be set on the dir before limactl creates the disk (inherited
+            # at file creation). Fails harmlessly on non-btrfs filesystems.
+            subprocess.run(["chattr", "+C", str(LIMA)], check=False, capture_output=True)
         with file_lock("vm", "Waiting for VM to start"):
             vm_setup = (
                 (PACKAGE_DATA / "vm-setup.sh")
