@@ -15,8 +15,10 @@ import sys
 import click
 
 from locki.paths import PACKAGE_DATA, WORKTREES, WORKTREES_META, XDG_CONFIG
+from locki.runes import INFO, WARNING
 from locki.services.home import home
-from locki.utils import fail, pretty_path, run_command
+from locki.services.transfer import untracked_files
+from locki.utils import check_dirty_applies, fail, pretty_path, run_command
 
 GIT_HOOKS = [
     "applypatch-msg",
@@ -223,7 +225,9 @@ class WorktreeService:
                 run_command([mise, "trust"], "Trusting mise config", cwd=str(wt_path), check=False, print_success=False)
         return wt_path
 
-    def create(self, worktree: WorktreeInfo, from_ref: str | None = None) -> None:
+    def create(
+        self, worktree: WorktreeInfo, from_ref: str | None = None, *, dirty: bool = False, raw: bool = False
+    ) -> None:
         run_command(
             ["git", "-C", str(worktree.repo), "worktree", "prune"],
             "Pruning stale git worktrees",
@@ -234,6 +238,83 @@ class WorktreeService:
         locki_dir.mkdir(parents=True, exist_ok=True)
         (locki_dir / ".gitignore").write_text("*\n")
         (locki_dir / "tmp").mkdir(exist_ok=True)
+        if dirty or raw:
+            self.replicate_dirty_state(worktree, raw=raw)
+
+    def ensure_created(self, worktree: WorktreeInfo, *, dirty: bool = False, raw: bool = False) -> bool:
+        """Create the worktree if missing (returning whether it did); --dirty/--raw
+        against an already existing worktree is rejected."""
+        check_dirty_applies(dirty or raw, worktree.path.exists())
+        if worktree.path.exists():
+            return False
+        self.create(worktree, dirty=dirty, raw=raw)
+        return True
+
+    def replicate_dirty_state(self, worktree: WorktreeInfo, *, raw: bool = False) -> None:
+        """Copy the host repo's uncommitted state (staged, unstaged, untracked) into
+        the freshly created worktree; the host repo is left byte-for-byte untouched.
+
+        Tracked changes travel as a `git stash create` commit applied in the worktree
+        (docs/adr/0003-dirty-seeding-via-stash-create.md); untracked files are copied.
+        With *raw*, gitignored files travel too (never .git or the host's .locki).
+        """
+        repo, wt_path = worktree.repo, worktree.path
+        stash = run_command(
+            ["git", "-C", str(repo), "stash", "create", "locki --dirty"],
+            "Snapshotting uncommitted changes",
+            check=False,
+            quiet=True,
+        )
+        sha = stash.stdout.decode().strip()
+        untracked = [
+            p for p in untracked_files(repo, include_ignored=raw) if pathlib.Path(p).parts[0] not in (".locki", ".git")
+        ]
+        if not sha and not untracked:
+            click.echo(f"{INFO} Host repo is clean; nothing to replicate.", err=True)
+            return
+        if sha:
+            apply = run_command(
+                ["git", "-C", str(wt_path), "stash", "apply", "--index", sha],
+                "Replicating uncommitted changes",
+                check=False,
+            )
+            if apply.returncode != 0:
+                # --index can fail when the worktree base differs from HEAD; retry the
+                # plain 3-way apply on a clean slate (staged/unstaged split is lost)
+                run_command(["git", "-C", str(wt_path), "reset", "--hard"], "Resetting worktree", quiet=True)
+                apply = run_command(
+                    ["git", "-C", str(wt_path), "stash", "apply", sha],
+                    "Replicating uncommitted changes",
+                    check=False,
+                )
+            if apply.returncode != 0:
+                click.echo(
+                    f"{WARNING} Uncommitted changes conflict with the sandbox base;"
+                    f" conflict markers were left in {pretty_path(wt_path)} for resolution.",
+                    err=True,
+                )
+        wt_real = wt_path.resolve()
+        for rel in untracked:
+            src, dst = repo / rel, wt_path / rel
+            if dst.is_symlink() or not dst.parent.resolve().is_relative_to(wt_real):
+                # a diverged --from base may hold a symlink where the host has a
+                # file -- writing through it would land outside this path
+                click.echo(f"{WARNING} Skipping {rel}: its destination sits behind a symlink.", err=True)
+                continue
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            if src.is_dir() and not src.is_symlink():
+                # ls-files doesn't recurse into a nested git repo; it emits one
+                # "dir/" entry -- copy it wholesale, .git included (it is part
+                # of the host's uncommitted state)
+                shutil.copytree(src, dst, symlinks=True)
+            else:
+                shutil.copy2(src, dst, follow_symlinks=False)
+        if raw and (ignored := set(untracked) - set(untracked_files(repo))):
+            click.echo(
+                f"{WARNING} --raw copied {len(ignored)} gitignored file(s) into the sandbox; any credentials"
+                f" in them (.env, tokens, ...) are usable by the sandboxed agent, beyond the bridge's protections.",
+                err=True,
+            )
 
     def fix_branches(self, worktree: WorktreeInfo) -> None:
         """Rename manually-switched branches to carry the sandbox's #locki-<id> suffix."""
@@ -334,16 +415,6 @@ class WorktreeService:
             return False
         cherry = git("cherry", trunk, squash_commit.stdout.decode().strip())
         return cherry.returncode == 0 and cherry.stdout.decode().strip().startswith("-")
-
-    def has_uncommitted_changes(self, worktree: WorktreeInfo, *, quiet: bool = False) -> bool:
-        return bool(
-            run_command(
-                ["git", "-C", str(worktree.path), "status", "--porcelain"],
-                "Checking for uncommitted changes",
-                check=False,
-                quiet=quiet,
-            ).stdout.strip()
-        )
 
     def current_worktree(self) -> pathlib.Path | None:
         """If cwd is inside a Locki-managed worktree, return its path."""
