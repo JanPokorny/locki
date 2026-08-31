@@ -189,6 +189,18 @@ class VMService:
         if self.status() != "Running":
             fail(f"Lima VM failed to start. LIMA_HOME={LIMA}")
 
+        # Lima READY only covers ssh + boot scripts; incusd is socket-activated and can
+        # still be starting (or transiently failing and restarting) — anything hitting
+        # it in that window gets "Shutting down". waitready polls until it is usable.
+        try:
+            self.run(
+                ["incus", "admin", "waitready", "--timeout=120"],
+                "Waiting for Incus",
+                print_success=False,
+            )
+        except subprocess.CalledProcessError:
+            fail(f"Incus did not become ready. Check `journalctl -u incus` in the VM. LIMA_HOME={LIMA}")
+
     def stop(self, force: bool = True, check: bool = True, quiet: bool = False) -> None:
         run_command(
             [self.limactl, "stop", *(["-f"] if force else []), "locki"],

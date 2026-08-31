@@ -45,7 +45,8 @@ def setup_logging():
         except OSError:
             return 0.0
 
-    log_files = sorted(LOG.glob("*.log"), key=_mtime, reverse=True)
+    # only per-run "<timestamp>-<pid>.log" files — never the daemon's long-lived daemon.log
+    log_files = sorted(LOG.glob("2[0-9]*.log"), key=_mtime, reverse=True)
     for old_log in log_files[20:]:
         old_log.unlink(missing_ok=True)
 
