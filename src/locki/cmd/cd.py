@@ -1,5 +1,4 @@
 import os
-import pwd
 
 import click
 
@@ -31,6 +30,11 @@ def cd_cmd(match, interactive, create):
     if not worktree.path.exists():
         worktrees.create(worktree)
 
-    shell = os.environ.get("SHELL") or pwd.getpwuid(os.getuid()).pw_shell or "/bin/sh"
+    if os.name == "nt":
+        shell = os.environ.get("COMSPEC") or "cmd.exe"
+    else:
+        import pwd
+
+        shell = os.environ.get("SHELL") or pwd.getpwuid(os.getuid()).pw_shell or "/bin/sh"
     os.chdir(worktree.path)
     os.execvp(shell, [shell])

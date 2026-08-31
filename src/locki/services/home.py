@@ -18,11 +18,11 @@ from locki.utils import deep_merge
 class HomeService:
     """Sandbox-home seeding + AI-harness state (Claude Code project dirs, transcripts)."""
 
-    def claude_project_dir(self, wt_path: pathlib.Path) -> pathlib.Path:
+    def claude_project_dir(self, wt_path: pathlib.PurePath) -> pathlib.Path:
         """Claude Code's per-project directory for a worktree (its cwd-munging scheme)."""
         return SANDBOX_HOME / ".claude" / "projects" / re.sub(r"[^a-zA-Z0-9]", "-", str(wt_path))
 
-    def prepare(self, wt_path: pathlib.Path) -> None:
+    def prepare(self, wt_path: pathlib.PurePath) -> None:
         """Seed the shared sandbox home with per-sandbox trust and agent settings."""
         SANDBOX_HOME.mkdir(parents=True, exist_ok=True)
         for path, updates in [
@@ -77,14 +77,14 @@ class HomeService:
         guard.parent.mkdir(parents=True, exist_ok=True)
         guard.write_bytes((PACKAGE_DATA / "claude-branch-guard.sh").read_bytes())
 
-    def ensure_resume_transcript(self, wt_path: pathlib.Path) -> None:
+    def ensure_resume_transcript(self, wt_path: pathlib.PurePath) -> None:
         """`claude -c` needs an existing transcript; plant an empty one for fresh sandboxes."""
         project_dir = self.claude_project_dir(wt_path)
         project_dir.mkdir(parents=True, exist_ok=True)
         if not any(project_dir.glob("*.jsonl")):
             (project_dir / f"{uuid.uuid4()}.jsonl").write_text("\n")
 
-    def ai_title(self, wt_path: pathlib.Path) -> str:
+    def ai_title(self, wt_path: pathlib.PurePath) -> str:
         """Last AI-generated session title from the sandbox's Claude Code transcripts, or "".
 
         Claude Code appends `{"type":"ai-title","aiTitle":...}` lines to

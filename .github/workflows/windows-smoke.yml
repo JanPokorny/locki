@@ -1,0 +1,52 @@
+name: Windows smoke test
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-wheels:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: jdx/mise-action@v4
+      - run: sudo apt-get update && sudo apt-get install -y cpio
+      - run: mise run build
+      - name: Verify Windows executable architectures
+        run: |
+          tmpdir=$(mktemp -d)
+          trap 'rm -rf "$tmpdir"' EXIT
+          unzip -p dist/*win_amd64.whl locki/data/bin/limactl.exe >"$tmpdir/limactl-amd64.exe"
+          unzip -p dist/*win_arm64.whl locki/data/bin/limactl.exe >"$tmpdir/limactl-arm64.exe"
+          [[ $(file "$tmpdir/limactl-amd64.exe") == *x86-64* ]]
+          [[ $(file "$tmpdir/limactl-arm64.exe") == *Aarch64* ]]
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows-wheels
+          path: dist/*win_*.whl
+
+  windows:
+    needs: build-wheels
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      - uses: actions/download-artifact@v8
+        with:
+          name: windows-wheels
+          path: dist
+      - run: uv sync --frozen --all-extras --dev
+      - run: uv run --frozen python -m unittest discover -s test -p "test_*.py"
+      - name: Test the installable Windows wheel
+        shell: pwsh
+        run: |
+          $wheel = (Get-ChildItem dist\*win_amd64.whl).FullName
+          uv pip install --python .venv\Scripts\python.exe --reinstall $wheel
+          & .venv\Scripts\locki.exe --help
+          & .venv\Scripts\python.exe -c "from locki.services.vm import vm; import subprocess; subprocess.run([vm.limactl, '--version'], check=True)"

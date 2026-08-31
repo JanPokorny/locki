@@ -9,7 +9,7 @@ import sys
 import time
 
 from locki.paths import PACKAGE_DATA, PID_FILE, PORT_FILE, RUNTIME, SANDBOX_HOME
-from locki.utils import file_lock
+from locki.utils import file_lock, process_is_running
 
 logger = logging.getLogger(__name__)
 
@@ -32,8 +32,7 @@ class DaemonService:
             if PID_FILE.exists():
                 with contextlib.suppress(ProcessLookupError, ValueError, PermissionError, FileNotFoundError):
                     pid = int(PID_FILE.read_text().strip())
-                    os.kill(pid, 0)
-                    alive = True
+                    alive = process_is_running(pid)
             # The daemon validates bridged commands in-process, so an upgraded locki
             # must restart a running daemon of another version to pick up new code.
             stored_version = ""
@@ -44,19 +43,21 @@ class DaemonService:
                 with contextlib.suppress(ProcessLookupError, PermissionError):
                     os.kill(pid, signal.SIGTERM)
                     for _ in range(50):  # wait for its cleanup to unlink the pid/port files
-                        os.kill(pid, 0)
+                        if not process_is_running(pid):
+                            break
                         time.sleep(0.1)
                 alive = False
             if not alive:
                 PID_FILE.unlink(missing_ok=True)
                 PORT_FILE.unlink(missing_ok=True)
-                subprocess.Popen(
-                    [sys.executable, "-m", "locki", "internal", "daemon"],
-                    start_new_session=True,
-                    stdin=subprocess.DEVNULL,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
+                daemon_command = [sys.executable, "-m", "locki", "internal", "daemon"]
+                stdio = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+                if os.name == "nt":
+                    # Win32 CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS. These constants
+                    # are only exposed by subprocess when Python itself runs on Windows.
+                    subprocess.Popen(daemon_command, creationflags=0x00000208, **stdio)
+                else:
+                    subprocess.Popen(daemon_command, start_new_session=True, **stdio)
             for _ in range(100):  # up to 10s for the daemon to write its port
                 with contextlib.suppress(OSError, ValueError):
                     if ssh_port := int(PORT_FILE.read_text().strip()):

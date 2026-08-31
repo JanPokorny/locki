@@ -1,4 +1,3 @@
-import fcntl
 import functools
 import logging
 import os
@@ -171,6 +170,93 @@ def run_command(
             raise
 
 
+def process_is_running(pid: int) -> bool:
+    """Return whether *pid* identifies a live process without signaling it.
+
+    ``os.kill(pid, 0)`` is a harmless existence probe on POSIX, but on Windows
+    Python routes most signals through ``TerminateProcess``. Use the Win32
+    process API there so checking the daemon cannot accidentally kill it.
+    """
+    if pid <= 0:
+        return False
+    if os.name != "nt":
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return False
+        return True
+
+    import ctypes
+
+    process_query_limited_information = 0x1000
+    still_active = 259
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
+    open_process = kernel32.OpenProcess
+    open_process.argtypes = [ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong]
+    open_process.restype = ctypes.c_void_p
+    get_exit_code = kernel32.GetExitCodeProcess
+    get_exit_code.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong)]
+    get_exit_code.restype = ctypes.c_int
+    close_handle = kernel32.CloseHandle
+    close_handle.argtypes = [ctypes.c_void_p]
+    close_handle.restype = ctypes.c_int
+
+    handle = open_process(process_query_limited_information, False, pid)
+    if not handle:
+        return ctypes.get_last_error() == 5  # type: ignore[attr-defined]  # ERROR_ACCESS_DENIED means it exists.
+    try:
+        exit_code = ctypes.c_ulong()
+        return bool(get_exit_code(handle, ctypes.byref(exit_code))) and exit_code.value == still_active
+    finally:
+        close_handle(handle)
+
+
+def _try_file_lock(fd: int) -> bool:
+    if os.name == "nt":
+        import msvcrt
+
+        os.lseek(fd, 0, os.SEEK_SET)
+        try:
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+        except OSError:
+            return False
+        return True
+
+    import fcntl
+
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return False
+    return True
+
+
+def _wait_for_file_lock(fd: int) -> None:
+    if os.name == "nt":
+        while not _try_file_lock(fd):
+            time.sleep(0.1)
+        return
+
+    import fcntl
+
+    fcntl.flock(fd, fcntl.LOCK_EX)
+
+
+def _unlock_file(fd: int) -> None:
+    if os.name == "nt":
+        import msvcrt
+
+        os.lseek(fd, 0, os.SEEK_SET)
+        msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        return
+
+    import fcntl
+
+    fcntl.flock(fd, fcntl.LOCK_UN)
+
+
 @contextmanager
 def file_lock(name: str, wait_message: str):
     """Acquire an exclusive file lock."""
@@ -178,14 +264,14 @@ def file_lock(name: str, wait_message: str):
     lock_path = RUNTIME / f"{name}.lock"
     fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR)
     try:
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
+        if os.name == "nt" and os.fstat(fd).st_size == 0:
+            os.write(fd, b"\0")
+        if not _try_file_lock(fd):
             with spinner(wait_message):
-                fcntl.flock(fd, fcntl.LOCK_EX)
+                _wait_for_file_lock(fd)
         yield
     finally:
-        fcntl.flock(fd, fcntl.LOCK_UN)
+        _unlock_file(fd)
         os.close(fd)
 
 

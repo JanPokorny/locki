@@ -14,7 +14,7 @@ import sys
 
 import click
 
-from locki.paths import PACKAGE_DATA, WORKTREES, WORKTREES_META, XDG_CONFIG
+from locki.paths import PACKAGE_DATA, WORKTREES, WORKTREES_META, XDG_CONFIG, guest_worktree_path
 from locki.services.home import home
 from locki.utils import fail, pretty_path, run_command
 
@@ -82,6 +82,11 @@ class WorktreeInfo:
     @property
     def path(self) -> pathlib.Path:
         return WORKTREES / self.wt_dir
+
+    @property
+    def sandbox_path(self) -> pathlib.PurePosixPath:
+        """The worktree path as seen by the Lima VM and sandbox container."""
+        return guest_worktree_path(self.path)
 
     @property
     def meta_path(self) -> pathlib.Path:
@@ -520,7 +525,7 @@ class WorktreeService:
                 choices.append(Choice(value="__create__", name="(create new)"))
             for s in sorted(candidate_sandboxes, key=lambda x: x.branch):
                 label = s.branch + (f" ({pretty_path(s.repo)})" if scope_all else "")
-                if title := home.ai_title(s.path):
+                if title := home.ai_title(s.sandbox_path):
                     label += f" — {title}"
                 choices.append(Choice(value=s.wt_id, name=label))
             if not scope_all and not filter_out_current_repo:
