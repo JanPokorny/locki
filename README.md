@@ -71,9 +71,11 @@ Commands act on the current worktree if inside one, letting you select interacti
 Most important commands are:
 
 ```bash
-locki ai   # open AI agent in sandbox (pick existing or new)
-locki x    # open Bash in sandbox (pick existing or new)
-locki rm   # remove sandbox
+locki ai     # open AI agent in sandbox (pick existing or new)
+locki x      # open Bash in sandbox (pick existing or new)
+locki ls     # list sandboxes with last-used age (--status adds container state)
+locki stop   # stop a sandbox's container; everything survives (--all stops all)
+locki rm     # remove sandbox (--merged removes all clean merged sandboxes)
 ```
 
 See the "pro-tips" section below for more advanced usage like IDE integration, port forwarding, working on multiple repos at once and more! You can also use `locki --help` anytime for a refresher.
@@ -157,7 +159,7 @@ Locki may not provide perfect security, however it is certainly much better than
 ## How it works
 
 - **Python CLI** driving a single [Lima](https://lima-vm.io/) VM (both `limactl` and Lima's guest agents are bundled in the platform wheels — no separate install) that hosts many lightweight [Incus](https://linuxcontainers.org/incus/introduction/) containers, one per sandbox. The VM is sized to your full host RAM and CPU count with a 200 GiB sparse disk.
-- **A host daemon** provides the `git`/`gh`/port-forward command bridge (over an SSH forced command bound to loopback) and idles containers and the VM back down when unused.
+- **A host daemon** provides the `git`/`gh`/port-forward command bridge (over an SSH forced command bound to loopback) and idles containers and the VM back down when unused. Idle containers are only *stopped*, never deleted — reclaim disk explicitly with `locki rm --merged` (drop clean sandboxes whose branch is merged) and `locki vm prune` (drop caches of removed sandboxes).
 - **Shared caches across all sandboxes** keep repeat work fast: a pull-through container-registry cache (nginx), a shared BuildKit daemon (Docker layers cached across sandboxes), package caches for [Mise](https://mise.jdx.dev), cargo, npm/pnpm, pip/uv, go, and more, plus GitHub-release and k3s-installer caching.
 - **btrfs with [bees](https://github.com/Zygo/bees) deduplication** for the container pool, so many similar sandboxes cost little disk. `node_modules` and `.venv` are redirected to the shared cache via a per-sandbox symlink (so opening a worktree on the host shows a symlink, not a real directory).
 - **[Mise](https://mise.jdx.dev)** provides on-demand, version-managed tools inside each sandbox.

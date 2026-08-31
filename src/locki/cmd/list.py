@@ -3,15 +3,23 @@ import json
 import click
 
 from locki.runes import INFO
+from locki.services.container import containers
 from locki.services.home import home
 from locki.services.worktree import worktrees
-from locki.utils import format_table, json_option, pretty_path
+from locki.utils import format_age, format_table, json_option, pretty_path
 
 
 @click.command()
 @click.option("--all", "-a", "show_all", is_flag=True, help="List sandboxes from all repos.")
+@click.option(
+    "--status",
+    "-s",
+    "with_status",
+    is_flag=True,
+    help="Add a live container STATUS column (queries the VM without booting it).",
+)
 @json_option
-def list_cmd(show_all: bool, as_json: bool) -> None:
+def list_cmd(show_all: bool, with_status: bool, as_json: bool) -> None:
     """List Locki sandboxes (current repo by default; all repos outside a git repo)."""
     cwd_repo = worktrees.cwd_repo
     show_all = show_all or cwd_repo is None
@@ -21,8 +29,25 @@ def list_cmd(show_all: bool, as_json: bool) -> None:
         assert cwd_repo is not None
         listed = [s for s in listed if s.repo.resolve() == cwd_repo.resolve()]
 
+    listed.sort(key=lambda s: s.last_used or 0, reverse=True)
+    statuses = containers.statuses() if with_status else None
+
+    def status_of(wt_id: str) -> str:
+        if statuses is None:
+            return "-"  # VM down
+        return statuses.get(wt_id, "none")  # worktree without a container
+
     if as_json:
-        click.echo(json.dumps([s.as_dict() | {"title": home.ai_title(s.path)} for s in listed]))
+        click.echo(
+            json.dumps(
+                [
+                    s.as_dict()
+                    | {"title": home.ai_title(s.path)}
+                    | ({"status": status_of(s.wt_id)} if with_status else {})
+                    for s in listed
+                ]
+            )
+        )
         return
 
     if not listed:
@@ -39,14 +64,18 @@ def list_cmd(show_all: bool, as_json: bool) -> None:
 
     rows: list[tuple[str, ...]] = []
     for s in listed:
-        row = [s.wt_id, s.branch, home.ai_title(s.path), pretty_path(s.path)]
+        row = [s.wt_id, s.branch, home.ai_title(s.path), format_age(s.last_used), pretty_path(s.path)]
+        if with_status:
+            row.insert(2, status_of(s.wt_id))
         if show_all:
             row.append(pretty_path(s.repo))
         if has_includes:
             row.append(",".join(pretty_path(i.repo) for i in s.include) if s.include else "")
         rows.append(tuple(row))
 
-    headers_list = ["WORKTREE ID", "WORKTREE BRANCH", "SESSION TITLE", "WORKTREE DIRECTORY"]
+    headers_list = ["WORKTREE ID", "WORKTREE BRANCH", "SESSION TITLE", "LAST USED", "WORKTREE DIRECTORY"]
+    if with_status:
+        headers_list.insert(2, "STATUS")
     if show_all:
         headers_list.append("PARENT REPO")
     if has_includes:

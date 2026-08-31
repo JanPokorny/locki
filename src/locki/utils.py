@@ -196,6 +196,19 @@ def pretty_path(p: pathlib.Path) -> str:
         return str(p)
 
 
+def format_age(timestamp: float | None) -> str:
+    """Compact age of a unix timestamp: 'just now', '5m', '3h', '12d', '8w'; '-' when unknown."""
+    if timestamp is None:
+        return "-"
+    seconds = max(0.0, time.time() - timestamp)
+    if seconds < 60:
+        return "just now"
+    for limit, div, unit in ((3600, 60, "m"), (86400, 3600, "h"), (1209600, 86400, "d")):
+        if seconds < limit:
+            return f"{int(seconds // div)}{unit}"
+    return f"{int(seconds // 604800)}w"
+
+
 def format_table(headers: tuple[str, ...], rows: list[tuple[str, ...]]) -> str:
     widths = [len(h) for h in headers]
     for row in rows:

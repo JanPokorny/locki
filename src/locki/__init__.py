@@ -11,6 +11,7 @@ from locki.cmd.new import new_cmd
 from locki.cmd.port_forward import port_forward_cmd
 from locki.cmd.remove import remove_cmd
 from locki.cmd.setup import setup_cmd
+from locki.cmd.stop import stop_cmd
 from locki.cmd.vm import vm_app
 from locki.logging import setup_logging
 from locki.utils import AliasGroup
@@ -39,4 +40,5 @@ app.add_command(list_cmd, "list | ls")
 app.add_command(port_forward_cmd, "port-forward | pf")
 app.add_command(remove_cmd, "remove | rm | delete")
 app.add_command(setup_cmd, "setup")
+app.add_command(stop_cmd, "stop")
 app.add_command(vm_app, "vm")
