@@ -542,6 +542,41 @@ git -C "$REPO" commit -qm "advance head" --allow-empty --no-verify
 FROM_PATH=$(locki new -f "$BASE_SHA" --json 2>/dev/null | json_field path)
 assert_output "locki new -f bases branch on given ref" "$BASE_SHA" git -C "$FROM_PATH" rev-parse HEAD
 
+# ── locki rm safety net ──────────────────────────────────────────────────────
+# The interactive confirmation needs a PTY, which this harness doesn't provide.
+# Here we pin the non-interactive semantics: dirty blocks, tmp-only doesn't
+# (it only warns), a dirty include blocks, --force wins.
+
+echo
+echo "Testing locki rm non-interactive semantics..."
+
+RM_OUT=$(locki new --json 2>/dev/null)
+RM_ID=$(printf '%s\n' "$RM_OUT" | json_field id)
+RM_WT=$(printf '%s\n' "$RM_OUT" | json_field path)
+echo dirt > "$RM_WT/uncommitted.txt"
+assert_fail "rm of dirty sandbox fails non-interactively" bash -c "locki rm -m '$RM_ID' </dev/null"
+assert_ok "rm --force removes dirty sandbox" bash -c "locki rm -m '$RM_ID' --force </dev/null"
+assert_fail "worktree gone after rm --force" test -d "$RM_WT"
+
+TMP_OUT=$(locki new --json 2>/dev/null)
+TMP_ID=$(printf '%s\n' "$TMP_OUT" | json_field id)
+TMP_WT=$(printf '%s\n' "$TMP_OUT" | json_field path)
+echo leftover > "$TMP_WT/.locki/tmp/leftover.txt"
+assert_ok "tmp-only sandbox removes non-interactively" bash -c "locki rm -m '$TMP_ID' </dev/null"
+
+INC_SRC="$TMPDIR_ROOT/inc-src"
+git init -q "$INC_SRC"
+git -C "$INC_SRC" config user.name "Locki Test"
+git -C "$INC_SRC" config user.email "locki@example.com"
+git -C "$INC_SRC" commit -qm "initial" --allow-empty
+INC_OUT=$(locki new --json 2>/dev/null)
+INC_ID=$(printf '%s\n' "$INC_OUT" | json_field id)
+INC_WT=$(printf '%s\n' "$INC_OUT" | json_field path)
+assert_ok "include a second repo" locki include -m "$INC_ID" --repo "$INC_SRC"
+echo dirt > "$INC_WT/.locki/include/inc-src-locki-$INC_ID/inc-dirty.txt"
+assert_fail "rm blocks on dirty include non-interactively" bash -c "locki rm -m '$INC_ID' </dev/null"
+assert_ok "rm --force removes sandbox with dirty include" bash -c "locki rm -m '$INC_ID' --force </dev/null"
+
 # ── mise trust propagation to new worktrees ──────────────────────────────────
 
 echo
