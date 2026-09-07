@@ -316,6 +316,11 @@ assert_ok "python resolves" locki x -m "$RELEASE" python --version
 assert_ok "pip3 resolves" locki x -m "$RELEASE" pip3 --version
 assert_ok "pip resolves" locki x -m "$RELEASE" pip --version
 
+# ── mise + node preinstalled ─────────────────────────────────────────────────
+# Container setup installs mise and node eagerly (no mise/node/npx shims left to lazy-install them).
+
+assert_ok "mise + node preinstalled by container setup" locki x -m "$RELEASE" sh -c 'locki-command-real mise && locki-command-real node'
+
 # ── tool installs without the GitHub API ─────────────────────────────────────
 # /opt/locki/mise.lock pins each shim tool's version, URL and checksum, so installs
 # never call api.github.com — whose 60/hr anonymous limit every sandbox shares. When
@@ -810,31 +815,6 @@ if locki x -m "$LRENT" timeout 30 sh -c \
     pass "nested auto-install completes without deadlock"
 else
     fail "nested auto-install deadlocked or errored (re-entrant lock broken)"
-fi
-
-# ── node auto-install must not recurse (fork-bomb regression) ────────────────
-# Regression: mise resolves npm-backed tools (`npm:foo`) by shelling out to `npm`, which
-# lands back on Locki's npm shim. With node still missing, that shim calls locki-ensure-node,
-# which runs `mise use -g node`, which shells out to `npm` again... Each level costs 4
-# processes; one sandbox on such a repo reached 32k processes and OOM-killed the whole VM.
-echo
-echo "Testing node auto-install does not recurse..."
-
-NREC=$(new_sandbox_id)
-# Fake mise ahead of the real one on PATH: locki-mise-install calls bare `mise` (shadowed),
-# while locki-command-real uses the absolute MISE_INSTALL_PATH (stays real, so the `node`
-# probe still fails honestly). Shelling out to npm is what real mise does for `npm:<pkg>`.
-locki x -m "$NREC" sh -c 'mkdir -p /root/.local/bin
-printf "#!/bin/sh\necho x >> /tmp/mise-calls\nnpm --version >/dev/null 2>&1\nexit 1\n" > /root/.local/bin/mise
-chmod +x /root/.local/bin/mise; : > /tmp/mise-calls'
-# ulimit caps the blast radius if the guard is gone; the call is expected to fail either
-# way (fake mise never installs node) — what matters is how often mise gets re-entered.
-locki x -m "$NREC" sh -c 'ulimit -u 400; timeout 60 npm --version' >/dev/null 2>&1 || true
-nrec_calls=$(locki x -m "$NREC" sh -c 'wc -l < /tmp/mise-calls' 2>/dev/null | tr -d ' \r\n')
-if [[ -n "$nrec_calls" && "$nrec_calls" -le 5 ]]; then
-    pass "node auto-install runs once, no recursion ($nrec_calls mise calls)"
-else
-    fail "node auto-install recursed ($nrec_calls mise calls; reentrancy guard broken)"
 fi
 
 # ── summary ──────────────────────────────────────────────────────────────────

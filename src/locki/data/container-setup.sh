@@ -135,16 +135,6 @@ fi
 exit 0
 EOF
 
-cat > /opt/locki/bin/high/locki-ensure-node << 'EOF'
-#!/bin/sh
-locki-command-real node >/dev/null 2>&1 && exit 0
-# mise resolves npm-backed tools (npm:foo) by shelling out to `npm`, which lands back on the
-# npm shim while node is still missing -> unbounded recursion. Only the outermost call installs.
-[ -z "${LOCKI_ENSURING_NODE:-}" ] || exit 0
-export LOCKI_ENSURING_NODE=1
-/opt/locki/bin/high/locki-auto-install nodejs /opt/locki/bin/high/locki-mise-install node >/dev/null 2>&1
-EOF
-
 ## Command bridge (git, gh, locki → SSH proxy to host)
 ## When cwd is outside the worktree tree, run the real binary directly in sandbox.
 tee /opt/locki/bin/high/git /opt/locki/bin/high/gh /opt/locki/bin/high/locki > /dev/null << 'EOF'
@@ -191,21 +181,10 @@ export AGENT_BROWSER_EXECUTABLE_PATH=$(command -v chromium 2>/dev/null || comman
 exec "$(locki-command-real-or-autoinstalled agent-browser)" "$@"
 EOF
 
-## node/npx: install Node.js if missing via mise
-for bin in node npx; do
-  cat > "/opt/locki/bin/high/$bin" << EOF
-#!/bin/bash
-set -eo pipefail
-locki-ensure-node
-exec "\$(locki-command-real-or-autoinstalled $bin)" "\$@"
-EOF
-done
-
-## npm: install Node.js if missing + symlink node_modules to btrfs
+## npm: symlink node_modules to btrfs
 cat > /opt/locki/bin/high/npm << 'EOF'
 #!/bin/bash
 set -eo pipefail
-locki-ensure-node
 locki-node-modules-redirect
 exec "$(locki-command-real-or-autoinstalled npm)" "$@"
 EOF
@@ -350,26 +329,9 @@ chmod +x /opt/locki/bin/high/*
 
 mkdir -p /opt/locki/bin/low
 
-## Claude Code: official RPM repo on dnf distros, npm fallback elsewhere
-cat > /opt/locki/bin/low/claude << 'EOF'
-#!/bin/bash
-set -eo pipefail
-if ! locki-command-real claude >/dev/null 2>&1; then
-  if command -v dnf >/dev/null 2>&1; then
-    /opt/locki/bin/high/locki-auto-install claude-code sh -c '
-      printf "[claude-code]\nname=Claude Code\nbaseurl=https://downloads.claude.ai/claude-code/rpm/latest\nenabled=1\ngpgcheck=1\ngpgkey=https://downloads.claude.ai/keys/claude-code.asc\n" > /etc/yum.repos.d/claude-code.repo
-      dnf install -yq claude-code
-    '
-  else
-    locki-ensure-node
-    /opt/locki/bin/high/locki-auto-install @anthropic-ai/claude-code /opt/locki/bin/high/locki-mise-install npm:@anthropic-ai/claude-code
-  fi
-fi
-exec "$(locki-command-real claude)" "$@"
-EOF
-
 ## NPM packages
 for pair in \
+  "@anthropic-ai/claude-code=claude" \
   "@mariozechner/pi-coding-agent=pi" \
   "@openai/codex=codex" \
   "agent-browser=agent-browser" \
@@ -381,7 +343,6 @@ for pair in \
 #!/bin/bash
 set -eo pipefail
 if ! locki-command-real $bin >/dev/null 2>&1; then
-  locki-ensure-node
   /opt/locki/bin/high/locki-auto-install $pkg /opt/locki/bin/high/locki-mise-install npm:$pkg
 fi
 exec "\$(locki-command-real $bin)" "\$@"
@@ -452,58 +413,6 @@ while [ "$#" -gt 0 ]; do [ "$1" = "--" ] && { shift; break; }; shift; done
 exit 0
 EOF
 
-## Mise
-cat > /opt/locki/bin/low/mise << 'EOF'
-#!/bin/bash
-set -eo pipefail
-if ! locki-command-real mise >/dev/null 2>&1; then
-  /opt/locki/bin/high/locki-auto-install mise sh -c '
-    set -eu
-    # >=2026.5 for MISE_PROVENANCE_API_FAILURES_FATAL: older mise ignores it and the
-    # lockfile fallback dies verifying provenance against the API it is working around.
-    mise_version="2026.7.15"
-    musl=""; if ldd /bin/ls 2>/dev/null | grep musl; then musl="-musl"; fi
-    case "$(uname -m)" in x86_64) arch="x64$musl";; aarch64|arm64) arch="arm64$musl";; esac
-    dest="/var/cache/locki/mise-install/mise-v${mise_version}-linux-${arch}"
-    if ! test -x "$dest/mise/bin/mise"; then
-      ext="tar.gz"
-      if command -v zstd >/dev/null 2>&1 && tar --version 2>/dev/null | grep -q "1\.\(3[1-9]\|[4-9][0-9]\)"; then ext="tar.zst"; fi
-      case "$arch.$ext" in
-        x64.tar.gz)         checksum="0785821a617e85197104c021835072ca3f4fcdda143538293a30593acc258969";;
-        x64-musl.tar.gz)    checksum="4ed34fb8af855de81504bc669c95bdd31966a43418f35829f240d96faf6d89b7";;
-        arm64.tar.gz)       checksum="0c2ca4d4ee79720a08d2c5f54c986450348b0fe25ace2bf9998dbe6c6761bf16";;
-        arm64-musl.tar.gz)  checksum="6067a008b6e87ca9c50a63a1c38cbc9ae478191f92f511ea71aa8e6108832205";;
-        x64.tar.zst)        checksum="78a67a8a7edc5292cc74d2ac6c160cb2936b09e8bdbb327804bcb2b6afae8e02";;
-        x64-musl.tar.zst)   checksum="000d4410432f58b9398ba3f6796ca23ad285e0a222e0d19c93a78f2e30cdc608";;
-        arm64.tar.zst)      checksum="192ff3d6d07b772592cbce7103187f6508fed7207c7ac6d351642c0f3a8b995b";;
-        arm64-musl.tar.zst) checksum="349a1a6cfae38a22dd5096ce8b8ab27d869babde7ceafbfe9b8de9154a84bcb8";;
-        *) echo "no checksum for linux-$arch.$ext" >&2; exit 1;;
-      esac
-      tmpdir=$(mktemp -d)
-      unpack=""
-      trap "rm -rf \"\$tmpdir\" \"\$unpack\"" EXIT
-      mise_file="mise-v$mise_version-linux-$arch.$ext"
-      mise_url="https://mise.jdx.dev/v$mise_version/$mise_file"
-      /opt/locki/bin/high/locki-fetch "$mise_url" "$tmpdir/$mise_file"
-      if [ "$(sha256sum "$tmpdir/$mise_file" | cut -d" " -f1)" != "$checksum" ]; then echo "checksum mismatch" >&2; exit 1; fi
-      # Extract into a temp dir and rename: the cache is shared across sandboxes, so a
-      # crashed extraction must not leave a half-populated dir that later passes the check.
-      mkdir -p /var/cache/locki/mise-install
-      unpack=$(mktemp -d /var/cache/locki/mise-install/.unpack-XXXXXX)
-      cd "$unpack"
-      if [ "$ext" = "tar.zst" ]; then zstd -d -c "$tmpdir/$mise_file" | tar -xf -; else tar -xf "$tmpdir/$mise_file"; fi
-      cd /
-      rm -rf "$dest"
-      mv "$unpack" "$dest"
-    fi
-    chmod +x "$dest/mise/bin/mise"
-    ln -sf "$dest/mise/bin/mise" /usr/local/bin/mise
-    chmod +x /usr/local/bin/mise
-  '
-fi
-exec "$(locki-command-real mise)" "$@"
-EOF
-
 chmod +x /opt/locki/bin/low/*
 
 # MARK: Caching
@@ -555,3 +464,28 @@ if /opt/locki/bin/high/locki-fetch "$ca_url" "$ca_tmp"; then
   fi
 fi
 rm -f "$ca_tmp"
+
+# MARK: Mise + Node.js
+## Always installed: every shim installs through mise, the AI CLIs are npm packages, and mise
+## itself resolves npm-backed tools by shelling out to npm. Last, since it needs the network.
+
+/opt/locki/bin/high/locki-auto-install mise sh -c '
+  set -eu
+  version="2026.7.15"
+  case "$(uname -m)" in
+    x86_64)  arch="x64";   checksum="0785821a617e85197104c021835072ca3f4fcdda143538293a30593acc258969";;
+    aarch64) arch="arm64"; checksum="0c2ca4d4ee79720a08d2c5f54c986450348b0fe25ace2bf9998dbe6c6761bf16";;
+  esac
+  dest="/var/cache/locki/mise-install/mise-v$version-linux-$arch"
+  if ! test -x "$dest/mise/bin/mise"; then
+    mkdir -p /var/cache/locki/mise-install
+    unpack=$(mktemp -d /var/cache/locki/mise-install/.unpack-XXXXXX)
+    trap "rm -rf $unpack" EXIT
+    /opt/locki/bin/high/locki-fetch "https://mise.jdx.dev/v$version/mise-v$version-linux-$arch.tar.gz" "$unpack/mise.tar.gz"
+    [ "$(sha256sum "$unpack/mise.tar.gz" | cut -d" " -f1)" = "$checksum" ] || { echo "mise checksum mismatch" >&2; exit 1; }
+    tar -xzf "$unpack/mise.tar.gz" -C "$unpack" && rm "$unpack/mise.tar.gz"
+    rm -rf "$dest" && mv "$unpack" "$dest"
+  fi
+  ln -sf "$dest/mise/bin/mise" /usr/local/bin/mise
+'
+/opt/locki/bin/high/locki-auto-install nodejs /opt/locki/bin/high/locki-mise-install node
