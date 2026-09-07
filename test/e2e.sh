@@ -590,6 +590,18 @@ cp "$AI_CONFIG" "$AI_CONFIG.bak"
 printf 'ai_command = "echo ai-ran"\nide_command = "true"\n' > "$AI_CONFIG"
 assert_output "locki ai runs configured command" "ai-ran" locki ai -m "$LOGIN"
 assert_output "locki ai forwards extra args" "ai-ran --resume extra-arg" locki ai -m "$LOGIN" --resume extra-arg
+
+FAKE_CLAUDE="$XDG_DATA_HOME/locki/home/.local/bin/claude"
+mkdir -p "$(dirname "$FAKE_CLAUDE")"
+printf '#!/bin/bash\necho "claude $* END"\n' > "$FAKE_CLAUDE"
+chmod +x "$FAKE_CLAUDE"
+printf 'ai_command = "claude --yolo -c"\nide_command = "true"\n' > "$AI_CONFIG"
+assert_output "locki ai drops -c without a claude transcript" "claude --yolo END" locki ai -m "$LOGIN"
+CLAUDE_PROJ="$XDG_DATA_HOME/locki/home/.claude/projects/$(worktree_of "$LOGIN" | sed 's/[^a-zA-Z0-9]/-/g')"
+mkdir -p "$CLAUDE_PROJ"
+echo '{"type":"user","entrypoint":"cli","message":{"role":"user","content":"hi"}}' > "$CLAUDE_PROJ/00000000-0000-0000-0000-000000000000.jsonl"
+assert_output "locki ai keeps -c with a claude transcript" "claude --yolo -c END" locki ai -m "$LOGIN"
+rm -f "$FAKE_CLAUDE"
 mv "$AI_CONFIG.bak" "$AI_CONFIG"
 
 # ── locki list outside git repo ─────────────────────────────────────────────
