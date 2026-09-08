@@ -331,7 +331,6 @@ mkdir -p /opt/locki/bin/low
 
 ## NPM packages
 for pair in \
-  "@anthropic-ai/claude-code=claude" \
   "@mariozechner/pi-coding-agent=pi" \
   "@openai/codex=codex" \
   "agent-browser=agent-browser" \
@@ -371,6 +370,7 @@ done
 ## Mise packages
 for pair in \
   "bun=bun" \
+  "claude=claude" \
   "fd=fd" \
   "github:anomalyco/opencode=opencode" \
   "github:google-antigravity/antigravity-cli=antigravity" \
