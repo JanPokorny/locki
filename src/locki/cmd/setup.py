@@ -147,7 +147,13 @@ def setup_cmd(defaults: bool, copy_only: bool):
 
         for rel in COPY_DIRS:
             src_root = HOME / rel
-            for dirpath, _dirnames, filenames in os.walk(src_root, followlinks=True):
+            walked: set[pathlib.Path] = set()
+            for dirpath, dirnames, filenames in os.walk(src_root, followlinks=True):
+                # following symlinked subdirectories can walk in circles (`x -> .`)
+                if (real := pathlib.Path(dirpath).resolve()) in walked:
+                    dirnames.clear()
+                    continue
+                walked.add(real)
                 for name in filenames:
                     src = pathlib.Path(dirpath) / name
                     copy_with_backup(src, SANDBOX_HOME / rel / src.relative_to(src_root))
