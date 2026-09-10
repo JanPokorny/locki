@@ -8,6 +8,7 @@ import subprocess
 import sys
 import threading
 import time
+import typing
 from contextlib import contextmanager, nullcontext
 
 import click
@@ -33,9 +34,30 @@ def deep_merge(base: dict, override: dict) -> dict:
     return result
 
 
-def fail(msg: str):
+def fail(msg: str) -> typing.NoReturn:
     click.echo(f"{ERROR} {msg}", err=True)
     sys.exit(1)
+
+
+dirty_option = click.option(
+    "--dirty",
+    is_flag=True,
+    default=False,
+    help="Copy the host repo's uncommitted changes into the newly created sandbox.",
+)
+
+raw_option = click.option(
+    "--raw",
+    is_flag=True,
+    default=False,
+    help="Like --dirty, but also copy gitignored files (.env, caches, ...) -- the raw repo folder.",
+)
+
+
+def check_dirty_applies(dirty: bool, worktree_exists: bool) -> None:
+    """--dirty/--raw seed a sandbox at creation; reject them against an existing one."""
+    if dirty and worktree_exists:
+        fail("--dirty/--raw only applies when a sandbox is being created (combine with -n, or pick a new one).")
 
 
 class AliasGroup(click.Group):
@@ -63,7 +85,7 @@ class AliasGroup(click.Group):
 
 
 def sandbox_options(create: bool = False):
-    """Shared `-m/-i[/-n]` sandbox-selection options; enforces their mutual exclusivity."""
+    """Shared `-m/-i[/-n/--dirty]` sandbox options; `-m`, `-i`, and `-n` are mutually exclusive."""
 
     def deco(f):
         @functools.wraps(f)
@@ -76,6 +98,8 @@ def sandbox_options(create: bool = False):
             wrapper = click.option("-n", "--new", "create", is_flag=True, default=False, help="Create a new sandbox.")(
                 wrapper
             )
+            wrapper = dirty_option(wrapper)
+            wrapper = raw_option(wrapper)
         wrapper = click.option("-i", "--interactive", is_flag=True, default=False, help="Force interactive picker.")(
             wrapper
         )
