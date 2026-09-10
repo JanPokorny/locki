@@ -335,16 +335,6 @@ class WorktreeService:
         cherry = git("cherry", trunk, squash_commit.stdout.decode().strip())
         return cherry.returncode == 0 and cherry.stdout.decode().strip().startswith("-")
 
-    def has_uncommitted_changes(self, worktree: WorktreeInfo, *, quiet: bool = False) -> bool:
-        return bool(
-            run_command(
-                ["git", "-C", str(worktree.path), "status", "--porcelain"],
-                "Checking for uncommitted changes",
-                check=False,
-                quiet=quiet,
-            ).stdout.strip()
-        )
-
     def current_worktree(self) -> pathlib.Path | None:
         """If cwd is inside a Locki-managed worktree, return its path."""
         cwd = pathlib.Path.cwd().resolve()
