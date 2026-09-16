@@ -471,10 +471,10 @@ rm -f "$ca_tmp"
 
 /opt/locki/bin/high/locki-auto-install mise sh -c '
   set -eu
-  version="2026.7.15"
+  version="2026.9.9"
   case "$(uname -m)" in
-    x86_64)  arch="x64";   checksum="0785821a617e85197104c021835072ca3f4fcdda143538293a30593acc258969";;
-    aarch64) arch="arm64"; checksum="0c2ca4d4ee79720a08d2c5f54c986450348b0fe25ace2bf9998dbe6c6761bf16";;
+    x86_64)  arch="x64";   checksum="e4767e4854af5daeff2191b2bbdc94f834742a23efad591dbd33187861d41604";;
+    aarch64) arch="arm64"; checksum="5f72efaa1265c9c3562ecf8d22e6623b5278700bd7ef1014a785d0ce1d1a90b2";;
   esac
   dest="/var/cache/locki/mise-install/mise-v$version-linux-$arch"
   if ! test -x "$dest/mise/bin/mise"; then
