@@ -6,6 +6,7 @@ worktree can exist without a container (e.g. after `locki vm delete`).
 
 import dataclasses
 import functools
+import itertools
 import pathlib
 import secrets
 import shutil
@@ -136,15 +137,16 @@ class WorktreeService:
         parent_name: str | None = None,
         branch: str | None = None,
         from_ref: str | None = None,
+        dir_name: str | None = None,
     ) -> pathlib.Path:
         """Create the sandbox worktree of *repo* for *wt_id*: the *branch* (default
         `untitled#locki-<wt-id>`, reused if it already exists), the worktree itself,
         trusted metadata, and per-worktree hooks.  With *parent_name* (the parent
-        sandbox repo's name) the worktree becomes an include inside that sandbox;
-        without it, the primary worktree.  *from_ref* bases a newly created branch
-        on that ref instead of HEAD."""
+        sandbox repo's name) the worktree becomes an include inside that sandbox,
+        named *dir_name* (default `<repo>-locki-<wt-id>`); without it, the primary
+        worktree.  *from_ref* bases a newly created branch on that ref instead of HEAD."""
         branch = branch or f"untitled{branch_suffix(wt_id)}"
-        dir_name = wt_dir_name(repo.name, wt_id)
+        dir_name = dir_name or wt_dir_name(repo.name, wt_id)
         if parent_name is None:
             wt_path = WORKTREES / dir_name
             meta_path = WORKTREES_META / dir_name
@@ -235,6 +237,60 @@ class WorktreeService:
         (locki_dir / ".gitignore").write_text("*\n")
         (locki_dir / "tmp").mkdir(exist_ok=True)
 
+    def next_include(self, worktree: WorktreeInfo, repo: pathlib.Path) -> tuple[str, str]:
+        """(dir name, branch) for another include of *repo* in *worktree*'s sandbox.
+
+        The n-th copy is `<repo>-<n>-locki-<wt-id>` on `untitled-<n>#locki-<wt-id>`
+        (no `-<n>` for the first), skipping names already used in the sandbox and
+        branches checked out in another worktree.  The sandbox's own repo starts
+        at 2, since its primary worktree is the first copy."""
+        run_command(["git", "-C", str(repo), "worktree", "prune"], "Pruning stale git worktrees", print_success=False)
+        listed = run_command(
+            ["git", "-C", str(repo), "worktree", "list", "--porcelain"], "Listing worktrees", quiet=True
+        ).stdout.decode()
+        checked_out = {
+            line.removeprefix("branch refs/heads/") for line in listed.splitlines() if line.startswith("branch ")
+        }
+        used = {inc.name for inc in worktree.include}
+        for n in itertools.count(2 if repo.resolve() == worktree.repo.resolve() else 1):
+            tag = "" if n == 1 else f"-{n}"
+            name = wt_dir_name(f"{repo.name}{tag}", worktree.wt_id)
+            branch = f"untitled{tag}{branch_suffix(worktree.wt_id)}"
+            if name in used or worktree.include_path(name).exists() or worktree.include_meta_path(name).exists():
+                continue
+            if branch not in checked_out:
+                return name, branch
+        raise AssertionError("unreachable")
+
+    def repo_of(self, path: pathlib.Path) -> pathlib.Path | None:
+        """The host repo *path* belongs to, or None if it's not in a git repo.
+
+        Inside a Locki worktree (or include) this is read from trusted metadata, never
+        from the sandbox-writable `.git` pointer; elsewhere it's the main repo (so a
+        linked worktree maps back to the repo it was created from)."""
+        path = path.resolve()
+        if path.is_relative_to(WORKTREES.resolve()):
+            parts = path.relative_to(WORKTREES.resolve()).parts
+            if not parts:
+                return None
+            meta = WORKTREES_META / parts[0]
+            if parts[1:3] == (".locki", "include") and len(parts) > 3:
+                meta = meta / "include" / parts[3]
+            repo_file = meta / "repo"
+            return pathlib.Path(repo_file.read_text().strip()).resolve() if repo_file.is_file() else None
+        result = run_command(
+            ["git", "-C", str(path), "rev-parse", "--path-format=absolute", "--show-toplevel", "--git-common-dir"],
+            "Resolving repo",
+            check=False,
+            quiet=True,
+        )
+        lines = result.stdout.decode().splitlines()
+        if result.returncode != 0 or len(lines) != 2:
+            return None  # not a repo, or a bare one
+        toplevel, common_dir = map(pathlib.Path, lines)
+        # a linked worktree's common dir is its main repo's .git; otherwise (e.g. a submodule) keep the toplevel
+        return (common_dir.parent if common_dir.name == ".git" else toplevel).resolve()
+
     def fix_branches(self, worktree: WorktreeInfo) -> None:
         """Rename manually-switched branches to carry the sandbox's #locki-<id> suffix."""
         suffix = branch_suffix(worktree.wt_id)
@@ -280,7 +336,7 @@ class WorktreeService:
         )
 
         if branches:
-            for repo in [*(inc.repo for inc in worktree.include), worktree.repo]:
+            for repo in dict.fromkeys([*(inc.repo for inc in worktree.include), worktree.repo]):
                 for b in _matching_branches(str(repo), worktree.wt_id):
                     run_command(
                         ["git", "-C", str(repo), "branch", "-D", b],
@@ -443,7 +499,7 @@ class WorktreeService:
         match: str | None,
         interactive: bool,
         create: str = "allow",
-        filter_out_current_repo: bool = False,
+        all_repos: bool = False,
     ) -> WorktreeInfo:
         """Pick or create a sandbox.
 
@@ -457,9 +513,11 @@ class WorktreeService:
           2. Branch substring on current-repo sandboxes.
           3. Branch substring on all sandboxes.
 
+        *all_repos* makes the picker list sandboxes from every repo, not just cwd's.
+
         Implicit behavior:
-          - Inside a Locki-managed worktree (no `match`, no `interactive`, not filtering out this
-            repo): return the current sandbox directly.
+          - Inside a Locki-managed worktree (no `match`, no `interactive`): return the
+            current sandbox directly.
         """
         cwd_repo = self.cwd_repo
 
@@ -475,12 +533,7 @@ class WorktreeService:
             else None
         )
 
-        if filter_out_current_repo and cwd_repo is None:
-            fail("Not inside a git repo.")
-
-        if filter_out_current_repo:
-            candidate_sandboxes = [s for s in all_sandboxes if s.repo.resolve() != cwd_repo.resolve()]  # type: ignore[union-attr]
-        elif cwd_repo is not None:
+        if cwd_repo is not None and not all_repos:
             candidate_sandboxes = [s for s in all_sandboxes if s.repo.resolve() == cwd_repo.resolve()]
         else:
             candidate_sandboxes = all_sandboxes
@@ -501,10 +554,10 @@ class WorktreeService:
                         f"Ambiguous match for {click.style(repr(match), fg='yellow')}: {', '.join(s.branch for s in matches)}"
                     )
 
-        if cwd_sandbox is not None and not interactive and not filter_out_current_repo:
+        if cwd_sandbox is not None and not interactive:
             return cwd_sandbox
 
-        allow_create = create == "allow" and cwd_repo is not None and not filter_out_current_repo
+        allow_create = create == "allow" and cwd_repo is not None
         if not sys.stdin.isatty():
             hint = " or --new" if allow_create else ""
             fail(f"No sandbox specified. Use -m <query>{hint} in non-interactive mode.")
@@ -513,7 +566,7 @@ class WorktreeService:
         from InquirerPy.base.control import Choice
 
         by_id = {s.wt_id: s for s in all_sandboxes}
-        scope_all = cwd_repo is None
+        scope_all = cwd_repo is None or all_repos
         while True:
             choices: list = []
             if allow_create:
@@ -523,7 +576,7 @@ class WorktreeService:
                 if title := home.ai_title(s.path):
                     label += f" — {title}"
                 choices.append(Choice(value=s.wt_id, name=label))
-            if not scope_all and not filter_out_current_repo:
+            if not scope_all:
                 choices.append(Choice(value="__all__", name="(show sandboxes from all repos)"))
 
             if not choices:
