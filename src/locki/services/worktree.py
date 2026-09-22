@@ -499,7 +499,7 @@ class WorktreeService:
         match: str | None,
         interactive: bool,
         create: str = "allow",
-        all_repos: bool = False,
+        other_repos: bool = False,
     ) -> WorktreeInfo:
         """Pick or create a sandbox.
 
@@ -513,7 +513,9 @@ class WorktreeService:
           2. Branch substring on current-repo sandboxes.
           3. Branch substring on all sandboxes.
 
-        *all_repos* makes the picker list sandboxes from every repo, not just cwd's.
+        *other_repos* flips the scope: sandboxes of repos other than cwd's are the
+        candidates (for including cwd's repo into them); cwd's own sandboxes are still
+        reachable by id, via "(show sandboxes from all repos)", or implicitly below.
 
         Implicit behavior:
           - Inside a Locki-managed worktree (no `match`, no `interactive`): return the
@@ -533,7 +535,9 @@ class WorktreeService:
             else None
         )
 
-        if cwd_repo is not None and not all_repos:
+        if cwd_repo is not None and other_repos:
+            candidate_sandboxes = [s for s in all_sandboxes if s.repo.resolve() != cwd_repo.resolve()]
+        elif cwd_repo is not None:
             candidate_sandboxes = [s for s in all_sandboxes if s.repo.resolve() == cwd_repo.resolve()]
         else:
             candidate_sandboxes = all_sandboxes
@@ -566,13 +570,13 @@ class WorktreeService:
         from InquirerPy.base.control import Choice
 
         by_id = {s.wt_id: s for s in all_sandboxes}
-        scope_all = cwd_repo is None or all_repos
+        scope_all = cwd_repo is None
         while True:
             choices: list = []
             if allow_create:
                 choices.append(Choice(value="__create__", name="(create new)"))
             for s in sorted(candidate_sandboxes, key=lambda x: x.branch):
-                label = s.branch + (f" ({pretty_path(s.repo)})" if scope_all else "")
+                label = s.branch + (f" ({pretty_path(s.repo)})" if scope_all or other_repos else "")
                 if title := home.ai_title(s.path):
                     label += f" — {title}"
                 choices.append(Choice(value=s.wt_id, name=label))

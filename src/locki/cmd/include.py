@@ -29,7 +29,7 @@ from locki.utils import fail, json_option, sandbox_options
     "this_flag",
     is_flag=True,
     default=False,
-    help="Include cwd's repo (inside a sandbox: another worktree of the repo you're in).",
+    help="Include cwd's repo into a sandbox from another repo (flips match scope).",
 )
 @json_option
 def include_cmd(match, interactive, repo_path, this_flag, as_json):
@@ -39,8 +39,11 @@ def include_cmd(match, interactive, repo_path, this_flag, as_json):
     Examples:
       locki include --repo ../other-repo      # include ../other-repo into current sandbox
       locki include -m feat --repo ../other   # include into a specific sandbox
+      locki include --this                    # include cwd's repo into some OTHER sandbox
       locki include --this -m feat            # include cwd's repo into sandbox matching 'feat'
-      locki include --this                    # in a sandbox: add another worktree of its repo
+
+    Inside a sandbox folder, the current sandbox is picked implicitly, so `--this`
+    there adds another worktree of the repo you're in to its own sandbox.
     """
     if this_flag == bool(repo_path):
         fail("Specify either --repo <path> or --this.")
@@ -49,7 +52,7 @@ def include_cmd(match, interactive, repo_path, this_flag, as_json):
     if repo is None:
         fail(f"Not a git repository: {repo_path or pathlib.Path.cwd()}")
 
-    worktree = worktrees.resolve(match=match, interactive=interactive, create="deny", all_repos=this_flag)
+    worktree = worktrees.resolve(match=match, interactive=interactive, create="deny", other_repos=this_flag)
     if not worktree.path.exists():
         fail(f"Sandbox {worktree.wt_id} has no worktree on disk.")
 
