@@ -115,6 +115,8 @@ Each sandbox gets its own [worktree](https://git-scm.com/docs/git-worktree) (a f
 
 - Something is broken? Try `locki vm delete` -- it will preserve your worktrees and settings, but the VM and sandboxes will be recreated from scratch on next run.
 
+- Project needs heavy OS-level setup (system packages, services, pre-pulled Docker images, a local cluster, ...)? Do it once in a sandbox, then run `locki template set` there: new sandboxes of the same repo start as copies of that sandbox's container (a near-instant btrfs snapshot) instead of the fresh image. The template is a snapshot taken at `set` time -- later changes to the source sandbox aren't picked up until you re-run `set`, and removing the source sandbox doesn't affect it. Only the container is copied: worktree contents and per-sandbox caches (`node_modules`, `.venv`) are not. `locki template get` shows the current template, `locki template unset` goes back to the image. Templates live in the VM, so `locki vm delete` removes them too.
+
 - Sandboxes run on Fedora 44. Want a different OS? Create a `locki.toml` file in repo root referencing either [an available OS image](https://images.linuxcontainers.org/), or a local Incus image archive by path. For the local archive format, see the [Incus image format documentation](https://linuxcontainers.org/incus/docs/main/reference/image_format/). Example:
 
   ```toml

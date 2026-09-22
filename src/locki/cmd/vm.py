@@ -6,7 +6,7 @@ import click
 
 from locki.paths import WORKTREES
 from locki.runes import INFO
-from locki.services.container import SCOPED_CACHE
+from locki.services.container import SCOPED_CACHE, TEMPLATE_PREFIX
 from locki.services.vm import vm
 from locki.services.worktree import WT_DIR_TAG, WorktreeInfo, worktrees
 from locki.utils import AliasGroup, fail, format_table, json_option, pretty_path
@@ -36,6 +36,8 @@ def vm_status_cmd(as_json):
             if not sep:
                 continue
             wt_id = wt_id.strip()
+            if wt_id.startswith(TEMPLATE_PREFIX):
+                continue  # see `locki template get`
             entries.append((wt_id, container_status.strip().lower(), by_id.get(wt_id)))
 
     if as_json:

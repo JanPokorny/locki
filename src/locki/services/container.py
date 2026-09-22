@@ -1,12 +1,19 @@
 import base64
+import dataclasses
+import datetime
 import hashlib
+import json
 import pathlib
 import shlex
 import subprocess
 import typing
 
+import click
+
 from locki.config import load_config
 from locki.paths import PACKAGE_DATA, WORKTREES
+from locki.runes import INFO
+from locki.services.daemon import VERSION
 from locki.services.vm import INTERCEPTED_HOSTS, vm
 from locki.services.worktree import WorktreeInfo
 from locki.utils import fail, file_lock
@@ -17,6 +24,54 @@ WORKTREE_DEVICE = "worktree"
 # Root of the per-sandbox cache folders (shared caches live in /var/cache/locki directly);
 # shims reach their sandbox's folder via the LOCKI_SCOPED_CACHE env var.
 SCOPED_CACHE = "/var/cache/locki/scoped"
+
+# Repo templates are stopped, device-less containers named after a hash of the repo path;
+# new sandboxes of the repo start as copies of them (a btrfs snapshot, so near-instant).
+TEMPLATE_PREFIX = "locki-template-"
+_TEMPLATE_KEY = "user.locki-template."
+
+
+@dataclasses.dataclass
+class TemplateInfo:
+    name: str  # incus container name
+    repo: str
+    source: str  # sandbox id the template was taken from
+    branch: str  # that sandbox's branch at the time
+    created: str  # ISO timestamp
+    version: str  # locki version that took it
+
+    def as_dict(self) -> dict:
+        return dataclasses.asdict(self)
+
+
+def template_name(repo: pathlib.Path) -> str:
+    return TEMPLATE_PREFIX + hashlib.sha256(str(repo.resolve()).encode()).hexdigest()[:12]
+
+
+# Runs in the VM. Snapshot first so a running source yields a crash-consistent copy, and
+# build under a temporary name so a failure leaves any previous template intact. The
+# copy loses the sandbox's own devices (worktree mount, port forwards; orphan cleanup
+# would otherwise delete it with the source worktree) and its machine-id (copies would
+# share it, and with it their DHCP client id), so each copy boots as a fresh machine.
+_TEMPLATE_SET_SCRIPT = r"""
+set -eu
+src=__SRC__ tpl=__TPL__ snap=locki-template
+tmp="$tpl-new"
+incus info "$src" >/dev/null 2>&1 || { echo "Sandbox $src has no container." >&2; exit 3; }
+incus snapshot delete "$src" "$snap" 2>/dev/null || true
+incus delete --force "$tmp" 2>/dev/null || true
+incus snapshot create "$src" "$snap"
+trap 'incus snapshot delete "$src" "$snap" 2>/dev/null || true' EXIT
+incus copy "$src/$snap" "$tmp"
+for dev in $(incus config device list "$tmp"); do incus config device remove "$tmp" "$dev" >/dev/null; done
+empty=$(mktemp)
+incus file push --mode=0444 "$empty" "$tmp/etc/machine-id"
+rm -f "$empty"
+incus file delete "$tmp/tmp/.locki-branch-named" 2>/dev/null || true
+incus config set "$tmp" __KEYS__
+incus delete --force "$tpl" 2>/dev/null || true
+incus rename "$tmp" "$tpl"
+"""
 
 
 class ContainerService:
@@ -173,7 +228,9 @@ class ContainerService:
                 check=False,
                 print_success=False,
             )
-            if worktree.wt_id not in result.stdout.decode():
+            if worktree.wt_id not in result.stdout.decode() and (template := self.template(worktree.repo)):
+                self._create_from_template(worktree, template)
+            elif worktree.wt_id not in result.stdout.decode():
                 incus_image = config.get_incus_image(worktree.repo)
 
                 local_path = worktree.repo / incus_image
@@ -224,6 +281,99 @@ class ContainerService:
                     input=setup_script,
                     print_success=False,
                 )
+
+    def _create_from_template(self, worktree: WorktreeInfo, template: TemplateInfo) -> None:
+        """Create the sandbox container as a copy of its repo's template.  The template
+        was fully set up already, so container-setup.sh (not idempotent) is skipped;
+        unsetting `volatile.apply_template` keeps the image's copy-time templates from
+        regenerating files the setup customized (e.g. /etc/hosts)."""
+        if template.version != VERSION:
+            click.echo(
+                f"{INFO} This repo's sandbox template was taken with Locki {template.version} (now {VERSION});"
+                f" re-run {click.style('locki template set', fg='green')} to pick up sandbox setup changes.",
+                err=True,
+            )
+        wt_id_q = shlex.quote(worktree.wt_id)
+        tpl_q = shlex.quote(template.name)
+        wt_path_q = shlex.quote(str(worktree.path))
+        with file_lock(f"template-{template.name}", "Waiting for the sandbox template to update"):
+            vm.run(
+                [
+                    "sh",
+                    "-c",
+                    " && ".join(
+                        [
+                            f"incus copy {tpl_q} {wt_id_q}",
+                            f"{{ incus config unset {wt_id_q} volatile.apply_template 2>/dev/null || true; }}",
+                            f"incus config device add {wt_id_q} {WORKTREE_DEVICE} disk"
+                            f" source={wt_path_q} path={wt_path_q}",
+                            f"incus start {wt_id_q}",
+                        ]
+                    ),
+                ],
+                f"Starting container from template of {click.style(template.source, fg='green')}",
+            )
+
+    def template(self, repo: pathlib.Path) -> TemplateInfo | None:
+        """The template new sandboxes of *repo* are copied from, if one is set."""
+        if vm.status() is None:
+            return None  # no VM, so no templates
+        name = template_name(repo)
+        result = vm.run(
+            ["incus", "query", f"/1.0/instances/{name}"],
+            "Checking for sandbox template",
+            check=False,
+            quiet=True,
+        )
+        if result.returncode != 0:
+            return None
+        try:
+            config = json.loads(result.stdout).get("config") or {}
+        except json.JSONDecodeError:
+            return None
+        return TemplateInfo(
+            name=name,
+            **{
+                f.name: config.get(_TEMPLATE_KEY + f.name, "")
+                for f in dataclasses.fields(TemplateInfo)
+                if f.name != "name"
+            },
+        )
+
+    def set_template(self, worktree: WorktreeInfo) -> TemplateInfo:
+        """Make a copy of *worktree*'s container the template for its repo's new sandboxes,
+        replacing any previous one."""
+        name = template_name(worktree.repo)
+        info = TemplateInfo(
+            name=name,
+            repo=str(worktree.repo),
+            source=worktree.wt_id,
+            branch=worktree.branch,
+            created=datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds"),
+            version=VERSION,
+        )
+        keys = " ".join(shlex.quote(f"{_TEMPLATE_KEY}{k}={v}") for k, v in info.as_dict().items() if k != "name")
+        script = (
+            _TEMPLATE_SET_SCRIPT.replace("__SRC__", shlex.quote(worktree.wt_id))
+            .replace("__TPL__", shlex.quote(name))
+            .replace("__KEYS__", keys)
+        )
+        with file_lock(f"template-{name}", "Waiting for another sandbox template update"):
+            result = vm.run(["sh", "-c", script], "Saving sandbox template", check=False)
+        if result.returncode == 3:
+            fail(f"Sandbox {worktree.wt_id} has no container yet. Enter it first, e.g. `locki x -m {worktree.wt_id}`.")
+        if result.returncode != 0:
+            fail(f"Saving sandbox template failed: {result.stderr.decode(errors='replace').strip()}")
+        return info
+
+    def unset_template(self, repo: pathlib.Path) -> TemplateInfo | None:
+        """Delete *repo*'s template; returns what was removed (None if nothing was set)."""
+        info = self.template(repo)
+        if info is None:
+            return None
+        with file_lock(f"template-{info.name}", "Waiting for another sandbox template update"):
+            vm.run(["incus", "delete", "--force", info.name], "Removing sandbox template")
+        return info
 
     def remove(self, *wt_ids: str) -> None:
         """Delete container(s) and their sandbox-scoped cache folders in one VM roundtrip."""
