@@ -154,6 +154,9 @@ class WorktreeService:
             parent_dir = wt_dir_name(parent_name, wt_id)
             wt_path = WORKTREES / parent_dir / ".locki" / "include" / dir_name
             meta_path = WORKTREES_META / parent_dir / "include" / dir_name
+            # `.locki/` is sandbox-writable and the agent can trigger includes via the bridge
+            if wt_path.parent.resolve() != WORKTREES.resolve() / parent_dir / ".locki" / "include":
+                fail(f"{pretty_path(wt_path.parent)} is a symlink; refusing to create the include through it.")
 
         exists = run_command(
             ["git", "-C", str(repo), "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"],

@@ -53,8 +53,6 @@ def include_cmd(match, interactive, repo_path, this_flag, as_json):
         fail(f"Not a git repository: {repo_path or pathlib.Path.cwd()}")
 
     worktree = worktrees.resolve(match=match, interactive=interactive, create="deny", other_repos=this_flag)
-    if not worktree.path.exists():
-        fail(f"Sandbox {worktree.wt_id} has no worktree on disk.")
 
     name, branch = worktrees.next_include(worktree, repo)
     click.echo(
