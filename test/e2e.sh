@@ -677,6 +677,31 @@ echo "gitdir: /tmp/evil" > "$INCLUDE_PATH/.git"
 assert_ok   "tampered .git is auto-repaired" locki x -m "$AUTH" bash -c "cd $INCLUDE_PATH && git status"
 assert_output ".git restored from metadata" "$ORIGINAL_DOTGIT" cat "$INCLUDE_PATH/.git"
 
+# ── sandbox templates ────────────────────────────────────────────────────────
+
+echo
+echo "Testing sandbox templates..."
+
+assert_output "no template by default" "null" locki template get --json
+locki x -m "$LOGIN" bash -c 'echo from-template > /etc/template-marker; echo 1.2.3.4 template-test.invalid >> /etc/hosts'
+assert_ok     "locki template set" locki template set -m "$LOGIN"
+assert_output "template get reports source sandbox" "\"source\": \"$LOGIN\"" locki template get --json
+assert_fail   "template is hidden from vm status" bash -c "locki vm status | grep -q locki-template-"
+TPL_SB=$(new_sandbox_id)
+assert_output "new sandbox starts from template" "from-template" locki x -m "$TPL_SB" cat /etc/template-marker
+assert_output "template copy keeps setup's /etc/hosts" "template-test.invalid" locki x -m "$TPL_SB" cat /etc/hosts
+assert_output "template copy mounts its own worktree" "$(worktree_of "$TPL_SB")" locki x -m "$TPL_SB" pwd
+assert_fail   "template copy gets a fresh machine-id" bash -c \
+    "[ \"\$(locki x -m '$TPL_SB' cat /etc/machine-id)\" = \"\$(locki x -m '$LOGIN' cat /etc/machine-id)\" ]"
+assert_ok     "template copy has networking" locki x -m "$TPL_SB" curl -fsS -o /dev/null https://pypi.org/simple/
+assert_output "template survives removing its source" "\"source\": \"$LOGIN\"" \
+    bash -c "locki remove -m '$TPL_SB' --force >/dev/null 2>&1; locki template get --json"
+assert_ok     "locki template unset" locki template unset
+assert_output "template is gone after unset" "null" locki template get --json
+PLAIN_SB=$(new_sandbox_id)
+assert_fail   "new sandbox after unset starts from image" locki x -m "$PLAIN_SB" test -f /etc/template-marker
+locki remove -m "$PLAIN_SB" --force >/dev/null 2>&1 || true
+
 # ── branch verification on non-conforming worktree ──────────────────────────
 
 echo
