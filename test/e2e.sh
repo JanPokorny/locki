@@ -647,8 +647,20 @@ assert_ok    "include folder exists"              test -d "$INCLUDE_PATH"
 assert_ok    "include .git pointer exists"        test -f "$INCLUDE_PATH/.git"
 assert_output "include branch named #locki-<id>"  "untitled#locki-$AUTH" git -C "$INCLUDE_PATH" branch --show-current
 
-# Second include call for same repo should fail (collision).
-assert_fail  "duplicate include rejected"         locki include -m "$AUTH" --repo "$REPO2"
+# Including the same repo again adds a numbered second worktree.
+INCLUDE2_PATH="$WORKTREE/.locki/include/$(basename "$REPO2")-2-locki-$AUTH"
+assert_ok    "same repo can be included twice"    locki include -m "$AUTH" --repo "$REPO2"
+assert_output "second include branch is numbered" "untitled-2#locki-$AUTH" git -C "$INCLUDE2_PATH" branch --show-current
+
+# The sandbox's own repo can be included too, also by the agent via the bridge.
+SELF_INCLUDE_PATH="$WORKTREE/.locki/include/$(basename "$REPO")-2-locki-$AUTH"
+assert_output "agent includes sandbox's own repo" "\"path\": \"$SELF_INCLUDE_PATH\"" \
+    locki x -m "$AUTH" locki include --this --json
+assert_output "own-repo include branch is numbered" "untitled-2#locki-$AUTH" git -C "$SELF_INCLUDE_PATH" branch --show-current
+assert_output "git works inside own-repo include" "untitled-2#locki-$AUTH" \
+    locki x -m "$AUTH" bash -c "cd $SELF_INCLUDE_PATH && git branch --show-current"
+assert_fail  "agent cannot include into other sandboxes" locki x -m "$AUTH" locki include --this -m "$LOGIN"
+assert_fail  "agent cannot include arbitrary repos" locki x -m "$AUTH" locki include --repo "$REPO2"
 
 # Git commands inside the include go through the command bridge.
 assert_output "git status works inside include"   "nothing to commit" \
@@ -716,6 +728,7 @@ assert_fail "removed worktree dir is gone" test -d "$WORKTREE"
 assert_fail "included worktree dir is gone" test -d "$INCLUDE_PATH"
 # repo2 should no longer list the worktree
 assert_fail "include worktree removed from source repo" bash -c "git -C '$REPO2' worktree list | grep -q '$INCLUDE_PATH'"
+assert_fail "own-repo include removed from repo" bash -c "git -C '$REPO' worktree list | grep -q '$SELF_INCLUDE_PATH'"
 
 # ── registry cache hits across sandboxes ─────────────────────────────────────
 

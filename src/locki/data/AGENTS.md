@@ -6,7 +6,7 @@ You are operating on a separated worktree folder of a git repo lying outside of 
 
 The `.locki/tmp/` folder, like the rest of the worktree, is shared with the host -- the user can see its contents. Put screenshots (e.g. from agent-browser), scratch files, debug dumps, and other artifacts there.
 
-The sandbox may also contain **included worktrees** from other repositories under `.locki/include/<repo-name>-locki-<wt-id>/`. Each include is a full git worktree of a separate repo; the command bridge rules apply inside each include the same way as in the main worktree (branch/stash ownership is scoped by the sandbox id, so commands work identically). `cd` into the include folder to operate on that repo. If the user asks you to work on multiple repos at once and an include is not yet present, tell the user to run `locki include --repo <path>` (or, from the other repo, `locki include --this -m <this-sandbox>`).
+The sandbox may also contain **included worktrees** under `.locki/include/<repo-name>[-<n>]-locki-<wt-id>/`. Each include is a full git worktree of another repo, or an extra worktree of this sandbox's own repo; the command bridge rules apply inside each include the same way as in the main worktree (branch/stash ownership is scoped by the sandbox id, so commands work identically). `cd` into the include folder to operate on that repo. If the user asks you to work on multiple repos at once and an include is not yet present, tell the user to run `locki include --repo <path>` (or, from the other repo, `locki include --this -m <this-sandbox>`). If you need another checkout of a repo you already have -- e.g. to work on a second branch in parallel or compare against a clean copy -- run `locki include --this` from inside it; the new worktree's path and branch are printed (`--json` for machine-readable output).
 
 # Command bridge
 
@@ -108,6 +108,14 @@ gh run (view [<number>] [-j/--job=<number>] [--log] [--log-failed] | list [-L/--
 ```
 
 `<owner>/<repo>` may only be the current repo.
+
+## Extra worktrees
+
+```locki-bridged-command-filter
+locki include --this [--json]
+```
+
+Adds another worktree of the repo at cwd (the main worktree or an include) to this sandbox, on a new `untitled-<n>#locki-<wt-id>` branch based on the host repo's HEAD. Rename the branch before working in it, same as the main one.
 
 ## Port forwarding
 
