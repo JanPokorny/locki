@@ -683,12 +683,12 @@ echo
 echo "Testing sandbox templates..."
 
 assert_output "no template by default" "null" locki template get --json
-locki x -m "$LOGIN" bash -c 'echo from-template > /root/template-marker; echo 1.2.3.4 template-test.invalid >> /etc/hosts'
+locki x -m "$LOGIN" bash -c 'echo from-template > /etc/template-marker; echo 1.2.3.4 template-test.invalid >> /etc/hosts'
 assert_ok     "locki template set" locki template set -m "$LOGIN"
 assert_output "template get reports source sandbox" "\"source\": \"$LOGIN\"" locki template get --json
 assert_fail   "template is hidden from vm status" bash -c "locki vm status | grep -q locki-template-"
 TPL_SB=$(new_sandbox_id)
-assert_output "new sandbox starts from template" "from-template" locki x -m "$TPL_SB" cat /root/template-marker
+assert_output "new sandbox starts from template" "from-template" locki x -m "$TPL_SB" cat /etc/template-marker
 assert_output "template copy keeps setup's /etc/hosts" "template-test.invalid" locki x -m "$TPL_SB" cat /etc/hosts
 assert_output "template copy mounts its own worktree" "$(worktree_of "$TPL_SB")" locki x -m "$TPL_SB" pwd
 assert_fail   "template copy gets a fresh machine-id" bash -c \
@@ -699,7 +699,7 @@ assert_output "template survives removing its source" "\"source\": \"$LOGIN\"" \
 assert_ok     "locki template unset" locki template unset
 assert_output "template is gone after unset" "null" locki template get --json
 PLAIN_SB=$(new_sandbox_id)
-assert_fail   "new sandbox after unset starts from image" locki x -m "$PLAIN_SB" test -f /root/template-marker
+assert_fail   "new sandbox after unset starts from image" locki x -m "$PLAIN_SB" test -f /etc/template-marker
 locki remove -m "$PLAIN_SB" --force >/dev/null 2>&1 || true
 
 # ── branch verification on non-conforming worktree ──────────────────────────
