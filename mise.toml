@@ -155,7 +155,7 @@ done
 '''
 
 [tasks.lock-tools]
-description = "Regenerate the sandbox mise lockfile (pinned tool resolutions, dodges the GitHub API rate limit)"
+description = "Regenerate the sandbox mise lockfile (pinned lazy tool resolutions, dodges the GitHub API rate limit)"
 run = '''
 #!/usr/bin/env bash
 set -euxo pipefail
@@ -163,9 +163,9 @@ tmpdir=$(mktemp -d)
 trap 'rm -rf "$tmpdir"' EXIT
 {
   echo '[tools]'
-  # single source: the package list the sandbox's mise-package shims install
-  sed -n '/^## Mise packages/,/^; do$/p' src/locki/data/container-setup.sh \
-    | grep -oE '"[^"=]+=' | tr -d '"=' | sort -u | sed 's/.*/"&" = "latest"/'
+  # single source: the sandbox's lazy tool config; npm-backed tools stay unpinned
+  sed -n "/^cat > \/opt\/locki\/lazy\/mise.toml/,/^EOF$/p" src/locki/data/container-setup.sh \
+    | grep 'lazy = true' | grep -v '^"npm:' | sed 's/ = .*/ = "latest"/'
 } >"$tmpdir/mise.toml"
 mise trust -q "$tmpdir"
 # Sandboxes are glibc Linux; mise throws in a few musl/baseline variants regardless,

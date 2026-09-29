@@ -317,12 +317,12 @@ assert_ok "pip3 resolves" locki x -m "$RELEASE" pip3 --version
 assert_ok "pip resolves" locki x -m "$RELEASE" pip --version
 
 # ── mise + node preinstalled ─────────────────────────────────────────────────
-# Container setup installs mise and node eagerly (no mise/node/npx shims left to lazy-install them).
+# Container setup installs mise and node eagerly (node is declared without `lazy`).
 
 assert_ok "mise + node preinstalled by container setup" locki x -m "$RELEASE" sh -c 'locki-command-real mise && locki-command-real node'
 
 # ── tool installs without the GitHub API ─────────────────────────────────────
-# /opt/locki/mise.lock pins each shim tool's version, URL and checksum, so installs
+# /opt/locki/lazy/mise.lock pins each lazy tool's version, URL and checksum, so installs
 # never call api.github.com — whose 60/hr anonymous limit every sandbox shares. When
 # that broke, the docker shim silently stopped pinning local base images.
 
@@ -331,7 +331,7 @@ echo "Testing tool installs with the GitHub API unreachable..."
 
 NOAPI=$(new_sandbox_id)
 locki x -m "$NOAPI" sh -c 'echo "0.0.0.0 api.github.com" >> /etc/hosts'
-assert_ok     "lockfile shipped into the sandbox" locki x -m "$NOAPI" test -s /opt/locki/mise.lock
+assert_ok     "lockfile shipped into the sandbox" locki x -m "$NOAPI" test -s /opt/locki/lazy/mise.lock
 # Verification must stay on: disabling it sandbox-wide breaks any repo whose own
 # lockfile records provenance ("Lockfile requires ... but no verification was used").
 assert_output "provenance verification stays enabled" "true" \
