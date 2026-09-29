@@ -117,14 +117,19 @@ class ContainerService:
             "MISE_INSTALL_PATH": "/usr/local/bin/mise",
             "MISE_NODE_VERIFY": "false",
             # Provenance stays on, but an unreachable/rate-limited api.github.com must not be
-            # fatal -- that is exactly when the lockfile fallback runs, and checksums still hold.
+            # fatal -- lazy tools install from the shipped lockfile, and checksums still hold.
             "MISE_PROVENANCE_API_FAILURES_FATAL": "false",
+            # Locki's lazy tools: bootstrap shims go to the end of PATH, installs join the
+            # user's (see container-setup.sh)
+            "MISE_SYSTEM_CONFIG_FILE": "/opt/locki/lazy/mise.toml",
+            "MISE_SYSTEM_INSTALLS_DIR": "/usr/share/mise/installs",
+            "MISE_SYSTEM_SHIMS_DIR": "/opt/locki/bin/lazy",
             "MISE_TRUSTED_CONFIG_PATHS": "/",
             "MIX_HOME": "/var/cache/locki/mix",
             "NIMBLE_DIR": "/var/cache/locki/nimble",
             "npm_config_cache": "/var/cache/locki/npm",
             "NUGET_PACKAGES": "/var/cache/locki/nuget",
-            "PATH": "/opt/locki/bin/high:/root/.local/bin:/usr/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/locki/bin/low",
+            "PATH": "/opt/locki/bin/high:/root/.local/bin:/usr/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/locki/bin/low:/opt/locki/bin/lazy",
             "PIP_CACHE_DIR": "/var/cache/locki/pip",
             "POETRY_VIRTUALENVS_PATH": f"{SCOPED_CACHE}/{worktree.wt_id}/poetry-venvs",
             "POETRY_VIRTUALENVS_IN_PROJECT": "false",

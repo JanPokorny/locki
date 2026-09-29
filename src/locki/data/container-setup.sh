@@ -35,15 +35,44 @@ if ! ldconfig -p 2>/dev/null | grep -q libatomic; then
   fi
 fi
 
-# MARK: mise lockfile
-## Pinned resolutions for every tool the shims install. Only locki-mise-install reads it,
-## and only after a normal install fails — typically because api.github.com's 60/hr
-## anonymous limit, shared by every sandbox behind the VM's IP, is exhausted. Regenerate
-## with `mise run lock-tools`; versions are as old as the last regeneration.
+# MARK: Lazy tools
+## Declared in mise's system config with `lazy = true`: mise writes a bootstrap shim for each
+## lazy_bins entry into the system shim farm (MISE_SYSTEM_SHIMS_DIR=/opt/locki/bin/lazy), which
+## sits at the very end of PATH, so a binary the image already ships always wins. The first call
+## installs the tool; from then on its user-farm shim (/usr/share/mise/shims) takes over.
+## Repo configs and `mise use -g` (global config, /opt/locki/mise.toml) take precedence as usual.
 
-mkdir -p /opt/locki
+mkdir -p /opt/locki/lazy
+cat > /opt/locki/lazy/mise.toml << 'EOF'
+[tools]
+node = "latest"
+"npm:@mariozechner/pi-coding-agent" = { version = "latest", lazy = true, lazy_bins = ["pi"] }
+"npm:@openai/codex" = { version = "latest", lazy = true, lazy_bins = ["codex"] }
+"npm:agent-browser" = { version = "latest", lazy = true, lazy_bins = ["agent-browser"] }
+"npm:corepack" = { version = "latest", lazy = true, lazy_bins = ["corepack"] }
+bun = { version = "latest", lazy = true, lazy_bins = ["bun"] }
+claude = { version = "latest", lazy = true, lazy_bins = ["claude"] }
+fd = { version = "latest", lazy = true, lazy_bins = ["fd"] }
+"github:anomalyco/opencode" = { version = "latest", lazy = true, lazy_bins = ["opencode"] }
+"github:google-antigravity/antigravity-cli" = { version = "latest", lazy = true, lazy_bins = ["antigravity"] }
+"github:github/copilot-cli" = { version = "latest", lazy = true, lazy_bins = ["copilot"] }
+"github:keilerkonzept/dockerfile-json" = { version = "latest", lazy = true, lazy_bins = ["dockerfile-json"] }
+jq = { version = "latest", lazy = true, lazy_bins = ["jq"] }
+k9s = { version = "latest", lazy = true, lazy_bins = ["k9s"] }
+kubectl = { version = "latest", lazy = true, lazy_bins = ["kubectl"] }
+"pipx:poetry" = { version = "latest", lazy = true, lazy_bins = ["poetry"] }
+python = { version = "latest", lazy = true, lazy_bins = ["pip", "pip3", "python", "python3"] }
+rg = { version = "latest", lazy = true, lazy_bins = ["rg"] }
+uv = { version = "latest", lazy = true, lazy_bins = ["uv", "uvx"] }
+yq = { version = "latest", lazy = true, lazy_bins = ["yq"] }
+EOF
+
+## The lockfile beside that config pins every non-npm lazy tool (version, URL, checksum), so
+## installs never call api.github.com, whose 60/hr anonymous limit every sandbox behind the
+## VM's IP shares. npm-backed tools resolve through the npm registry and stay current.
+## Regenerate with `mise run lock-tools`; versions are as old as the last regeneration.
 set +x
-echo '__MISE_LOCK_B64__' | base64 -d > /opt/locki/mise.lock
+echo '__MISE_LOCK_B64__' | base64 -d > /opt/locki/lazy/mise.lock
 set -x
 
 # MARK: High-priority shims
@@ -74,22 +103,6 @@ else
 fi
 EOF
 
-## locki-mise-install: install a package globally via mise (shim-safe env)
-cat > /opt/locki/bin/high/locki-mise-install << 'EOF'
-#!/bin/sh
-# MISE_LOCKFILE=false so installs resolve current versions and ignore /opt/locki/mise.lock.
-# Scoped to this script: setting it in the container env would make mise ignore the
-# lockfiles of the repos worked on in the sandbox.
-export MISE_AUTO_INSTALL=false MISE_NO_HOOKS=true MISE_LOCKFILE=false
-mise use -g "$1" && mise install "$1" && exit 0
-# Version resolution goes through api.github.com, so it dies once that anonymous rate
-# limit is spent. Fall back to the shipped lockfile: MISE_LOCKED demands its pre-resolved
-# URLs, needing no API at all, at the cost of a possibly stale version.
-printf '\033[1;33mᛚ\033[0m Retrying %s from Locki'"'"'s pinned lockfile\n' "$1" >&2
-export MISE_LOCKFILE=true MISE_LOCKED=true
-mise use -g "$1" && mise install "$1"
-EOF
-
 ## locki-fetch <url> <dest>: download with curl -> wget -> python3 fallback
 cat > /opt/locki/bin/high/locki-fetch << 'EOF'
 #!/bin/sh
@@ -103,19 +116,17 @@ else echo "[Locki] Error: no HTTP client found (need curl, wget, or python3)" >&
 EOF
 
 ## locki-command-real: resolve binary outside ALL /opt/locki/bin/ shim folders
-## MISE_LOCKFILE=false to match locki-mise-install: installs resolve current versions, so a
-## lockfile lagging upstream would pin `which` to a version that was never installed.
 cat > /opt/locki/bin/high/locki-command-real << 'EOF'
 #!/bin/sh
 _mise="${MISE_INSTALL_PATH:-/usr/local/bin/mise}"
-PATH=$(printf '%s' "$PATH" | tr ':' '\n' | grep -v -e '^/opt/locki/bin/' -e '/mise/shims' | paste -sd:) command -v "$1" || MISE_LOCKFILE=false "$_mise" which "$1" 2>/dev/null || exit 1
+PATH=$(printf '%s' "$PATH" | tr ':' '\n' | grep -v -e '^/opt/locki/bin/' -e '/mise/shims' | paste -sd:) command -v "$1" || "$_mise" which "$1" 2>/dev/null || exit 1
 EOF
 
-## locki-command-real-or-autoinstalled: resolve binary outside /opt/locki/bin/high (low shims still reachable)
+## locki-command-real-or-autoinstalled: resolve binary outside /opt/locki/bin/high (low and lazy shims still reachable)
 cat > /opt/locki/bin/high/locki-command-real-or-autoinstalled << 'EOF'
 #!/bin/sh
 _mise="${MISE_INSTALL_PATH:-/usr/local/bin/mise}"
-MISE_LOCKFILE=false "$_mise" which "$1" 2>/dev/null || PATH=$(printf '%s' "${PATH#*/opt/locki/bin/high:}" | tr ':' '\n' | grep -v '/mise/shims' | paste -sd:) command -v "$1" || exit 1
+"$_mise" which "$1" 2>/dev/null || PATH=$(printf '%s' "${PATH#*/opt/locki/bin/high:}" | tr ':' '\n' | grep -v '/mise/shims' | paste -sd:) command -v "$1" || exit 1
 EOF
 
 ## locki-node-modules-redirect: point the project's node_modules at the btrfs cache
@@ -329,25 +340,6 @@ chmod +x /opt/locki/bin/high/*
 
 mkdir -p /opt/locki/bin/low
 
-## NPM packages
-for pair in \
-  "@mariozechner/pi-coding-agent=pi" \
-  "@openai/codex=codex" \
-  "agent-browser=agent-browser" \
-  "corepack=corepack" \
-; do
-  pkg="${pair%%=*}"
-  bin="${pair#*=}"
-  cat > "/opt/locki/bin/low/$bin" << EOF
-#!/bin/bash
-set -eo pipefail
-if ! locki-command-real $bin >/dev/null 2>&1; then
-  /opt/locki/bin/high/locki-auto-install $pkg /opt/locki/bin/high/locki-mise-install npm:$pkg
-fi
-exec "\$(locki-command-real $bin)" "\$@"
-EOF
-done
-
 ## Corepack packages
 for pair in \
   "pnpm=pnpm" \
@@ -367,43 +359,12 @@ exec "\$(locki-command-real $bin)" "\$@"
 EOF
 done
 
-## Mise packages
-for pair in \
-  "bun=bun" \
-  "claude=claude" \
-  "fd=fd" \
-  "github:anomalyco/opencode=opencode" \
-  "github:google-antigravity/antigravity-cli=antigravity" \
-  "github:github/copilot-cli=copilot" \
-  "github:keilerkonzept/dockerfile-json=dockerfile-json" \
-  "jq=jq" \
-  "k9s=k9s" \
-  "kubectl=kubectl" \
-  "pipx:poetry=poetry" \
-  "python=pip" \
-  "python=pip3" \
-  "python=python" \
-  "python=python3" \
-  "rg=rg" \
-  "uv=uv" \
-  "uv=uvx" \
-  "yq=yq" \
-; do
-  pkg="${pair%%=*}"
-  bin="${pair#*=}"
-  cat > "/opt/locki/bin/low/$bin" << EOF
-#!/bin/bash
-set -eo pipefail
-if ! locki-command-real $bin >/dev/null 2>&1; then
-  /opt/locki/bin/high/locki-auto-install $pkg /opt/locki/bin/high/locki-mise-install $pkg
-fi
-exec "\$(locki-command-real $bin)" "\$@"
-EOF
-done
-
 ## The release tarball's only binary is `antigravity`; `agy` (the name upstream's own
 ## installer uses, and what users type) is a symlink shipped in the macOS archive only.
-ln -sf antigravity /opt/locki/bin/low/agy
+cat > /opt/locki/bin/low/agy << 'EOF'
+#!/bin/sh
+exec antigravity "$@"
+EOF
 
 cat > /opt/locki/bin/low/bwrap << 'EOF'
 #!/bin/sh
@@ -466,15 +427,15 @@ fi
 rm -f "$ca_tmp"
 
 # MARK: Mise + Node.js
-## Always installed: every shim installs through mise, the AI CLIs are npm packages, and mise
-## itself resolves npm-backed tools by shelling out to npm. Last, since it needs the network.
+## Always installed: every lazy tool installs through mise, the AI CLIs are npm packages, and
+## mise itself resolves npm-backed tools by shelling out to npm. Last, since it needs the network.
 
 /opt/locki/bin/high/locki-auto-install mise sh -c '
   set -eu
-  version="2026.9.9"
+  version="2026.9.17"
   case "$(uname -m)" in
-    x86_64)  arch="x64";   checksum="e4767e4854af5daeff2191b2bbdc94f834742a23efad591dbd33187861d41604";;
-    aarch64) arch="arm64"; checksum="5f72efaa1265c9c3562ecf8d22e6623b5278700bd7ef1014a785d0ce1d1a90b2";;
+    x86_64)  arch="x64";   checksum="8d1bcbc0b2ba167ee765e7410502c3f89974d0195eb8ec74537bc93bb367420d";;
+    aarch64) arch="arm64"; checksum="46717187f93d4ebfff8b87a30da3f5939af995057c0c1a855e968f0ee4d19c88";;
   esac
   dest="/var/cache/locki/mise-install/mise-v$version-linux-$arch"
   if ! test -x "$dest/mise/bin/mise"; then
@@ -488,4 +449,5 @@ rm -f "$ca_tmp"
   fi
   ln -sf "$dest/mise/bin/mise" /usr/local/bin/mise
 '
-/opt/locki/bin/high/locki-auto-install nodejs /opt/locki/bin/high/locki-mise-install node
+/opt/locki/bin/high/locki-auto-install nodejs mise install node
+mise reshim --system
