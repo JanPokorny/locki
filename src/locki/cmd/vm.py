@@ -7,6 +7,7 @@ import click
 from locki.paths import WORKTREES
 from locki.runes import INFO
 from locki.services.container import SCOPED_CACHE, TEMPLATE_PREFIX
+from locki.services.tools import tools
 from locki.services.vm import vm
 from locki.services.worktree import WT_DIR_TAG, WorktreeInfo, worktrees
 from locki.utils import AliasGroup, fail, format_table, json_option, pretty_path
@@ -78,6 +79,12 @@ def vm_status_cmd(as_json):
 @vm_app.command("stop", help="Stop the Locki VM.")
 def vm_stop_cmd():
     vm.stop()
+
+
+@vm_app.command("update-tools", help="Upgrade the sandbox tools (AI harnesses, CLIs) to their newest releases now.")
+def vm_update_tools_cmd():
+    vm.ensure_running()
+    tools.sync(force_upgrade=True)
 
 
 @vm_app.command("delete | remove | rm", help="Delete the Locki VM entirely.")

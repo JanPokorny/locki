@@ -8,6 +8,7 @@ from locki.runes import EXIT, INFO, SPINNER
 from locki.services.container import containers
 from locki.services.daemon import daemon
 from locki.services.home import home
+from locki.services.tools import tools
 from locki.services.vm import vm
 from locki.services.worktree import WorktreeInfo, worktrees
 from locki.utils import CLEAR_LINE, pretty_path, sandbox_options
@@ -22,6 +23,7 @@ def enter_sandbox(worktree: WorktreeInfo, command: list[str]) -> typing.NoReturn
     home.prepare(worktree.path)
 
     vm.ensure_running()
+    tools.sync()
 
     if not worktree.path.exists():
         worktrees.create(worktree)
@@ -73,4 +75,4 @@ def exec_cmd(ctx, match, interactive, create):
         interactive=interactive,
         create="force" if create else "allow",
     )
-    enter_sandbox(worktree, ctx.args or ["bash"])
+    enter_sandbox(worktree, ctx.args or ["bash", "--login"])

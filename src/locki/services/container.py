@@ -14,6 +14,7 @@ from locki.config import load_config
 from locki.paths import PACKAGE_DATA, WORKTREES
 from locki.runes import INFO
 from locki.services.daemon import VERSION
+from locki.services.tools import TOOLS_BIN, TOOLS_CONFIG
 from locki.services.vm import INTERCEPTED_HOSTS, vm
 from locki.services.worktree import WorktreeInfo
 from locki.utils import fail, file_lock
@@ -74,6 +75,15 @@ incus rename "$tmp" "$tpl"
 """
 
 
+# Runs the entry command in the mise environment of the worktree (the sandbox tools and the
+# repo's pins), so a harness and everything it runs inherit it: bash loads it through BASH_ENV,
+# see container-setup.sh; without bash, `mise env` gives the same environment once.
+_ENTER = r"""if command -v bash >/dev/null 2>&1; then exec bash -c 'exec "$@"' locki "$@"; fi
+eval "$(mise env 2>/dev/null)"
+exec "$@"
+"""
+
+
 class ContainerService:
     """Per-sandbox Incus containers inside the Locki VM."""
 
@@ -89,6 +99,9 @@ class ContainerService:
         return {
             # agy self-updates in the background; mise owns its install path here
             "AGY_CLI_DISABLE_AUTO_UPDATE": "true",
+            # every non-interactive bash (agents' command shells) loads the repo's mise
+            # environment, see container-setup.sh
+            "BASH_ENV": "/etc/profile.d/locki-mise.sh",
             "BUN_INSTALL_CACHE_DIR": "/var/cache/locki/bun",
             "BUNDLE_PATH": "/var/cache/locki/bundle",
             "CABAL_DIR": "/var/cache/locki/cabal",
@@ -99,7 +112,8 @@ class ContainerService:
             "COPILOT_CUSTOM_INSTRUCTIONS_DIRS": "/etc/copilot",
             "COREPACK_ENABLE_DOWNLOAD_PROMPT": "0",
             "COURSIER_CACHE": "/var/cache/locki/coursier",
-            "DENO_DIR": "/var/cache/locki/deno",
+            # the VM keeps Claude Code up to date (services/tools.py); its install is read-only
+            "DISABLE_AUTOUPDATER": "1",
             "GOCACHE": "/var/cache/locki/go/build",
             "GOMODCACHE": "/var/cache/locki/go/mod",
             "GRADLE_USER_HOME": "/var/cache/locki/gradle",
@@ -111,26 +125,24 @@ class ContainerService:
             "LOCKI_SCOPED_CACHE": f"{SCOPED_CACHE}/{worktree.wt_id}",
             "LOCKI_WORKTREES_HOME": str(WORKTREES),
             "MAVEN_OPTS": "-Dmaven.repo.local=/var/cache/locki/maven",
-            "MISE_CACHE_DIR": "/var/cache/locki/mise",
-            "MISE_DATA_DIR": "/usr/share/mise",
+            # no shims: every bash loads the mise environment instead, see container-setup.sh
+            "MISE_ACTIVATE_SHIMS": "false",
             "MISE_GLOBAL_CONFIG_FILE": "/opt/locki/mise.toml",
-            "MISE_INSTALL_PATH": "/usr/local/bin/mise",
             "MISE_NODE_VERIFY": "false",
-            # Provenance stays on, but an unreachable/rate-limited api.github.com must not be
-            # fatal -- lazy tools install from the shipped lockfile, and checksums still hold.
+            # Provenance stays on, but an unreachable/rate-limited api.github.com must not
+            # fail installs of repo-pinned tools -- checksums still hold.
             "MISE_PROVENANCE_API_FAILURES_FATAL": "false",
-            # Locki's lazy tools: bootstrap shims go to the end of PATH, installs join the
-            # user's (see container-setup.sh)
-            "MISE_SYSTEM_CONFIG_FILE": "/opt/locki/lazy/mise.toml",
-            "MISE_SYSTEM_INSTALLS_DIR": "/usr/share/mise/installs",
-            "MISE_SYSTEM_SHIMS_DIR": "/opt/locki/bin/lazy",
+            # Locki's sandbox tools, at the exact versions the VM installed (services/tools.py)
+            "MISE_SYSTEM_CONFIG_FILE": TOOLS_CONFIG,
             "MISE_TRUSTED_CONFIG_PATHS": "/",
             "MIX_HOME": "/var/cache/locki/mix",
             "NIMBLE_DIR": "/var/cache/locki/nimble",
             "npm_config_cache": "/var/cache/locki/npm",
+            # node comes read-only from the VM (services/tools.py); `npm i -g` lands here instead
+            "npm_config_prefix": "/usr/local",
             "NUGET_PACKAGES": "/var/cache/locki/nuget",
-            "PATH": "/opt/locki/bin/high:/root/.local/bin:/usr/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/locki/bin/low:/opt/locki/bin/lazy",
-            "PIP_CACHE_DIR": "/var/cache/locki/pip",
+            # the mise environment adds the tools (and the repo's pins) on entry, see exec_interactive
+            "PATH": f"/opt/locki/bin/high:/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:{TOOLS_BIN}:/opt/locki/bin/low",
             "POETRY_VIRTUALENVS_PATH": f"{SCOPED_CACHE}/{worktree.wt_id}/poetry-venvs",
             "POETRY_VIRTUALENVS_IN_PROJECT": "false",
             "PNPM_HOME": "/usr/share/pnpm",
@@ -139,8 +151,9 @@ class ContainerService:
             "REBAR_CACHE_DIR": "/var/cache/locki/rebar3",
             "STACK_ROOT": "/var/cache/locki/stack",
             "TF_PLUGIN_CACHE_DIR": "/var/cache/locki/terraform",
-            "UV_CACHE_DIR": "/var/cache/locki/uv",
             "VCPKG_DEFAULT_BINARY_CACHE": "/var/cache/locki/vcpkg",
+            # tools following XDG (mise, uv, pip, deno, ...) need no own variable: caches land in
+            # /var/cache/locki/<tool>, mise installs in /usr/share/mise
             "XDG_DATA_HOME": "/usr/share",
             "XDG_CACHE_HOME": "/var/cache/locki",
             "XDG_BIN_HOME": "/usr/local/bin",
@@ -264,13 +277,6 @@ class ContainerService:
                     .read_bytes()
                     .replace(b"__INTERCEPTED_HOSTS__", " ".join(INTERCEPTED_HOSTS).encode())
                     .replace(b"__AGENTS_MD_B64__", base64.b64encode((PACKAGE_DATA / "AGENTS.md").read_bytes()))
-                    .replace(b"__MISE_LOCK_B64__", base64.b64encode((PACKAGE_DATA / "mise.lock").read_bytes()))
-                    .replace(
-                        b"__LIBATOMIC_B64__",
-                        base64.b64encode((PACKAGE_DATA / "libatomic.so.1").read_bytes())
-                        if (PACKAGE_DATA / "libatomic.so.1").is_file()
-                        else b"",
-                    )
                 )
                 env_flags = [flag for k, v in self.env(worktree).items() for flag in ("--env", f"{k}={v}")]
                 vm.run(
@@ -393,6 +399,7 @@ class ContainerService:
 
     def exec_interactive(self, worktree: WorktreeInfo, command: list[str]) -> subprocess.CompletedProcess:
         """Run *command* in the sandbox container with inherited stdio."""
+        env = self.env(worktree)
         return vm.shell(
             [
                 "bash",
@@ -405,9 +412,13 @@ class ContainerService:
                         shlex.quote(worktree.wt_id),
                         "--cwd",
                         shlex.quote(str(worktree.path)),
-                        *(f"--env={k}={v}" for k, v in self.env(worktree).items()),
-                        *(f'--env={env}="${env}"' for env in self.forwarded_env),
+                        *(f"--env={k}={v}" for k, v in env.items()),
+                        *(f'--env={name}="${name}"' for name in self.forwarded_env),
                         "--",
+                        "sh",
+                        "-c",
+                        shlex.quote(_ENTER),
+                        "locki",
                         *(shlex.quote(a) for a in command),
                     ]
                 ),
