@@ -7,6 +7,7 @@
 #     `latest` tools to their newest release)
 #   - $ROOT/path: the tools' bin folders (`mise bin-paths`, resolved to exact versions) as a
 #     `:<dir>...` PATH suffix, replaced atomically; sandboxes read it on entry
+#   - $ROOT/lib/libatomic.so.1, which node needs and sandboxes load from there
 #   - the `locki-tools` incus profile device mounting $ROOT read-only in every sandbox
 #   - old tool versions pruned once nothing uses them any more
 #
@@ -31,7 +32,8 @@ config=$1 mode=$2
 
 # MARK: As root: system prerequisites
 
-## Node 25+ needs libatomic, which the Lima Fedora image may lack
+## Node 25+ needs libatomic, which distros rarely ship: installed here for node in the VM,
+## and copied to $ROOT/lib for node in the sandboxes (container-setup.sh)
 rpm -q libatomic >/dev/null 2>&1 || dnf install -y -q --setopt install_weak_deps=False libatomic
 
 ## Installs run unprivileged: npm/pipx install scripts must not run as VM root
@@ -39,6 +41,9 @@ id "$USER" >/dev/null 2>&1 || useradd --system --user-group --home-dir "$CACHE" 
 mkdir -p "$ROOT" "$CACHE"
 chown "$USER:$USER" "$ROOT" "$CACHE"
 chmod 755 "$ROOT"
+mkdir -p "$ROOT/lib"
+libatomic=$(ldconfig -p | awk '/libatomic\.so\.1 /{print $NF; exit}')
+[ -z "$libatomic" ] || cp -fL "$libatomic" "$ROOT/lib/libatomic.so.1"
 
 if command -v incus >/dev/null 2>&1 && ! incus profile device get default locki-tools path >/dev/null 2>&1; then
   incus profile device add default locki-tools disk source="$ROOT" path="$ROOT" readonly=true \

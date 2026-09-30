@@ -295,7 +295,7 @@ echo "  hot start: ${hot_start}s"
 
 # ── uv venv redirect ─────────────────────────────────────────────────────────
 # The uv shim must place the project venv on the shared btrfs cache (hardlinks
-# from UV_CACHE_DIR work there) and leave only a symlink in the worktree.
+# from the uv cache work there) and leave only a symlink in the worktree.
 
 echo
 echo "Testing uv venv redirect to shared cache..."

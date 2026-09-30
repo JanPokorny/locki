@@ -20,25 +20,18 @@ projects."$LOCKI_WORKTREES_HOME".trust_level = "trusted"
 EOF
 
 # MARK: libatomic
-## Node 25+ needs it, distros don't ship it, Locki vendors it
+## Node 25+ needs it and distros rarely ship it; the VM provides one with the sandbox tools
 
 if ! ldconfig -p 2>/dev/null | grep -q libatomic; then
-  set +x
-  libatomic_b64='__LIBATOMIC_B64__'
-  set -x
-  if [ -n "$libatomic_b64" ]; then
-    mkdir -p /usr/local/lib
-    echo "$libatomic_b64" | base64 -d > /usr/local/lib/libatomic.so.1
-    mkdir -p /etc/ld.so.conf.d
-    echo /usr/local/lib > /etc/ld.so.conf.d/locki.conf
-    ldconfig 2>/dev/null || true
-  fi
+  mkdir -p /etc/ld.so.conf.d
+  echo /var/lib/locki/tools/lib > /etc/ld.so.conf.d/locki.conf
+  ldconfig 2>/dev/null || true
 fi
 
 # MARK: Sandbox tools
 ## Nothing to install: AI harnesses, CLIs, node and mise itself come from the VM, mounted
 ## read-only at /var/lib/locki/tools, their bin folders at the end of PATH (see services/tools.py).
-## Tools a repo's own mise config pins install into the sandbox's MISE_DATA_DIR as usual.
+## Tools a repo's own mise config pins install into the sandbox (/usr/share/mise) as usual.
 
 # MARK: High-priority shims
 
@@ -80,16 +73,11 @@ urlretrieve(sys.argv[1], sys.argv[2])' "$1" "$2"
 else echo "[Locki] Error: no HTTP client found (need curl, wget, or python3)" >&2; exit 1; fi
 EOF
 
-## locki-command-real: resolve binary outside ALL /opt/locki/bin/ shim folders
+## locki-command-real: the binary a Locki shim stands in for. A repo-pinned (mise) version first,
+## else PATH without the shims: Locki's own (/opt/locki/bin/*) and mise's (they may auto-install).
 cat > /opt/locki/bin/high/locki-command-real << 'EOF'
 #!/bin/sh
-PATH=$(printf '%s' "$PATH" | tr ':' '\n' | grep -v -e '^/opt/locki/bin/' -e '/mise/shims' | paste -sd:) command -v "$1" || mise which "$1" 2>/dev/null || exit 1
-EOF
-
-## locki-command-real-or-autoinstalled: resolve binary outside /opt/locki/bin/high (low shims still reachable)
-cat > /opt/locki/bin/high/locki-command-real-or-autoinstalled << 'EOF'
-#!/bin/sh
-mise which "$1" 2>/dev/null || PATH=$(printf '%s' "${PATH#*/opt/locki/bin/high:}" | tr ':' '\n' | grep -v '/mise/shims' | paste -sd:) command -v "$1" || exit 1
+mise which "$1" 2>/dev/null || PATH=$(printf '%s' "$PATH" | tr ':' '\n' | grep -v -e '^/opt/locki/bin/' -e '/mise/shims' | paste -sd:) command -v "$1" || exit 1
 EOF
 
 ## locki-node-modules-redirect: point the project's node_modules at the btrfs cache
@@ -99,7 +87,7 @@ EOF
 cat > /opt/locki/bin/high/locki-node-modules-redirect << 'EOF'
 #!/bin/sh
 [ -n "${LOCKI_SCOPED_CACHE:-}" ] || exit 0
-_dir="$("$(locki-command-real-or-autoinstalled npm)" prefix 2>/dev/null)" || exit 0
+_dir="$("$(locki-command-real npm)" prefix 2>/dev/null)" || exit 0
 [ -f "$_dir/package.json" ] || exit 0
 _target="$LOCKI_SCOPED_CACHE/node-modules${_dir}/node_modules"
 if [ -L "$_dir/node_modules" ] || [ ! -e "$_dir/node_modules" ]; then
@@ -141,7 +129,7 @@ esac
 if [ "$cmd" = git ] && ! locki-command-real git >/dev/null 2>&1; then
   /opt/locki/bin/high/locki-auto-install git sh -c 'if command -v dnf >/dev/null 2>&1; then dnf install -yq git; elif command -v apt-get >/dev/null 2>&1; then apt-get update -qq && apt-get install -yqq git; elif command -v apk >/dev/null 2>&1; then apk add --no-cache git; fi'
 fi
-exec "$(locki-command-real-or-autoinstalled "$cmd")" "$@"
+exec "$(locki-command-real "$cmd")" "$@"
 EOF
 
 ## agent-browser: install chromium if missing, set env, then exec real binary
@@ -152,7 +140,7 @@ if ! command -v chromium >/dev/null 2>&1 && ! command -v chromium-browser >/dev/
   /opt/locki/bin/high/locki-auto-install chromium sh -c 'if command -v dnf >/dev/null 2>&1; then dnf install -yq chromium; elif command -v apt-get >/dev/null 2>&1; then apt-get update -qq && apt-get install -yqq chromium-browser; fi'
 fi
 export AGENT_BROWSER_EXECUTABLE_PATH=$(command -v chromium 2>/dev/null || command -v chromium-browser 2>/dev/null)
-exec "$(locki-command-real-or-autoinstalled agent-browser)" "$@"
+exec "$(locki-command-real agent-browser)" "$@"
 EOF
 
 ## npm: symlink node_modules to btrfs
@@ -160,14 +148,14 @@ cat > /opt/locki/bin/high/npm << 'EOF'
 #!/bin/bash
 set -eo pipefail
 locki-node-modules-redirect
-exec "$(locki-command-real-or-autoinstalled npm)" "$@"
+exec "$(locki-command-real npm)" "$@"
 EOF
 
 ## pnpm: cache + global virtual store
 cat > /opt/locki/bin/high/pnpm << 'EOF'
 #!/bin/bash
 set -eo pipefail
-_real=$(locki-command-real-or-autoinstalled pnpm) || exit 1
+_real=$(locki-command-real pnpm) || exit 1
 if ! "$_real" config get enable-global-virtual-store 2>/dev/null | grep -q true; then
   /opt/locki/bin/high/locki-auto-install pnpm sh -c "\"$_real\" config set store-dir /var/cache/locki/pnpm && \"$_real\" config set global-bin-dir /usr/local/bin && \"$_real\" config set enable-global-virtual-store true && \"$_real\" config delete virtual-store-dir 2>/dev/null || true"
 fi
@@ -178,7 +166,7 @@ EOF
 cat > /opt/locki/bin/high/uv << 'EOF'
 #!/bin/bash
 set -eo pipefail
-_real=$(locki-command-real-or-autoinstalled uv) || exit 1
+_real=$(locki-command-real uv) || exit 1
 if [ -n "${LOCKI_SCOPED_CACHE:-}" ] && _dir="$("$_real" workspace dir 2>/dev/null)"; then
   if [ -L "$_dir/.venv" ] || [ ! -e "$_dir/.venv" ]; then
     export UV_PROJECT_ENVIRONMENT="$LOCKI_SCOPED_CACHE/uv-venvs${_dir}/.venv"
@@ -193,7 +181,7 @@ cat > /opt/locki/bin/high/yarn << 'EOF'
 #!/bin/bash
 set -eo pipefail
 locki-node-modules-redirect
-exec "$(locki-command-real-or-autoinstalled yarn)" "$@"
+exec "$(locki-command-real yarn)" "$@"
 EOF
 
 ## bun: symlink node_modules to btrfs + redirect cache (BUN_INSTALL_CACHE_DIR)
@@ -201,7 +189,7 @@ cat > /opt/locki/bin/high/bun << 'EOF'
 #!/bin/bash
 set -eo pipefail
 locki-node-modules-redirect
-exec "$(locki-command-real-or-autoinstalled bun)" "$@"
+exec "$(locki-command-real bun)" "$@"
 EOF
 
 ## Docker: auto-install + route builds through the shared BuildKit daemon.

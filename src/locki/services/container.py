@@ -100,7 +100,6 @@ class ContainerService:
             "COPILOT_CUSTOM_INSTRUCTIONS_DIRS": "/etc/copilot",
             "COREPACK_ENABLE_DOWNLOAD_PROMPT": "0",
             "COURSIER_CACHE": "/var/cache/locki/coursier",
-            "DENO_DIR": "/var/cache/locki/deno",
             # the VM keeps Claude Code up to date (services/tools.py); its install is read-only
             "DISABLE_AUTOUPDATER": "1",
             "GOCACHE": "/var/cache/locki/go/build",
@@ -114,8 +113,6 @@ class ContainerService:
             "LOCKI_SCOPED_CACHE": f"{SCOPED_CACHE}/{worktree.wt_id}",
             "LOCKI_WORKTREES_HOME": str(WORKTREES),
             "MAVEN_OPTS": "-Dmaven.repo.local=/var/cache/locki/maven",
-            "MISE_CACHE_DIR": "/var/cache/locki/mise",
-            "MISE_DATA_DIR": "/usr/share/mise",
             "MISE_GLOBAL_CONFIG_FILE": "/opt/locki/mise.toml",
             "MISE_NODE_VERIFY": "false",
             # Provenance stays on, but an unreachable/rate-limited api.github.com must not
@@ -130,7 +127,6 @@ class ContainerService:
             "NUGET_PACKAGES": "/var/cache/locki/nuget",
             # Locki's sandbox tools are appended on entry, see exec_interactive
             "PATH": "/opt/locki/bin/high:/root/.local/bin:/usr/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/locki/bin/low",
-            "PIP_CACHE_DIR": "/var/cache/locki/pip",
             "POETRY_VIRTUALENVS_PATH": f"{SCOPED_CACHE}/{worktree.wt_id}/poetry-venvs",
             "POETRY_VIRTUALENVS_IN_PROJECT": "false",
             "PNPM_HOME": "/usr/share/pnpm",
@@ -139,8 +135,9 @@ class ContainerService:
             "REBAR_CACHE_DIR": "/var/cache/locki/rebar3",
             "STACK_ROOT": "/var/cache/locki/stack",
             "TF_PLUGIN_CACHE_DIR": "/var/cache/locki/terraform",
-            "UV_CACHE_DIR": "/var/cache/locki/uv",
             "VCPKG_DEFAULT_BINARY_CACHE": "/var/cache/locki/vcpkg",
+            # tools following XDG (mise, uv, pip, deno, ...) need no own variable: caches land in
+            # /var/cache/locki/<tool>, mise installs in /usr/share/mise
             "XDG_DATA_HOME": "/usr/share",
             "XDG_CACHE_HOME": "/var/cache/locki",
             "XDG_BIN_HOME": "/usr/local/bin",
@@ -264,12 +261,6 @@ class ContainerService:
                     .read_bytes()
                     .replace(b"__INTERCEPTED_HOSTS__", " ".join(INTERCEPTED_HOSTS).encode())
                     .replace(b"__AGENTS_MD_B64__", base64.b64encode((PACKAGE_DATA / "AGENTS.md").read_bytes()))
-                    .replace(
-                        b"__LIBATOMIC_B64__",
-                        base64.b64encode((PACKAGE_DATA / "libatomic.so.1").read_bytes())
-                        if (PACKAGE_DATA / "libatomic.so.1").is_file()
-                        else b"",
-                    )
                 )
                 env_flags = [flag for k, v in self.env(worktree).items() for flag in ("--env", f"{k}={v}")]
                 vm.run(
