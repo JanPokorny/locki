@@ -126,7 +126,7 @@ class ToolsService:
                 # A partial failure still leaves the other tools usable.
                 upgraded = now - UPGRADE_INTERVAL + RETRY_INTERVAL
                 lines = result.stderr.decode(errors="replace").splitlines()
-                failed = [line for line in lines if "✗" in line]
+                failed = [line for line in lines if "✗" in line or line.startswith("Sandbox tool folder missing")]
                 click.echo(f"{WARNING} Some sandbox tools could not be installed or updated:", err=True)
                 for line in dict.fromkeys(failed or lines[-3:]):
                     click.echo(f"     {line.strip()}", err=True)

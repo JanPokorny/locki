@@ -321,6 +321,9 @@ assert_ok "every tool command resolves" locki x -m "$RELEASE" sh -c \
     'for c in claude codex pi opencode copilot antigravity agy agent-browser corepack pnpm pnpx pnx yarn jq yq rg fd k9s kubectl uv uvx poetry bun npm npx; do
        command -v "$c" >/dev/null || { echo "missing: $c" >&2; exit 1; }
      done'
+# its launcher chmods the bundled binary on first run, which the read-only mount refuses
+assert_ok "agent-browser's native binary runs from the read-only tools" locki x -m "$RELEASE" sh -c \
+    '"$(locki-command-real agent-browser)" --version'
 assert_output "codex comes from the VM tools" "/var/lib/locki/tools/" locki x -m "$RELEASE" sh -c 'command -v codex'
 assert_fail "tools mount is read-only" locki x -m "$RELEASE" touch /var/lib/locki/tools/pwned
 assert_ok "npm i -g writes outside the read-only tools" locki x -m "$RELEASE" sh -c \

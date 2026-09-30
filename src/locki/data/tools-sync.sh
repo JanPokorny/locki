@@ -88,12 +88,20 @@ rc=0
 mise install || rc=1
 if [ "$MODE" = upgrade ]; then mise upgrade || rc=1; fi
 
+## npm packages that bundle a native binary (agent-browser) often ship it non-executable and
+## chmod it on first run, which the read-only sandbox mount then refuses. Do it here instead.
+find "$MISE_DATA_DIR/installs" -type f ! -perm -u+x -size +8k 2>/dev/null | while IFS= read -r f; do
+  if [ "$(head -c 4 "$f" | od -An -c | tr -d " ")" = "177ELF" ]; then chmod a+x "$f"; fi
+done
+
 ## Exact versions, not the `latest` links of mise: some bin folders are named after the version
 ## (ripgrep-<version>-<target>), and a running session keeps its PATH until it exits. The
 ## pruning below keeps the old versions for exactly as long as such sessions live.
 {
   printf ":%s" "$mise_dir"
-  mise bin-paths | while IFS= read -r dir; do printf ":%s" "$(readlink -f "$dir")"; done
+  mise bin-paths | while IFS= read -r dir; do
+    if real=$(readlink -e "$dir"); then printf ":%s" "$real"; else echo "Sandbox tool folder missing: $dir" >&2; fi
+  done
 } > "$ROOT/path.new" || rc=1
 mv "$ROOT/path.new" "$ROOT/path"
 exit "$rc"
