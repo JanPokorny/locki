@@ -37,7 +37,7 @@ fi
 
 # MARK: Sandbox tools
 ## Nothing to install: AI harnesses, CLIs, node and mise itself come from the VM, mounted
-## read-only at /var/lib/locki/tools with its bin/ at the end of PATH (see services/tools.py).
+## read-only at /var/lib/locki/tools, their bin folders at the end of PATH (see services/tools.py).
 ## Tools a repo's own mise config pins install into the sandbox's MISE_DATA_DIR as usual.
 
 # MARK: High-priority shims
@@ -54,7 +54,7 @@ mkdir -p "$(dirname "$log")" /var/cache/locki
 printf '\033[1;35mᚠ\033[0m Installing %s...\n' "$name" >&2
 # Always log; mirror to the terminal too when stderr is a TTY (user-run), stay silent for agents (no TTY).
 [ -t 2 ] && tty_out=/dev/stderr || tty_out=/dev/null
-# flock is not reentrant: an install command may invoke another shim that auto-installs (e.g. corepack),
+# flock is not reentrant: an install command may invoke another shim that auto-installs (e.g. pnpm),
 # which would deadlock on the lock its own ancestor holds. Take the lock only at the outermost call.
 [ -n "${LOCKI_INSTALLING:-}" ] || set -- flock -o /var/cache/locki/.install.lock env LOCKI_INSTALLING=1 "$@"
 { "$@" 2>&1; echo "$?" > "$log.rc"; } | tee -a "$log" > "$tty_out"
@@ -303,24 +303,19 @@ chmod +x /opt/locki/bin/high/*
 
 mkdir -p /opt/locki/bin/low
 
-## Corepack packages
-for pair in \
-  "pnpm=pnpm" \
-  "pnpm=pnpx" \
-  "pnpm=pnx" \
-  "yarn=yarn" \
-; do
-  pkg="${pair%%=*}"
-  bin="${pair#*=}"
-  cat > "/opt/locki/bin/low/$bin" << EOF
-#!/bin/bash
-set -eo pipefail
-if ! locki-command-real $bin >/dev/null 2>&1; then
-  /opt/locki/bin/high/locki-auto-install $pkg corepack enable --install-directory /usr/local/bin $pkg
-fi
-exec "\$(locki-command-real $bin)" "\$@"
+## pnpm, pnpx, yarn and yarnpkg come with corepack (sandbox tools); pnpm's newer short
+## alias for pnpx does not
+cat > /opt/locki/bin/low/pnx << 'EOF'
+#!/bin/sh
+exec pnpx "$@"
 EOF
-done
+
+## The release tarball's only binary is `antigravity`; `agy` (the name upstream's own
+## installer uses, and what users type) is a symlink shipped in the macOS archive only.
+cat > /opt/locki/bin/low/agy << 'EOF'
+#!/bin/sh
+exec antigravity "$@"
+EOF
 
 cat > /opt/locki/bin/low/bwrap << 'EOF'
 #!/bin/sh

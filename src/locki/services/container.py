@@ -14,7 +14,7 @@ from locki.config import load_config
 from locki.paths import PACKAGE_DATA, WORKTREES
 from locki.runes import INFO
 from locki.services.daemon import VERSION
-from locki.services.tools import TOOLS_BIN
+from locki.services.tools import TOOLS_PATH_FILE
 from locki.services.vm import INTERCEPTED_HOSTS, vm
 from locki.services.worktree import WorktreeInfo
 from locki.utils import fail, file_lock
@@ -128,7 +128,8 @@ class ContainerService:
             # node comes read-only from the VM (services/tools.py); `npm i -g` lands here instead
             "npm_config_prefix": "/usr/local",
             "NUGET_PACKAGES": "/var/cache/locki/nuget",
-            "PATH": f"/opt/locki/bin/high:/root/.local/bin:/usr/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/locki/bin/low:{TOOLS_BIN}",
+            # Locki's sandbox tools are appended on entry, see exec_interactive
+            "PATH": "/opt/locki/bin/high:/root/.local/bin:/usr/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/locki/bin/low",
             "PIP_CACHE_DIR": "/var/cache/locki/pip",
             "POETRY_VIRTUALENVS_PATH": f"{SCOPED_CACHE}/{worktree.wt_id}/poetry-venvs",
             "POETRY_VIRTUALENVS_IN_PROJECT": "false",
@@ -391,6 +392,7 @@ class ContainerService:
 
     def exec_interactive(self, worktree: WorktreeInfo, command: list[str]) -> subprocess.CompletedProcess:
         """Run *command* in the sandbox container with inherited stdio."""
+        env = self.env(worktree)
         return vm.shell(
             [
                 "bash",
@@ -403,8 +405,10 @@ class ContainerService:
                         shlex.quote(worktree.wt_id),
                         "--cwd",
                         shlex.quote(str(worktree.path)),
-                        *(f"--env={k}={v}" for k, v in self.env(worktree).items()),
-                        *(f'--env={env}="${env}"' for env in self.forwarded_env),
+                        *(f"--env={k}={v}" for k, v in env.items() if k != "PATH"),
+                        # the sandbox tools' bin folders, read in the VM so always as installed right now
+                        f'--env=PATH={env["PATH"]}"$(cat {TOOLS_PATH_FILE} 2>/dev/null)"',
+                        *(f'--env={name}="${name}"' for name in self.forwarded_env),
                         "--",
                         *(shlex.quote(a) for a in command),
                     ]

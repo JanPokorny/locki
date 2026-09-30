@@ -5,11 +5,11 @@
 #   - mise itself (pinned below) under $ROOT/mise-bin/<version>/
 #   - every tool of $ROOT/mise.toml installed under $ROOT/mise/ ($2=upgrade also moves
 #     `latest` tools to their newest release)
-#   - $ROOT/bin: one exec wrapper per command, swapped atomically, so a sandbox only ever
-#     sees a complete set
+#   - $ROOT/path: the tools' bin folders (`mise bin-paths`, resolved to exact versions) as a
+#     `:<dir>...` PATH suffix, replaced atomically; sandboxes read it on entry
 #   - the `locki-tools` incus profile device mounting $ROOT read-only in every sandbox
 #
-# Args: $1 mise.toml (base64), $2 "upgrade" or "", $3 "<link>=<command>" lines (base64).
+# Args: $1 mise.toml (base64), $2 "upgrade" or "".
 # Stdin: a GitHub token line, possibly empty. It is only ever held in the environment
 # of the unprivileged mise run below: never written to disk, never seen by a sandbox.
 set -eu
@@ -26,7 +26,7 @@ case "$(uname -m)" in
 esac
 
 IFS= read -r token || true
-config=$1 mode=$2 links=$3
+config=$1 mode=$2
 
 # MARK: As root: system prerequisites
 
@@ -44,11 +44,10 @@ if command -v incus >/dev/null 2>&1 && ! incus profile device get default locki-
     || echo "Could not mount the sandbox tools into sandboxes (incus profile device add failed)" >&2
 fi
 
-# MARK: As $USER: mise, tools, command links
+# MARK: As $USER: mise, tools, PATH
 
 printf '%s' "$config" | base64 -d > "$CACHE/mise.toml.new"
-printf '%s' "$links" | base64 -d > "$CACHE/links.new"
-chown "$USER:$USER" "$CACHE/mise.toml.new" "$CACHE/links.new"
+chown "$USER:$USER" "$CACHE/mise.toml.new"
 
 ## The token goes through a pipe: in argv or a file, other VM processes could read it
 cd /
@@ -93,23 +92,13 @@ for tool in "$MISE_DATA_DIR"/installs/*/; do
   find "$tool" -mindepth 1 -maxdepth 1 -xtype l -delete
 done
 
-## exec wrappers, not symlinks: launchers like npm locate their install from $0. Targets
-## are resolved to the exact version, which the pruning above keeps until the next farm.
-new="bin.$(date +%s%N)"
-mkdir "$ROOT/$new"
-wrap() { printf "#!/bin/sh\nexec %s \"\$@\"\n" "$(printf "%s" "$2" | sed "s/[^A-Za-z0-9_./-]/\\\\&/g")" > "$ROOT/$new/$1"; chmod 755 "$ROOT/$new/$1"; }
-wrap mise "$mise_dir/mise"
-while IFS="=" read -r link cmd; do
-  [ -n "$link" ] || continue
-  if path=$(mise which "$cmd" 2>/dev/null) && path=$(readlink -f "$path"); then
-    wrap "$link" "$path"
-  else
-    echo "Sandbox tool command not found: $cmd" >&2
-    rc=1
-  fi
-done < "$CACHE/links.new"
-rm -f "$CACHE/links.new"
-ln -sfn "$new" "$ROOT/bin.tmp" && mv -T "$ROOT/bin.tmp" "$ROOT/bin"
-for old in "$ROOT"/bin.*; do [ "$old" = "$ROOT/$new" ] || rm -rf "$old"; done
+## Exact versions, not the `latest` links of mise: some bin folders are named after the version
+## (ripgrep-<version>-<target>), and a running session keeps its PATH until the next entry.
+## The pruning above keeps the previous version for exactly those sessions.
+{
+  printf ":%s" "$mise_dir"
+  mise bin-paths | while IFS= read -r dir; do printf ":%s" "$(readlink -f "$dir")"; done
+} > "$ROOT/path.new" || rc=1
+mv "$ROOT/path.new" "$ROOT/path"
 exit "$rc"
 '

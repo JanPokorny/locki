@@ -317,14 +317,16 @@ assert_ok "python resolves" locki x -m "$RELEASE" python --version
 assert_ok "pip3 resolves" locki x -m "$RELEASE" pip3 --version
 assert_ok "pip resolves" locki x -m "$RELEASE" pip --version
 assert_ok "mise + node available" locki x -m "$RELEASE" sh -c 'locki-command-real mise && locki-command-real node'
-assert_ok "every tool command is in the VM tools" locki x -m "$RELEASE" sh -c \
-    'for c in claude codex pi opencode copilot agy agent-browser corepack jq yq rg fd k9s kubectl uv uvx poetry bun npm npx; do
-       test -x "/var/lib/locki/tools/bin/$c" || { echo "missing: $c" >&2; exit 1; }
+assert_ok "every tool command resolves" locki x -m "$RELEASE" sh -c \
+    'for c in claude codex pi opencode copilot antigravity agy agent-browser corepack pnpm pnpx pnx yarn jq yq rg fd k9s kubectl uv uvx poetry bun npm npx; do
+       command -v "$c" >/dev/null || { echo "missing: $c" >&2; exit 1; }
      done'
-assert_fail "tools mount is read-only" locki x -m "$RELEASE" touch /var/lib/locki/tools/bin/pwned
+assert_output "codex comes from the VM tools" "/var/lib/locki/tools/" locki x -m "$RELEASE" sh -c 'command -v codex'
+assert_fail "tools mount is read-only" locki x -m "$RELEASE" touch /var/lib/locki/tools/pwned
 assert_ok "npm i -g writes outside the read-only tools" locki x -m "$RELEASE" sh -c \
     'npm i -g -s cowsay && test -x /usr/local/bin/cowsay'
-assert_ok "corepack pnpm installs outside the read-only tools" locki x -m "$RELEASE" pnpm --version
+assert_ok "corepack pnpm runs outside the read-only tools" locki x -m "$RELEASE" pnpm --version
+assert_ok "corepack yarn runs" locki x -m "$RELEASE" yarn --version
 # Verification must stay on: disabling it sandbox-wide breaks any repo whose own
 # lockfile records provenance ("Lockfile requires ... but no verification was used").
 assert_output "provenance verification stays enabled" "true" \
@@ -851,7 +853,7 @@ fi
 
 # ── nested auto-install must not deadlock (reentrant lock) ───────────────────
 # Regression: a shim's install command can invoke another shim that auto-installs
-# (e.g. corepack), re-entering locki-auto-install. flock is not
+# (e.g. pnpm), re-entering locki-auto-install. flock is not
 # reentrant, so without an outermost-only lock the nested call deadlocks on the
 # lock its own ancestor holds — freezing installs in *every* sandbox (shared cache).
 echo

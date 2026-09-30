@@ -1,9 +1,10 @@
 """Sandbox tools: AI harnesses and CLIs, installed once in the VM and shared read-only.
 
 The VM installs every tool with mise (data/tools-sync.sh) under TOOLS_ROOT, which every
-sandbox mounts read-only at the same path; TOOLS_BIN, at the very end of the sandbox
-PATH, holds one exec wrapper per command. A binary the image ships itself therefore wins, and
-repo-level mise inside the sandbox still takes precedence for anything the repo pins.
+sandbox mounts read-only at the same path. The tools' bin folders (`mise bin-paths`) are
+appended to the sandbox PATH on each entry, from TOOLS_PATH_FILE. A binary the image ships
+itself therefore wins, and repo-level mise inside the sandbox still takes precedence for
+anything the repo pins.
 
 Sandboxes never install or update these tools themselves: the host syncs the VM before
 entering a sandbox, installing what is missing and upgrading to the newest releases at
@@ -27,50 +28,41 @@ from locki.services.vm import vm
 from locki.utils import file_lock, run_command
 
 TOOLS_ROOT = "/var/lib/locki/tools"
-TOOLS_BIN = f"{TOOLS_ROOT}/bin"
+# `:<dir>...`, appended to the sandbox PATH (read in the VM on each entry, so always current)
+TOOLS_PATH_FILE = f"{TOOLS_ROOT}/path"
 
 UPGRADE_INTERVAL = 3600
 RETRY_INTERVAL = 300
 
-# mise tool spec -> commands linked into TOOLS_BIN, as `link` or `link=command`.
-TOOLS: dict[str, list[str]] = {
-    "node": ["node", "npm", "npx"],
-    "npm:@mariozechner/pi-coding-agent": ["pi"],
-    "npm:@openai/codex": ["codex"],
-    "npm:agent-browser": ["agent-browser"],
-    "npm:corepack": ["corepack"],
-    "bun": ["bun"],
-    "claude": ["claude"],
-    "fd": ["fd"],
-    "github:anomalyco/opencode": ["opencode"],
-    # upstream's installer names it `agy`, but the Linux tarball only ships `antigravity`
-    "github:google-antigravity/antigravity-cli": ["antigravity", "agy=antigravity"],
-    "github:github/copilot-cli": ["copilot"],
-    "github:keilerkonzept/dockerfile-json": ["dockerfile-json"],
-    "jq": ["jq"],
-    "k9s": ["k9s"],
-    "kubectl": ["kubectl"],
-    "pipx:poetry": ["poetry"],
-    "python": ["pip", "pip3", "python", "python3"],
-    "rg": ["rg"],
-    "uv": ["uv", "uvx"],
-    "yq": ["yq"],
-}
+# mise tool specs, all tracking their newest release
+TOOLS = [
+    "node",
+    "npm:@mariozechner/pi-coding-agent",
+    "npm:@openai/codex",
+    "npm:agent-browser",
+    "npm:corepack",
+    "bun",
+    "claude",
+    "fd",
+    "github:anomalyco/opencode",
+    "github:google-antigravity/antigravity-cli",
+    "github:github/copilot-cli",
+    "github:keilerkonzept/dockerfile-json",
+    "jq",
+    "k9s",
+    "kubectl",
+    "pipx:poetry",
+    "python",
+    "rg",
+    "uv",
+    "yq",
+]
 
 _SYNC_STATE = STATE / "tools-sync.json"
 
 
 def _mise_toml() -> str:
     return "[tools]\n" + "".join(f'{json.dumps(spec)} = "latest"\n' for spec in TOOLS)
-
-
-def _links() -> str:
-    lines = []
-    for bins in TOOLS.values():
-        for entry in bins:
-            link, _, cmd = entry.partition("=")
-            lines.append(f"{link}={cmd or link}\n")
-    return "".join(lines)
 
 
 def github_token() -> str:
@@ -120,7 +112,6 @@ class ToolsService:
                     "tools-sync",
                     base64.b64encode(_mise_toml().encode()).decode(),
                     "upgrade" if upgrade else "",
-                    base64.b64encode(_links().encode()).decode(),
                 ],
                 "Installing sandbox tools" if fresh else "Updating sandbox tools",
                 input=f"{github_token()}\n".encode(),
@@ -135,7 +126,7 @@ class ToolsService:
                 # A partial failure still leaves the other tools usable.
                 upgraded = now - UPGRADE_INTERVAL + RETRY_INTERVAL
                 lines = result.stderr.decode(errors="replace").splitlines()
-                failed = [line for line in lines if "✗" in line or line.startswith("Sandbox tool command not found")]
+                failed = [line for line in lines if "✗" in line]
                 click.echo(f"{WARNING} Some sandbox tools could not be installed or updated:", err=True)
                 for line in dict.fromkeys(failed or lines[-3:]):
                     click.echo(f"     {line.strip()}", err=True)
