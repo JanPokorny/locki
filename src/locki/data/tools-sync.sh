@@ -8,6 +8,7 @@
 #   - $ROOT/path: the tools' bin folders (`mise bin-paths`, resolved to exact versions) as a
 #     `:<dir>...` PATH suffix, replaced atomically; sandboxes read it on entry
 #   - the `locki-tools` incus profile device mounting $ROOT read-only in every sandbox
+#   - old tool versions pruned once nothing uses them any more
 #
 # Args: $1 mise.toml (base64), $2 "upgrade" or "".
 # Stdin: a GitHub token line, possibly empty. It is only ever held in the environment
@@ -51,7 +52,8 @@ chown "$USER:$USER" "$CACHE/mise.toml.new"
 
 ## The token goes through a pipe: in argv or a file, other VM processes could read it
 cd /
-printf '%s\n' "$token" | exec runuser -u "$USER" -- env -i \
+rc=0
+printf '%s\n' "$token" | runuser -u "$USER" -- env -i \
   HOME="$CACHE" PATH=/usr/local/bin:/usr/bin:/bin LANG=C.UTF-8 \
   ROOT="$ROOT" CACHE="$CACHE" MISE_VERSION="$MISE_VERSION" ARCH="$arch" CHECKSUM="$checksum" MODE="$mode" \
   sh -eu -c '
@@ -81,24 +83,50 @@ rc=0
 mise install || rc=1
 if [ "$MODE" = upgrade ]; then mise upgrade || rc=1; fi
 
-## Old versions stay for sessions still running them; keep the newest two per tool.
-## Never python: pipx tools (poetry) run from venvs linked to the version they were built with.
-for tool in "$MISE_DATA_DIR"/installs/*/; do
-  case "$tool" in */installs/python/) continue;; esac
-  [ -d "$tool" ] || continue
-  find "$tool" -mindepth 1 -maxdepth 1 -type d -printf "%f\n" | sort -V | head -n -2 | while IFS= read -r v; do
-    rm -rf "$tool$v"
-  done
-  find "$tool" -mindepth 1 -maxdepth 1 -xtype l -delete
-done
-
 ## Exact versions, not the `latest` links of mise: some bin folders are named after the version
-## (ripgrep-<version>-<target>), and a running session keeps its PATH until the next entry.
-## The pruning above keeps the previous version for exactly those sessions.
+## (ripgrep-<version>-<target>), and a running session keeps its PATH until it exits. The
+## pruning below keeps the old versions for exactly as long as such sessions live.
 {
   printf ":%s" "$mise_dir"
   mise bin-paths | while IFS= read -r dir; do printf ":%s" "$(readlink -f "$dir")"; done
 } > "$ROOT/path.new" || rc=1
 mv "$ROOT/path.new" "$ROOT/path"
 exit "$rc"
-'
+' || rc=$?
+
+# MARK: As root: prune versions nothing uses
+
+## Sandboxes are containers in this VM, so /proc here lists every sandbox process. A tool
+## version is in use while any process runs it (exe), maps its libraries (maps), runs a
+## script of it (cmdline) or has it on its PATH (environ: a session started before an
+## upgrade keeps the old PATH, and so does everything it launches). Another install can
+## depend on it too: a pipx venv (poetry) links to its python and records it as `home`.
+## Links within a version, like fd and uv shipping links to themselves, do not count.
+## Installs change only under the tools lock (services/tools.py), so nothing races this.
+installs="$ROOT/mise/installs"
+seg="[^/:[:cntrl:][:space:]]*"
+vdir() { printf "%s\n" "$1" | grep -o "^$installs/$seg/$seg" || true; }
+in_use=$(mktemp)
+{
+  tr ":" "\n" < "$ROOT/path" || true
+  find /proc -mindepth 2 -maxdepth 2 -name exe -printf "%l\n" 2>/dev/null || true
+  grep -aho "$installs/$seg/$seg" /proc/[0-9]*/maps /proc/[0-9]*/cmdline /proc/[0-9]*/environ 2>/dev/null || true
+  find "$installs" -type l -lname "$installs/*" 2>/dev/null | while IFS= read -r link; do
+    target=$(readlink -f "$link") || continue
+    [ "$(vdir "$link")" = "$(vdir "$target")" ] || printf "%s\n" "$target"
+  done
+  find "$installs" -name pyvenv.cfg -exec sed -n "s/^home *= *//p" {} + 2>/dev/null || true
+} | grep -o "$installs/$seg/$seg" | sort -u > "$in_use" || true
+
+for tool in "$installs"/*/; do
+  [ -d "$tool" ] || continue
+  versions=$(find "$tool" -mindepth 1 -maxdepth 1 -type d -printf "%f\n" | sort -V)
+  newest=$(printf "%s\n" "$versions" | tail -n 1)
+  printf "%s\n" "$versions" | while IFS= read -r v; do
+    [ -n "$v" ] && [ "$v" != "$newest" ] || continue
+    grep -qxF "$tool$v" "$in_use" || rm -rf "$tool$v"
+  done
+  find "$tool" -mindepth 1 -maxdepth 1 -xtype l -delete
+done
+rm -f "$in_use"
+exit "$rc"
