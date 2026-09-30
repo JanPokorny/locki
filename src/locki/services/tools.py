@@ -34,19 +34,25 @@ TOOLS_PATH_FILE = f"{TOOLS_ROOT}/path"
 UPGRADE_INTERVAL = 3600
 RETRY_INTERVAL = 300
 
-# mise tool specs, all tracking their newest release
-TOOLS = [
-    "node",
+# The AI harnesses: new models often need their newest release, so they skip mise's default
+# 24h minimum_release_age (a supply-chain hold on fresh releases), which every other tool keeps.
+HARNESSES = [
+    "claude",
+    "github:anomalyco/opencode",
+    "github:github/copilot-cli",
+    "github:google-antigravity/antigravity-cli",
     "npm:@mariozechner/pi-coding-agent",
     "npm:@openai/codex",
+]
+
+# mise tool specs, all tracking their newest release
+TOOLS = [
+    *HARNESSES,
+    "node",
     "npm:agent-browser",
     "npm:corepack",
     "bun",
-    "claude",
     "fd",
-    "github:anomalyco/opencode",
-    "github:google-antigravity/antigravity-cli",
-    "github:github/copilot-cli",
     "github:keilerkonzept/dockerfile-json",
     "jq",
     "k9s",
@@ -62,7 +68,9 @@ _SYNC_STATE = STATE / "tools-sync.json"
 
 
 def _mise_toml() -> str:
-    return "[tools]\n" + "".join(f'{json.dumps(spec)} = "latest"\n' for spec in TOOLS)
+    return f"[settings]\nminimum_release_age_excludes = {json.dumps(HARNESSES)}\n\n[tools]\n" + "".join(
+        f'{json.dumps(spec)} = "latest"\n' for spec in TOOLS
+    )
 
 
 def github_token() -> str:
@@ -119,6 +127,12 @@ class ToolsService:
                 print_success=False,
             )
             upgraded = now if upgrade or fresh else state.get("upgraded", 0)
+            if "GitHub rejected the token" in result.stderr.decode(errors="replace"):
+                click.echo(
+                    f"{WARNING} GitHub rejected your token (GITHUB_TOKEN / GH_TOKEN / `gh auth token`);"
+                    " sandbox tools were updated without it, at GitHub's anonymous rate limit.",
+                    err=True,
+                )
             if result.returncode == 0 and fresh:
                 click.echo(f"{SUCCESS} Installed sandbox tools", err=True)
             if result.returncode != 0:

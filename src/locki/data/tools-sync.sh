@@ -83,10 +83,21 @@ export MISE_DATA_DIR="$ROOT/mise" MISE_CACHE_DIR="$CACHE/mise" MISE_STATE_DIR="$
   MISE_YES=1 MISE_NODE_VERIFY=false MISE_PROVENANCE_API_FAILURES_FATAL=false \
   UV_PYTHON_INSTALL_DIR="$ROOT/uv-python" UV_CACHE_DIR="$CACHE/uv" UV_SYSTEM_CERTS=1 npm_config_cache="$CACHE/npm"
 
+## A rejected token (expired, revoked) must not cost the anonymous access it replaces:
+## on a 401, warn and retry once without it, for this and every later step.
+run_mise() {
+  if mise "$@" 2>"$CACHE/mise.err"; then cat "$CACHE/mise.err" >&2; return 0; fi
+  cat "$CACHE/mise.err" >&2
+  [ -n "${MISE_GITHUB_TOKEN:-}" ] && grep -q "401 Unauthorized" "$CACHE/mise.err" || return 1
+  echo "GitHub rejected the token (401 Unauthorized); retrying without it" >&2
+  unset MISE_GITHUB_TOKEN
+  mise "$@"
+}
+
 ## One failing tool must not keep the others from installing or upgrading
 rc=0
-mise install || rc=1
-if [ "$MODE" = upgrade ]; then mise upgrade || rc=1; fi
+run_mise install || rc=1
+if [ "$MODE" = upgrade ]; then run_mise upgrade || rc=1; fi
 
 ## npm packages that bundle a native binary (agent-browser) often ship it non-executable and
 ## chmod it on first run, which the read-only sandbox mount then refuses. Do it here instead.
