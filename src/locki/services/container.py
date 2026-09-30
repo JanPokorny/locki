@@ -90,6 +90,9 @@ class ContainerService:
         return {
             # agy self-updates in the background; mise owns its install path here
             "AGY_CLI_DISABLE_AUTO_UPDATE": "true",
+            # every non-interactive bash (agents' command shells) loads the repo's mise
+            # environment, see container-setup.sh
+            "BASH_ENV": "/etc/profile.d/locki-mise.sh",
             "BUN_INSTALL_CACHE_DIR": "/var/cache/locki/bun",
             "BUNDLE_PATH": "/var/cache/locki/bundle",
             "CABAL_DIR": "/var/cache/locki/cabal",

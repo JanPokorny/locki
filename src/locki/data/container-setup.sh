@@ -24,14 +24,29 @@ EOF
 
 if ! ldconfig -p 2>/dev/null | grep -q libatomic; then
   mkdir -p /etc/ld.so.conf.d
-  echo /var/lib/locki/tools/lib > /etc/ld.so.conf.d/locki.conf
+  echo /usr/local/share/mise/locki/lib > /etc/ld.so.conf.d/locki.conf
   ldconfig 2>/dev/null || true
 fi
 
 # MARK: Sandbox tools
-## Nothing to install: AI harnesses, CLIs, node and mise itself come from the VM, mounted
-## read-only at /var/lib/locki/tools, their bin folders at the end of PATH (see services/tools.py).
-## Tools a repo's own mise config pins install into the sandbox (/usr/share/mise) as usual.
+## Nothing to install: AI harnesses, CLIs, node and mise itself come from the VM, mounted read-only
+## at /usr/local/share/mise (mise's default system data dir), their bin folders at the end of PATH
+## (see services/tools.py). A repo's pins resolve to those installs when they match, and install
+## into the sandbox (/usr/share/mise) when they don't.
+
+## Every bash loads the mise environment of its working directory: agents' command shells
+## through BASH_ENV (non-interactive), login and interactive ones through profile.d. So the repo's
+## pinned tools come first on PATH without shims, including versions only the VM has installed,
+## which get no shim in the sandbox. `mise activate` also follows `cd` within one command.
+## Locki's own bash shims skip it: they only look up the real binary.
+cat > /etc/profile.d/locki-mise.sh << 'EOF'
+case "$0" in /opt/locki/bin/*) ;; *)
+  if [ -n "${BASH_VERSION:-}" ] && [ -z "${__LOCKI_MISE_ACTIVE:-}" ] && command -v mise >/dev/null 2>&1; then
+    __LOCKI_MISE_ACTIVE=1
+    eval "$(mise activate bash)"
+  fi
+esac
+EOF
 
 # MARK: High-priority shims
 

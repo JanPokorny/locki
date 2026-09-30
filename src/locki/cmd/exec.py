@@ -75,4 +75,4 @@ def exec_cmd(ctx, match, interactive, create):
         interactive=interactive,
         create="force" if create else "allow",
     )
-    enter_sandbox(worktree, ctx.args or ["bash"])
+    enter_sandbox(worktree, ctx.args or ["bash", "--login"])

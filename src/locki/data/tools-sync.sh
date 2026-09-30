@@ -2,13 +2,13 @@
 # Sandbox tools: installed once in the VM, mounted read-only into every sandbox.
 #
 # Runs in the VM as root (see services/tools.py). Idempotent; every run converges the VM:
-#   - mise itself (pinned below) under $ROOT/mise-bin/<version>/
-#   - every tool of $ROOT/mise.toml installed under $ROOT/mise/ ($2=upgrade also moves
+#   - mise itself (pinned below) under $ROOT/locki/mise-bin/<version>/
+#   - every tool of $ROOT/locki/mise.toml installed under $ROOT/installs/ ($2=upgrade also moves
 #     `latest` tools to their newest release); a tool the GitHub API keeps from installing
 #     comes from Locki's pinned lockfile instead
-#   - $ROOT/path: the tools' bin folders (`mise bin-paths`, resolved to exact versions) as a
+#   - $ROOT/locki/path: the tools' bin folders (`mise bin-paths`, resolved to exact versions) as a
 #     `:<dir>...` PATH suffix, replaced atomically; sandboxes read it on entry
-#   - $ROOT/lib/libatomic.so.1, which node needs and sandboxes load from there
+#   - $ROOT/locki/lib/libatomic.so.1, which node needs and sandboxes load from there
 #   - the `locki-tools` incus profile device mounting $ROOT read-only in every sandbox
 #   - old tool versions pruned once nothing uses them any more
 #
@@ -17,7 +17,9 @@
 # of the unprivileged mise run below: never written to disk, never seen by a sandbox.
 set -eu
 
-ROOT=/var/lib/locki/tools
+## mise's own default system data dir: mise in a sandbox checks $ROOT/installs by itself, so a
+## repo pinning a version installed here uses it instead of installing its own copy
+ROOT=/usr/local/share/mise
 CACHE=/var/lib/locki/tools-cache
 USER=locki-tools
 
@@ -34,19 +36,19 @@ config=$1 mode=$2 fallback_lock=$3
 # MARK: As root: system prerequisites
 
 ## Node 25+ needs libatomic, which distros rarely ship: installed here for node in the VM,
-## and copied to $ROOT/lib for node in the sandboxes (container-setup.sh)
+## and copied to $ROOT/locki/lib for node in the sandboxes (container-setup.sh)
 rpm -q libatomic >/dev/null 2>&1 || dnf install -y -q --setopt install_weak_deps=False libatomic
 
 ## Installs run unprivileged: npm/pipx install scripts must not run as VM root
 id "$USER" >/dev/null 2>&1 || useradd --system --user-group --home-dir "$CACHE" --shell /sbin/nologin "$USER"
-mkdir -p "$ROOT" "$CACHE"
-chown "$USER:$USER" "$ROOT" "$CACHE"
-chmod 755 "$ROOT"
-mkdir -p "$ROOT/lib"
+mkdir -p "$ROOT/locki/lib" "$CACHE"
+chown "$USER:$USER" "$ROOT" "$ROOT/locki" "$CACHE"
+chmod 755 "$ROOT" "$ROOT/locki"
 libatomic=$(ldconfig -p | awk '/libatomic\.so\.1 /{print $NF; exit}')
-[ -z "$libatomic" ] || cp -fL "$libatomic" "$ROOT/lib/libatomic.so.1"
+[ -z "$libatomic" ] || cp -fL "$libatomic" "$ROOT/locki/lib/libatomic.so.1"
 
-if command -v incus >/dev/null 2>&1 && ! incus profile device get default locki-tools path >/dev/null 2>&1; then
+if command -v incus >/dev/null 2>&1 && [ "$(incus profile device get default locki-tools path 2>/dev/null)" != "$ROOT" ]; then
+  incus profile device remove default locki-tools >/dev/null 2>&1 || true
   incus profile device add default locki-tools disk source="$ROOT" path="$ROOT" readonly=true \
     || echo "Could not mount the sandbox tools into sandboxes (incus profile device add failed)" >&2
 fi
@@ -54,7 +56,7 @@ fi
 # MARK: As $USER: mise, tools, PATH
 
 printf '%s' "$config" | base64 -d > "$CACHE/mise.toml.new"
-## The fallback lockfile must not sit beside $ROOT/mise.toml: mise would then pin every run to it
+## The fallback lockfile must not sit beside $ROOT/locki/mise.toml: mise would then pin every run to it
 mkdir -p "$CACHE/fallback"
 printf '%s' "$config" | base64 -d > "$CACHE/fallback/mise.toml"
 printf '%s' "$fallback_lock" | base64 -d > "$CACHE/fallback/mise.lock"
@@ -70,23 +72,26 @@ printf '%s\n' "$token" | runuser -u "$USER" -- env -i \
 IFS= read -r t || true
 [ -z "$t" ] || export MISE_GITHUB_TOKEN="$t"
 unset t
-mise_dir="$ROOT/mise-bin/$MISE_VERSION"
+mise_dir="$ROOT/locki/mise-bin/$MISE_VERSION"
 if ! test -x "$mise_dir/mise"; then
   tmp=$(mktemp -d "$CACHE/.mise-XXXXXX")
   trap "rm -rf $tmp" EXIT
   curl -fsSL --retry 3 -o "$tmp/mise.tar.gz" "https://mise.jdx.dev/v$MISE_VERSION/mise-v$MISE_VERSION-linux-$ARCH.tar.gz"
   [ "$(sha256sum "$tmp/mise.tar.gz" | cut -d" " -f1)" = "$CHECKSUM" ] || { echo "mise checksum mismatch" >&2; exit 1; }
   tar -xzf "$tmp/mise.tar.gz" -C "$tmp"
-  mkdir -p "$ROOT/mise-bin"
+  mkdir -p "$ROOT/locki/mise-bin"
   rm -rf "$mise_dir" && mv "$tmp/mise/bin" "$mise_dir"
 fi
 
-mv "$CACHE/mise.toml.new" "$ROOT/mise.toml"
+mv "$CACHE/mise.toml.new" "$ROOT/locki/mise.toml"
 export PATH="$mise_dir:$PATH"
-export MISE_DATA_DIR="$ROOT/mise" MISE_CACHE_DIR="$CACHE/mise" MISE_STATE_DIR="$CACHE/mise-state" \
-  MISE_CONFIG_DIR="$CACHE/mise-config" MISE_GLOBAL_CONFIG_FILE="$ROOT/mise.toml" MISE_SYSTEM_CONFIG_FILE="$CACHE/no-system-config.toml" \
+## Shims stay out of $ROOT: a sandbox would take them for its own system shim farm. $ROOT is the
+## default mise system data dir, so its installs count as system ones, with system shims.
+export MISE_DATA_DIR="$ROOT" MISE_CACHE_DIR="$CACHE/mise" MISE_STATE_DIR="$CACHE/mise-state" \
+  MISE_SHIMS_DIR="$CACHE/shims" MISE_SYSTEM_SHIMS_DIR="$CACHE/system-shims" \
+  MISE_CONFIG_DIR="$CACHE/mise-config" MISE_GLOBAL_CONFIG_FILE="$ROOT/locki/mise.toml" MISE_SYSTEM_CONFIG_FILE="$CACHE/no-system-config.toml" \
   MISE_YES=1 MISE_NODE_VERIFY=false MISE_PROVENANCE_API_FAILURES_FATAL=false \
-  UV_PYTHON_INSTALL_DIR="$ROOT/uv-python" UV_CACHE_DIR="$CACHE/uv" UV_SYSTEM_CERTS=1 npm_config_cache="$CACHE/npm"
+  UV_PYTHON_INSTALL_DIR="$ROOT/locki/uv-python" UV_CACHE_DIR="$CACHE/uv" UV_SYSTEM_CERTS=1 npm_config_cache="$CACHE/npm"
 
 ## A rejected token (expired, revoked) must not cost the anonymous access it replaces:
 ## on a 401, warn and retry once without it, for this and every later step.
@@ -132,12 +137,15 @@ done
   mise bin-paths | while IFS= read -r dir; do
     if real=$(readlink -e "$dir"); then printf ":%s" "$real"; else echo "Sandbox tool folder missing: $dir" >&2; fi
   done
-} > "$ROOT/path.new" || rc=1
-mv "$ROOT/path.new" "$ROOT/path"
+} > "$ROOT/locki/path.new" || rc=1
+mv "$ROOT/locki/path.new" "$ROOT/locki/path"
 exit "$rc"
 ' || rc=$?
 
 # MARK: As root: prune versions nothing uses
+
+## Left by earlier runs, or by mise defaulting to it; see MISE_SYSTEM_SHIMS_DIR above
+rm -rf "$ROOT/shims"
 
 ## Sandboxes are containers in this VM, so /proc here lists every sandbox process. A tool
 ## version is in use while any process runs it (exe), maps its libraries (maps), runs a
@@ -146,12 +154,12 @@ exit "$rc"
 ## depend on it too: a pipx venv (poetry) links to its python and records it as `home`.
 ## Links within a version, like fd and uv shipping links to themselves, do not count.
 ## Installs change only under the tools lock (services/tools.py), so nothing races this.
-installs="$ROOT/mise/installs"
+installs="$ROOT/installs"
 seg="[^/:[:cntrl:][:space:]]*"
 vdir() { printf "%s\n" "$1" | grep -o "^$installs/$seg/$seg" || true; }
 in_use=$(mktemp)
 {
-  tr ":" "\n" < "$ROOT/path" || true
+  tr ":" "\n" < "$ROOT/locki/path" || true
   find /proc -mindepth 2 -maxdepth 2 -name exe -printf "%l\n" 2>/dev/null || true
   grep -aho "$installs/$seg/$seg" /proc/[0-9]*/maps /proc/[0-9]*/cmdline /proc/[0-9]*/environ 2>/dev/null || true
   find "$installs" -type l -lname "$installs/*" 2>/dev/null | while IFS= read -r link; do

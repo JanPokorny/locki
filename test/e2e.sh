@@ -324,8 +324,17 @@ assert_ok "every tool command resolves" locki x -m "$RELEASE" sh -c \
 # its launcher chmods the bundled binary on first run, which the read-only mount refuses
 assert_ok "agent-browser's native binary runs from the read-only tools" locki x -m "$RELEASE" sh -c \
     '"$(locki-command-real agent-browser)" --version'
-assert_output "codex comes from the VM tools" "/var/lib/locki/tools/" locki x -m "$RELEASE" sh -c 'command -v codex'
-assert_fail "tools mount is read-only" locki x -m "$RELEASE" touch /var/lib/locki/tools/pwned
+assert_output "codex comes from the VM tools" "/usr/local/share/mise/" locki x -m "$RELEASE" sh -c 'command -v codex'
+assert_fail "tools mount is read-only" locki x -m "$RELEASE" touch /usr/local/share/mise/pwned
+# A repo pin matching a VM install uses it in place (mise checks its system installs by itself),
+# and the repo's mise environment puts it first on PATH in any bash, without a shim.
+assert_ok "repo pin reuses the VM install, first on PATH" locki x -m "$RELEASE" bash -c '
+    v=$(jq --version | cut -d- -f2) && mkdir -p /tmp/pin && cd /tmp/pin &&
+    printf "[tools]\njq = \"%s\"\n" "$v" > mise.toml && mise install -q &&
+    ! test -e /usr/share/mise/installs/jq &&
+    bash -c "cd /tmp/pin && command -v jq" | grep -q "^/usr/local/share/mise/installs/jq/"'
+assert_ok "cd into a pinned dir within one command switches the environment" locki x -m "$RELEASE" bash -c \
+    'cd / && cd /tmp/pin && command -v jq | grep -q "^/usr/local/share/mise/installs/jq/"'
 assert_ok "npm i -g writes outside the read-only tools" locki x -m "$RELEASE" sh -c \
     'npm i -g -s cowsay && test -x /usr/local/bin/cowsay'
 assert_ok "corepack pnpm runs outside the read-only tools" locki x -m "$RELEASE" pnpm --version

@@ -1,10 +1,11 @@
 """Sandbox tools: AI harnesses and CLIs, installed once in the VM and shared read-only.
 
-The VM installs every tool with mise (data/tools-sync.sh) under TOOLS_ROOT, which every
-sandbox mounts read-only at the same path. The tools' bin folders (`mise bin-paths`) are
-appended to the sandbox PATH on each entry, from TOOLS_PATH_FILE. A binary the image ships
-itself therefore wins, and repo-level mise inside the sandbox still takes precedence for
-anything the repo pins.
+The VM installs every tool with mise (data/tools-sync.sh) into TOOLS_ROOT, mise's default
+system data dir, which every sandbox mounts read-only at the same path. The tools' bin folders
+(`mise bin-paths`) are appended to the sandbox PATH on each entry, from TOOLS_PATH_FILE, so a
+binary the image ships itself wins. mise in the sandbox checks TOOLS_ROOT/installs by itself:
+a repo pinning a version installed there uses it in place, and every bash loads the repo's
+mise environment (container-setup.sh), so the pin takes precedence without a shim.
 
 Sandboxes never install or update these tools themselves: the host syncs the VM before
 entering a sandbox, installing what is missing and upgrading to the newest releases at
@@ -27,9 +28,9 @@ from locki.services.daemon import VERSION
 from locki.services.vm import vm
 from locki.utils import file_lock, run_command
 
-TOOLS_ROOT = "/var/lib/locki/tools"
+TOOLS_ROOT = "/usr/local/share/mise"
 # `:<dir>...`, appended to the sandbox PATH (read in the VM on each entry, so always current)
-TOOLS_PATH_FILE = f"{TOOLS_ROOT}/path"
+TOOLS_PATH_FILE = f"{TOOLS_ROOT}/locki/path"
 
 UPGRADE_INTERVAL = 3600
 RETRY_INTERVAL = 300
