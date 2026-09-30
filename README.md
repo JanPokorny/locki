@@ -109,6 +109,8 @@ Each sandbox gets its own [worktree](https://git-scm.com/docs/git-worktree) (a f
 
 - Ask your agent to forward ports, or use `locki port-forward` for more control.
 
+- The AI harnesses ship new releases often, and new models usually need the latest one. Locki upgrades them before entering a sandbox, at most hourly; run `locki vm update-tools` to get a release right away. Those upgrades call the GitHub API, which allows only 60 anonymous requests per hour, so Locki passes it your `GITHUB_TOKEN` / `GH_TOKEN`, or else `gh auth token`. The token only reaches the VM's install run, never a sandbox. A [fine-grained token](https://github.com/settings/personal-access-tokens/new) with no permissions is enough and is the safest choice, since `gh auth token` has your full access.
+
 - Locki sandboxes provide [Mise](https://mise.jdx.dev) for tool version management -- replacing `nvm`, `rbenv`, `brew` etc. with a single tool. Adding `mise.toml` to your repo with tool versions and task definitions will help agents and humans alike: ask your agent to do it!
 
 - Want to use custom AI configuration in the VM -- instructions, skills, MCP servers, ...? Sandboxes share a home folder accessible at `~/.local/share/locki/home` on host (or `$XDG_DATA_HOME/locki/home`). For example, you can edit `~/.local/share/locki/home/.claude/CLAUDE.md` for sandbox-specific instructions.
@@ -162,7 +164,7 @@ Locki may not provide perfect security, however it is certainly much better than
 - **A host daemon** provides the `git`/`gh`/port-forward command bridge (over an SSH forced command bound to loopback) and idles containers and the VM back down when unused.
 - **Shared caches across all sandboxes** keep repeat work fast: a pull-through container-registry cache (nginx), a shared BuildKit daemon (Docker layers cached across sandboxes), package caches for [Mise](https://mise.jdx.dev), cargo, npm/pnpm, pip/uv, go, and more, plus GitHub-release and k3s-installer caching.
 - **btrfs with [bees](https://github.com/Zygo/bees) deduplication** for the container pool, so many similar sandboxes cost little disk. `node_modules` and `.venv` are redirected to the shared cache via a per-sandbox symlink (so opening a worktree on the host shows a symlink, not a real directory).
-- **[Mise](https://mise.jdx.dev)** provides on-demand, version-managed tools inside each sandbox.
+- **Sandbox tools** (the AI harnesses, `node`, `python`, `uv`, `jq`, `kubectl`, ... and [Mise](https://mise.jdx.dev) itself) are installed once in the VM by Mise and mounted read-only into every sandbox, so a new sandbox starts with all of them and no sandbox can tamper with them. Before entering a sandbox, Locki checks for new releases at most hourly; `locki vm update-tools` upgrades right away. Inside a sandbox, Mise still installs whatever a repo's own `mise.toml` pins.
 
 &nbsp;
 

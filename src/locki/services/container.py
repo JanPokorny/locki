@@ -14,6 +14,7 @@ from locki.config import load_config
 from locki.paths import PACKAGE_DATA, WORKTREES
 from locki.runes import INFO
 from locki.services.daemon import VERSION
+from locki.services.tools import TOOLS_BIN
 from locki.services.vm import INTERCEPTED_HOSTS, vm
 from locki.services.worktree import WorktreeInfo
 from locki.utils import fail, file_lock
@@ -100,6 +101,8 @@ class ContainerService:
             "COREPACK_ENABLE_DOWNLOAD_PROMPT": "0",
             "COURSIER_CACHE": "/var/cache/locki/coursier",
             "DENO_DIR": "/var/cache/locki/deno",
+            # the VM keeps Claude Code up to date (services/tools.py); its install is read-only
+            "DISABLE_AUTOUPDATER": "1",
             "GOCACHE": "/var/cache/locki/go/build",
             "GOMODCACHE": "/var/cache/locki/go/mod",
             "GRADLE_USER_HOME": "/var/cache/locki/gradle",
@@ -114,22 +117,18 @@ class ContainerService:
             "MISE_CACHE_DIR": "/var/cache/locki/mise",
             "MISE_DATA_DIR": "/usr/share/mise",
             "MISE_GLOBAL_CONFIG_FILE": "/opt/locki/mise.toml",
-            "MISE_INSTALL_PATH": "/usr/local/bin/mise",
             "MISE_NODE_VERIFY": "false",
-            # Provenance stays on, but an unreachable/rate-limited api.github.com must not be
-            # fatal -- lazy tools install from the shipped lockfile, and checksums still hold.
+            # Provenance stays on, but an unreachable/rate-limited api.github.com must not
+            # fail installs of repo-pinned tools -- checksums still hold.
             "MISE_PROVENANCE_API_FAILURES_FATAL": "false",
-            # Locki's lazy tools: bootstrap shims go to the end of PATH, installs join the
-            # user's (see container-setup.sh)
-            "MISE_SYSTEM_CONFIG_FILE": "/opt/locki/lazy/mise.toml",
-            "MISE_SYSTEM_INSTALLS_DIR": "/usr/share/mise/installs",
-            "MISE_SYSTEM_SHIMS_DIR": "/opt/locki/bin/lazy",
             "MISE_TRUSTED_CONFIG_PATHS": "/",
             "MIX_HOME": "/var/cache/locki/mix",
             "NIMBLE_DIR": "/var/cache/locki/nimble",
             "npm_config_cache": "/var/cache/locki/npm",
+            # node comes read-only from the VM (services/tools.py); `npm i -g` lands here instead
+            "npm_config_prefix": "/usr/local",
             "NUGET_PACKAGES": "/var/cache/locki/nuget",
-            "PATH": "/opt/locki/bin/high:/root/.local/bin:/usr/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/locki/bin/low:/opt/locki/bin/lazy",
+            "PATH": f"/opt/locki/bin/high:/root/.local/bin:/usr/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/locki/bin/low:{TOOLS_BIN}",
             "PIP_CACHE_DIR": "/var/cache/locki/pip",
             "POETRY_VIRTUALENVS_PATH": f"{SCOPED_CACHE}/{worktree.wt_id}/poetry-venvs",
             "POETRY_VIRTUALENVS_IN_PROJECT": "false",
@@ -264,7 +263,6 @@ class ContainerService:
                     .read_bytes()
                     .replace(b"__INTERCEPTED_HOSTS__", " ".join(INTERCEPTED_HOSTS).encode())
                     .replace(b"__AGENTS_MD_B64__", base64.b64encode((PACKAGE_DATA / "AGENTS.md").read_bytes()))
-                    .replace(b"__MISE_LOCK_B64__", base64.b64encode((PACKAGE_DATA / "mise.lock").read_bytes()))
                     .replace(
                         b"__LIBATOMIC_B64__",
                         base64.b64encode((PACKAGE_DATA / "libatomic.so.1").read_bytes())

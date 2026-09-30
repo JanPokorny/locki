@@ -304,41 +304,52 @@ assert_ok "uv init + sync works" locki x -m "$RELEASE" bash -c 'uv init -q --nam
 assert_output "uv .venv is a symlink into the sandbox-scoped cache" "/var/cache/locki/scoped/$RELEASE/uv-venvs" \
     locki x -m "$RELEASE" readlink .venv
 
-# ── python shims ─────────────────────────────────────────────────────────────
-# Base fedora image ships no python3 (dnf5 dropped the dependency); the shims
-# must auto-install it via mise so e.g. python3-based Claude Code hooks work.
+# ── sandbox tools from the VM ────────────────────────────────────────────────
+# AI harnesses and CLIs are installed once in the VM and mounted read-only into every
+# sandbox (services/tools.py). Base fedora ships no python3 (dnf5 dropped it), so python
+# must come from there too, e.g. for python3-based Claude Code hooks.
 
 echo
-echo "Testing python/pip shims..."
+echo "Testing sandbox tools from the VM..."
 
-assert_output "python3 shim auto-installs and runs" "py-ok" locki x -m "$RELEASE" python3 -c 'print("py-ok")'
+assert_output "python3 from the VM runs" "py-ok" locki x -m "$RELEASE" python3 -c 'print("py-ok")'
 assert_ok "python resolves" locki x -m "$RELEASE" python --version
 assert_ok "pip3 resolves" locki x -m "$RELEASE" pip3 --version
 assert_ok "pip resolves" locki x -m "$RELEASE" pip --version
-
-# ── mise + node preinstalled ─────────────────────────────────────────────────
-# Container setup installs mise and node eagerly (node is declared without `lazy`).
-
-assert_ok "mise + node preinstalled by container setup" locki x -m "$RELEASE" sh -c 'locki-command-real mise && locki-command-real node'
-
-# ── tool installs without the GitHub API ─────────────────────────────────────
-# /opt/locki/lazy/mise.lock pins each lazy tool's version, URL and checksum, so installs
-# never call api.github.com — whose 60/hr anonymous limit every sandbox shares. When
-# that broke, the docker shim silently stopped pinning local base images.
-
-echo
-echo "Testing tool installs with the GitHub API unreachable..."
-
-NOAPI=$(new_sandbox_id)
-locki x -m "$NOAPI" sh -c 'echo "0.0.0.0 api.github.com" >> /etc/hosts'
-assert_ok     "lockfile shipped into the sandbox" locki x -m "$NOAPI" test -s /opt/locki/lazy/mise.lock
+assert_ok "mise + node available" locki x -m "$RELEASE" sh -c 'locki-command-real mise && locki-command-real node'
+assert_ok "every tool command is in the VM tools" locki x -m "$RELEASE" sh -c \
+    'for c in claude codex pi opencode copilot agy agent-browser corepack jq yq rg fd k9s kubectl uv uvx poetry bun npm npx; do
+       test -x "/var/lib/locki/tools/bin/$c" || { echo "missing: $c" >&2; exit 1; }
+     done'
+assert_fail "tools mount is read-only" locki x -m "$RELEASE" touch /var/lib/locki/tools/bin/pwned
+assert_ok "npm i -g writes outside the read-only tools" locki x -m "$RELEASE" sh -c \
+    'npm i -g -s cowsay && test -x /usr/local/bin/cowsay'
+assert_ok "corepack pnpm installs outside the read-only tools" locki x -m "$RELEASE" pnpm --version
 # Verification must stay on: disabling it sandbox-wide breaks any repo whose own
 # lockfile records provenance ("Lockfile requires ... but no verification was used").
 assert_output "provenance verification stays enabled" "true" \
-    locki x -m "$NOAPI" mise settings get github_attestations
-assert_output "aqua-backend tool installs (jq)" "jq-1" locki x -m "$NOAPI" jq --version
-assert_output "github-backend tool installs (dockerfile-json)" "alpine:3.20" \
+    locki x -m "$RELEASE" mise settings get github_attestations
+
+# ── tools work without the GitHub API in the sandbox ─────────────────────────
+# Sandboxes never resolve or download Locki's tools themselves. When they did, the shared
+# 60/hr anonymous limit broke the docker shim's pinning of local base images.
+
+echo
+echo "Testing sandbox tools with the GitHub API unreachable..."
+
+NOAPI=$(new_sandbox_id)
+locki x -m "$NOAPI" sh -c 'echo "0.0.0.0 api.github.com" >> /etc/hosts'
+assert_output "jq runs" "jq-1" locki x -m "$NOAPI" jq --version
+assert_output "dockerfile-json runs" "alpine:3.20" \
     locki x -m "$NOAPI" sh -c 'printf "FROM alpine:3.20\n" >/tmp/D; dockerfile-json -quiet /tmp/D'
+
+# ── tools sync skips when nothing is due ─────────────────────────────────────
+
+echo
+echo "Testing sandbox tools sync..."
+
+assert_fail "no tools sync on a warm entry" sh -c "locki x -m '$RELEASE' true 2>&1 | grep -q 'sandbox tools'"
+assert_ok "forced upgrade succeeds" locki vm update-tools
 
 # ── cache symlinks git-ignored per-worktree ──────────────────────────────────
 # "node_modules/" style .gitignore rules don't match symlinks; the per-worktree
@@ -840,7 +851,7 @@ fi
 
 # ── nested auto-install must not deadlock (reentrant lock) ───────────────────
 # Regression: a shim's install command can invoke another shim that auto-installs
-# (e.g. `mise use` -> install mise), re-entering locki-auto-install. flock is not
+# (e.g. corepack), re-entering locki-auto-install. flock is not
 # reentrant, so without an outermost-only lock the nested call deadlocks on the
 # lock its own ancestor holds — freezing installs in *every* sandbox (shared cache).
 echo
