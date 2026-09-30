@@ -4,14 +4,15 @@
 # Runs in the VM as root (see services/tools.py). Idempotent; every run converges the VM:
 #   - mise itself (pinned below) under $ROOT/mise-bin/<version>/
 #   - every tool of $ROOT/mise.toml installed under $ROOT/mise/ ($2=upgrade also moves
-#     `latest` tools to their newest release)
+#     `latest` tools to their newest release); a tool the GitHub API keeps from installing
+#     comes from Locki's pinned lockfile instead
 #   - $ROOT/path: the tools' bin folders (`mise bin-paths`, resolved to exact versions) as a
 #     `:<dir>...` PATH suffix, replaced atomically; sandboxes read it on entry
 #   - $ROOT/lib/libatomic.so.1, which node needs and sandboxes load from there
 #   - the `locki-tools` incus profile device mounting $ROOT read-only in every sandbox
 #   - old tool versions pruned once nothing uses them any more
 #
-# Args: $1 mise.toml (base64), $2 "upgrade" or "".
+# Args: $1 mise.toml (base64), $2 "upgrade" or "", $3 the pinned fallback mise.lock (base64).
 # Stdin: a GitHub token line, possibly empty. It is only ever held in the environment
 # of the unprivileged mise run below: never written to disk, never seen by a sandbox.
 set -eu
@@ -28,7 +29,7 @@ case "$(uname -m)" in
 esac
 
 IFS= read -r token || true
-config=$1 mode=$2
+config=$1 mode=$2 fallback_lock=$3
 
 # MARK: As root: system prerequisites
 
@@ -53,7 +54,11 @@ fi
 # MARK: As $USER: mise, tools, PATH
 
 printf '%s' "$config" | base64 -d > "$CACHE/mise.toml.new"
-chown "$USER:$USER" "$CACHE/mise.toml.new"
+## The fallback lockfile must not sit beside $ROOT/mise.toml: mise would then pin every run to it
+mkdir -p "$CACHE/fallback"
+printf '%s' "$config" | base64 -d > "$CACHE/fallback/mise.toml"
+printf '%s' "$fallback_lock" | base64 -d > "$CACHE/fallback/mise.lock"
+chown -R "$USER:$USER" "$CACHE/mise.toml.new" "$CACHE/fallback"
 
 ## The token goes through a pipe: in argv or a file, other VM processes could read it
 cd /
@@ -94,10 +99,24 @@ run_mise() {
   mise "$@"
 }
 
-## One failing tool must not keep the others from installing or upgrading
+## One failing tool must not keep the others from installing or upgrading. A failed install
+## only counts if the fallback below cannot make up for it either.
 rc=0
-run_mise install || rc=1
+run_mise install || true
 if [ "$MODE" = upgrade ]; then run_mise upgrade || rc=1; fi
+
+## Resolving a version goes through the GitHub API for most tools, so an outage, a blocked
+## api.github.com or a spent rate limit leaves tools uninstalled. Those install from the Locki
+## pinned lockfile (MISE_LOCKED: its URLs and checksums need no API), at a possibly older
+## version; the next sync that reaches the API upgrades them. Installed tools just stay.
+missing=$(mise ls --missing 2>/dev/null | cut -d" " -f1)
+if [ -n "$missing" ]; then
+  # shellcheck disable=SC2086
+  if MISE_GLOBAL_CONFIG_FILE="$CACHE/fallback/mise.toml" MISE_LOCKED=true mise install $missing; then
+    echo "Installed from Locki pinned versions (GitHub API unavailable):" $missing >&2
+  fi
+  [ -z "$(mise ls --missing 2>/dev/null)" ] || rc=1
+fi
 
 ## npm packages that bundle a native binary (agent-browser) often ship it non-executable and
 ## chmod it on first run, which the read-only sandbox mount then refuses. Do it here instead.

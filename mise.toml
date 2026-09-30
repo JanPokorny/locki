@@ -103,6 +103,22 @@ fetch macosx_12_0_arm64      Darwin-arm64  &
 for job in $(jobs -p); do wait "$job"; done
 '''
 
+[tasks.lock-tools]
+description = "Regenerate the sandbox tools' fallback lockfile (pinned resolutions for when the GitHub API is unavailable)"
+run = '''
+#!/usr/bin/env bash
+set -euxo pipefail
+tmpdir=$(mktemp -d)
+trap 'rm -rf "$tmpdir"' EXIT
+# single source: the VM's mise config, as services/tools.py generates it
+uv run python -c 'from locki.services.tools import _mise_toml; print(_mise_toml())' >"$tmpdir/mise.toml"
+mise trust -q "$tmpdir"
+# Sandboxes are glibc Linux; mise throws in a few musl/baseline variants regardless, which is
+# harmless. Needs GitHub API access (a token avoids its rate limit), or entries come out without URLs.
+(cd "$tmpdir" && mise lock --platform linux-x64,linux-arm64)
+cp "$tmpdir/mise.lock" src/locki/data/tools.lock
+'''
+
 [tasks.build]
 description = "Build sdist, universal wheel, and platform-specific wheels with bundled limactl"
 depends = ["setup", "build:*"]

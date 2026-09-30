@@ -66,6 +66,10 @@ TOOLS = [
 
 _SYNC_STATE = STATE / "tools-sync.json"
 
+# Pinned resolutions (URL + checksum) for tools the GitHub API keeps from installing, see
+# tools-sync.sh. Regenerate with `mise run lock-tools`; versions are as old as that run.
+_FALLBACK_LOCK = PACKAGE_DATA / "tools.lock"
+
 
 def _mise_toml() -> str:
     return f"[settings]\nminimum_release_age_excludes = {json.dumps(HARNESSES)}\n\n[tools]\n" + "".join(
@@ -90,7 +94,7 @@ class ToolsService:
         list or sync script (e.g. a Locki upgrade), or a recreated VM."""
         lima_yaml = LIMA / "locki" / "lima.yaml"
         vm_id = str(lima_yaml.stat().st_mtime_ns) if lima_yaml.exists() else ""
-        script = (PACKAGE_DATA / "tools-sync.sh").read_bytes()
+        script = (PACKAGE_DATA / "tools-sync.sh").read_bytes() + _FALLBACK_LOCK.read_bytes()
         return hashlib.sha256(json.dumps([VERSION, vm_id, TOOLS]).encode() + script).hexdigest()
 
     def _state(self) -> dict:
@@ -120,6 +124,7 @@ class ToolsService:
                     "tools-sync",
                     base64.b64encode(_mise_toml().encode()).decode(),
                     "upgrade" if upgrade else "",
+                    base64.b64encode(_FALLBACK_LOCK.read_bytes()).decode(),
                 ],
                 "Installing sandbox tools" if fresh else "Updating sandbox tools",
                 input=f"{github_token()}\n".encode(),
@@ -133,6 +138,9 @@ class ToolsService:
                     " sandbox tools were updated without it, at GitHub's anonymous rate limit.",
                     err=True,
                 )
+            for line in result.stderr.decode(errors="replace").splitlines():
+                if line.startswith("Installed from Locki pinned versions"):
+                    click.echo(f"{WARNING} {line}; they update once the API works again.", err=True)
             if result.returncode == 0 and fresh:
                 click.echo(f"{SUCCESS} Installed sandbox tools", err=True)
             if result.returncode != 0:
