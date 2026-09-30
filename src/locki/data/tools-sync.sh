@@ -6,8 +6,8 @@
 #   - every tool of $ROOT/locki/mise.toml installed under $ROOT/installs/ ($2=upgrade also moves
 #     `latest` tools to their newest release); a tool the GitHub API keeps from installing
 #     comes from Locki's pinned lockfile instead
-#   - $ROOT/locki/path: the tools' bin folders (`mise bin-paths`, resolved to exact versions) as a
-#     `:<dir>...` PATH suffix, replaced atomically; sandboxes read it on entry
+#   - $ROOT/locki/tools.toml: the mise system config of the sandboxes, pinning the exact installed
+#     versions, replaced atomically; $ROOT/locki/bin/mise, the mise binary they run
 #   - $ROOT/locki/lib/libatomic.so.1, which node needs and sandboxes load from there
 #   - the `locki-tools` incus profile device mounting $ROOT read-only in every sandbox
 #   - old tool versions pruned once nothing uses them any more
@@ -53,7 +53,7 @@ if command -v incus >/dev/null 2>&1 && [ "$(incus profile device get default loc
     || echo "Could not mount the sandbox tools into sandboxes (incus profile device add failed)" >&2
 fi
 
-# MARK: As $USER: mise, tools, PATH
+# MARK: As $USER: mise, tools, sandbox config
 
 printf '%s' "$config" | base64 -d > "$CACHE/mise.toml.new"
 ## The fallback lockfile must not sit beside $ROOT/locki/mise.toml: mise would then pin every run to it
@@ -129,16 +129,21 @@ find "$MISE_DATA_DIR/installs" -type f ! -perm -u+x -size +8k 2>/dev/null | whil
   if [ "$(head -c 4 "$f" | od -An -c | tr -d " ")" = "177ELF" ]; then chmod a+x "$f"; fi
 done
 
-## Exact versions, not the `latest` links of mise: some bin folders are named after the version
-## (ripgrep-<version>-<target>), and a running session keeps its PATH until it exits. The
-## pruning below keeps the old versions for exactly as long as such sessions live.
+## The mise system config of the sandboxes: mise there loads it in every bash (container-setup.sh),
+## so these tools are on PATH without shims, behind any version the repo pins. Exact versions,
+## not `latest`: they resolve offline, and a session keeps the ones it started with until it
+## exits (the pruning below waits for it). _.path keeps the Locki shims ahead of every tool.
 {
-  printf ":%s" "$mise_dir"
-  mise bin-paths | while IFS= read -r dir; do
-    if real=$(readlink -e "$dir"); then printf ":%s" "$real"; else echo "Sandbox tool folder missing: $dir" >&2; fi
+  printf "[env]\n_.path = [\"/opt/locki/bin/high\"]\n\n[tools]\n"
+  mise ls --current --installed --no-header | while read -r tool version _; do
+    printf "\"%s\" = \"%s\"\n" "$tool" "$version"
   done
-} > "$ROOT/locki/path.new" || rc=1
-mv "$ROOT/locki/path.new" "$ROOT/locki/path"
+} > "$ROOT/locki/tools.toml.new" || rc=1
+mv "$ROOT/locki/tools.toml.new" "$ROOT/locki/tools.toml"
+mkdir -p "$ROOT/locki/bin"
+ln -sfn "../mise-bin/$MISE_VERSION/mise" "$ROOT/locki/bin/.mise.new"
+mv -T "$ROOT/locki/bin/.mise.new" "$ROOT/locki/bin/mise"
+rm -f "$ROOT/locki/path"
 exit "$rc"
 ' || rc=$?
 
@@ -159,7 +164,6 @@ seg="[^/:[:cntrl:][:space:]]*"
 vdir() { printf "%s\n" "$1" | grep -o "^$installs/$seg/$seg" || true; }
 in_use=$(mktemp)
 {
-  tr ":" "\n" < "$ROOT/locki/path" || true
   find /proc -mindepth 2 -maxdepth 2 -name exe -printf "%l\n" 2>/dev/null || true
   grep -aho "$installs/$seg/$seg" /proc/[0-9]*/maps /proc/[0-9]*/cmdline /proc/[0-9]*/environ 2>/dev/null || true
   find "$installs" -type l -lname "$installs/*" 2>/dev/null | while IFS= read -r link; do

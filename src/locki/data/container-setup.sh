@@ -30,17 +30,23 @@ fi
 
 # MARK: Sandbox tools
 ## Nothing to install: AI harnesses, CLIs, node and mise itself come from the VM, mounted read-only
-## at /usr/local/share/mise (mise's default system data dir), their bin folders at the end of PATH
-## (see services/tools.py). A repo's pins resolve to those installs when they match, and install
-## into the sandbox (/usr/share/mise) when they don't.
+## at /usr/local/share/mise (mise's default system data dir) and listed at their exact versions in
+## the mise system config (MISE_SYSTEM_CONFIG_FILE, see services/tools.py). A repo's pins resolve
+## to those installs when they match, and install into the sandbox (/usr/share/mise) when they don't.
 
-## Every bash loads the mise environment of its working directory: agents' command shells
-## through BASH_ENV (non-interactive), login and interactive ones through profile.d. So the repo's
-## pinned tools come first on PATH without shims, including versions only the VM has installed,
-## which get no shim in the sandbox. `mise activate` also follows `cd` within one command.
-## Locki's own bash shims skip it: they only look up the real binary.
+## No shims: every bash loads the mise environment of its working directory, agents' command shells
+## through BASH_ENV (non-interactive), login and interactive ones through profile.d, and the entry
+## command runs under one too (ContainerService.exec_interactive). That puts the repo's pins, then
+## Locki's tools, on PATH, behind /opt/locki/bin/high (the `_.path` of the system config), and
+## `mise activate` follows `cd` and config changes. A pinned version missing everywhere installs
+## on first use, through mise's command-not-found handler (not_found_auto_install).
+## /etc/profile of some distros resets PATH: a login shell restores the Locki entries first.
+## Locki's own bash shims skip all this: they only look up the real binary.
 cat > /etc/profile.d/locki-mise.sh << 'EOF'
 case "$0" in /opt/locki/bin/*) ;; *)
+  case ":$PATH:" in *:/opt/locki/bin/high:*) ;; *)
+    PATH="/opt/locki/bin/high:/root/.local/bin:$PATH:/usr/local/share/mise/locki/bin:/opt/locki/bin/low" ;;
+  esac
   if [ -n "${BASH_VERSION:-}" ] && [ -z "${__LOCKI_MISE_ACTIVE:-}" ] && command -v mise >/dev/null 2>&1; then
     __LOCKI_MISE_ACTIVE=1
     eval "$(mise activate bash)"
@@ -88,11 +94,11 @@ urlretrieve(sys.argv[1], sys.argv[2])' "$1" "$2"
 else echo "[Locki] Error: no HTTP client found (need curl, wget, or python3)" >&2; exit 1; fi
 EOF
 
-## locki-command-real: the binary a Locki shim stands in for. A repo-pinned (mise) version first,
-## else PATH without the shims: Locki's own (/opt/locki/bin/*) and mise's (they may auto-install).
+## locki-command-real: the binary a Locki shim stands in for. The mise version first (a repo pin,
+## else Locki's tool), else PATH without Locki's own shims (/opt/locki/bin/*).
 cat > /opt/locki/bin/high/locki-command-real << 'EOF'
 #!/bin/sh
-mise which "$1" 2>/dev/null || PATH=$(printf '%s' "$PATH" | tr ':' '\n' | grep -v -e '^/opt/locki/bin/' -e '/mise/shims' | paste -sd:) command -v "$1" || exit 1
+mise which "$1" 2>/dev/null || PATH=$(printf '%s' "$PATH" | tr ':' '\n' | grep -v '^/opt/locki/bin/' | paste -sd:) command -v "$1" || exit 1
 EOF
 
 ## locki-node-modules-redirect: point the project's node_modules at the btrfs cache

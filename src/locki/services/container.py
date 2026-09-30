@@ -14,7 +14,7 @@ from locki.config import load_config
 from locki.paths import PACKAGE_DATA, WORKTREES
 from locki.runes import INFO
 from locki.services.daemon import VERSION
-from locki.services.tools import TOOLS_PATH_FILE
+from locki.services.tools import TOOLS_BIN, TOOLS_CONFIG
 from locki.services.vm import INTERCEPTED_HOSTS, vm
 from locki.services.worktree import WorktreeInfo
 from locki.utils import fail, file_lock
@@ -75,6 +75,15 @@ incus rename "$tmp" "$tpl"
 """
 
 
+# Runs the entry command in the mise environment of the worktree (the sandbox tools and the
+# repo's pins), so a harness and everything it runs inherit it: bash loads it through BASH_ENV,
+# see container-setup.sh; without bash, `mise env` gives the same environment once.
+_ENTER = r"""if command -v bash >/dev/null 2>&1; then exec bash -c 'exec "$@"' locki "$@"; fi
+eval "$(mise env 2>/dev/null)"
+exec "$@"
+"""
+
+
 class ContainerService:
     """Per-sandbox Incus containers inside the Locki VM."""
 
@@ -116,11 +125,15 @@ class ContainerService:
             "LOCKI_SCOPED_CACHE": f"{SCOPED_CACHE}/{worktree.wt_id}",
             "LOCKI_WORKTREES_HOME": str(WORKTREES),
             "MAVEN_OPTS": "-Dmaven.repo.local=/var/cache/locki/maven",
+            # no shims: every bash loads the mise environment instead, see container-setup.sh
+            "MISE_ACTIVATE_SHIMS": "false",
             "MISE_GLOBAL_CONFIG_FILE": "/opt/locki/mise.toml",
             "MISE_NODE_VERIFY": "false",
             # Provenance stays on, but an unreachable/rate-limited api.github.com must not
             # fail installs of repo-pinned tools -- checksums still hold.
             "MISE_PROVENANCE_API_FAILURES_FATAL": "false",
+            # Locki's sandbox tools, at the exact versions the VM installed (services/tools.py)
+            "MISE_SYSTEM_CONFIG_FILE": TOOLS_CONFIG,
             "MISE_TRUSTED_CONFIG_PATHS": "/",
             "MIX_HOME": "/var/cache/locki/mix",
             "NIMBLE_DIR": "/var/cache/locki/nimble",
@@ -128,8 +141,8 @@ class ContainerService:
             # node comes read-only from the VM (services/tools.py); `npm i -g` lands here instead
             "npm_config_prefix": "/usr/local",
             "NUGET_PACKAGES": "/var/cache/locki/nuget",
-            # Locki's sandbox tools are appended on entry, see exec_interactive
-            "PATH": "/opt/locki/bin/high:/root/.local/bin:/usr/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/locki/bin/low",
+            # the mise environment adds the tools (and the repo's pins) on entry, see exec_interactive
+            "PATH": f"/opt/locki/bin/high:/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:{TOOLS_BIN}:/opt/locki/bin/low",
             "POETRY_VIRTUALENVS_PATH": f"{SCOPED_CACHE}/{worktree.wt_id}/poetry-venvs",
             "POETRY_VIRTUALENVS_IN_PROJECT": "false",
             "PNPM_HOME": "/usr/share/pnpm",
@@ -399,11 +412,13 @@ class ContainerService:
                         shlex.quote(worktree.wt_id),
                         "--cwd",
                         shlex.quote(str(worktree.path)),
-                        *(f"--env={k}={v}" for k, v in env.items() if k != "PATH"),
-                        # the sandbox tools' bin folders, read in the VM so always as installed right now
-                        f'--env=PATH={env["PATH"]}"$(cat {TOOLS_PATH_FILE} 2>/dev/null)"',
+                        *(f"--env={k}={v}" for k, v in env.items()),
                         *(f'--env={name}="${name}"' for name in self.forwarded_env),
                         "--",
+                        "sh",
+                        "-c",
+                        shlex.quote(_ENTER),
+                        "locki",
                         *(shlex.quote(a) for a in command),
                     ]
                 ),

@@ -335,6 +335,15 @@ assert_ok "repo pin reuses the VM install, first on PATH" locki x -m "$RELEASE" 
     bash -c "cd /tmp/pin && command -v jq" | grep -q "^/usr/local/share/mise/installs/jq/"'
 assert_ok "cd into a pinned dir within one command switches the environment" locki x -m "$RELEASE" bash -c \
     'cd / && cd /tmp/pin && command -v jq | grep -q "^/usr/local/share/mise/installs/jq/"'
+# No shims: a pinned version installed nowhere installs when first run (command-not-found),
+# rather than a different version of it being found further down PATH
+assert_ok "a pin installed nowhere installs on first use" locki x -m "$RELEASE" bash -c '
+    mkdir -p /tmp/pin2 && cd /tmp/pin2 && printf "[tools]\njq = \"1.7.1\"\n" > mise.toml &&
+    bash -c "cd /tmp/pin2 && jq --version" | grep -qx "jq-1.7.1"'
+assert_ok "Locki shims stay first on PATH in a pinned dir" locki x -m "$RELEASE" bash -c \
+    'cd /tmp/pin2 && [ "${PATH%%:*}" = /opt/locki/bin/high ]'
+assert_ok "the entry command runs in the mise environment" locki x -m "$RELEASE" sh -c \
+    'command -v claude | grep -q "^/usr/local/share/mise/installs/"'
 assert_ok "npm i -g writes outside the read-only tools" locki x -m "$RELEASE" sh -c \
     'npm i -g -s cowsay && test -x /usr/local/bin/cowsay'
 assert_ok "corepack pnpm runs outside the read-only tools" locki x -m "$RELEASE" pnpm --version
