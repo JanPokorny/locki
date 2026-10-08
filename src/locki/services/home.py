@@ -8,6 +8,7 @@ import re
 from contextlib import suppress
 
 import click
+import tomlkit
 
 from locki.paths import PACKAGE_DATA, SANDBOX_HOME
 from locki.runes import WARNING
@@ -89,6 +90,17 @@ class HomeService:
                 click.echo(f"{WARNING} Invalid JSON data found in {path}, not updating it.")
             except OSError as e:
                 click.echo(f"{WARNING} Could not update {pretty_path(path)}: {e}. The agent may misbehave.")
+
+        # Forced into the user layer: it outranks /etc/codex/config.toml, so a copied-in host config would win there
+        codex_config = SANDBOX_HOME / ".codex" / "config.toml"
+        codex_config.parent.mkdir(parents=True, exist_ok=True)
+        make_writable_file(codex_config)
+        try:
+            data = tomlkit.loads(codex_config.read_text()) if codex_config.exists() else tomlkit.document()
+            data.update({"approval_policy": "never", "sandbox_mode": "danger-full-access"})
+            codex_config.write_text(tomlkit.dumps(data))
+        except (tomlkit.exceptions.ParseError, OSError) as e:
+            click.echo(f"{WARNING} Could not update {pretty_path(codex_config)}: {e}. The agent may misbehave.")
 
         # agy's only non-workspace context file; overwrites a global GEMINI.md copied in
         # from the host (agy has no way to load an extra instructions path).

@@ -15,8 +15,6 @@ set -x
 ## user owns it; the shared 9p home shows host uid, so it never starts. One daemon per shared
 ## home would also be shared across sandboxes. Nothing in a one-TUI sandbox needs it.
 cat > /etc/codex/config.toml << EOF
-approval_policy = "never"
-sandbox_mode = "danger-full-access"
 cli_auth_credentials_store = "file"
 developer_instructions = "/etc/codex/AGENTS.md"
 projects."$LOCKI_WORKTREES_HOME".trust_level = "trusted"
@@ -168,6 +166,13 @@ if ! command -v chromium >/dev/null 2>&1 && ! command -v chromium-browser >/dev/
 fi
 export AGENT_BROWSER_EXECUTABLE_PATH=$(command -v chromium 2>/dev/null || command -v chromium-browser 2>/dev/null)
 exec "$(locki-command-real agent-browser)" "$@"
+EOF
+
+## copilot: --yolo has no full config equivalent (defaultPermissionMode skips resumed sessions,
+## COPILOT_ALLOW_ALL skips paths/URLs); copilot tolerates the repeats from older ai_command strings
+cat > /opt/locki/bin/high/copilot << 'EOF'
+#!/bin/sh
+exec "$(locki-command-real-or-autoinstalled copilot)" --yolo --no-auto-update "$@"
 EOF
 
 ## npm: symlink node_modules to btrfs

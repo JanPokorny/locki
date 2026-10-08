@@ -643,6 +643,19 @@ assert_output "locki ai keeps -c with a claude transcript" "claude --yolo -c END
 rm -f "$FAKE_CLAUDE"
 mv "$AI_CONFIG.bak" "$AI_CONFIG"
 
+FAKE_COPILOT="$XDG_DATA_HOME/locki/home/.local/bin/copilot"
+printf '#!/bin/bash\necho "copilot $* END"\n' > "$FAKE_COPILOT"
+chmod +x "$FAKE_COPILOT"
+assert_output "locki x copilot gets locki ai's permission flags" "copilot --yolo --no-auto-update --continue END" locki x -m "$LOGIN" copilot --continue
+rm -f "$FAKE_COPILOT"
+
+CODEX_CONFIG="$XDG_DATA_HOME/locki/home/.codex/config.toml"
+mkdir -p "$(dirname "$CODEX_CONFIG")"
+printf 'approval_policy = "on-request"\nmodel = "kept"\n' > "$CODEX_CONFIG"
+assert_output "codex user config forced to locki ai's --yolo" 'approval_policy = "never"' locki x -m "$LOGIN" cat /root/.codex/config.toml
+assert_output "codex user config keeps user keys" 'model = "kept"' locki x -m "$LOGIN" cat /root/.codex/config.toml
+rm -f "$CODEX_CONFIG"
+
 # ── locki list outside git repo ─────────────────────────────────────────────
 
 echo
