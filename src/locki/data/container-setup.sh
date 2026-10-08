@@ -172,7 +172,7 @@ EOF
 ## COPILOT_ALLOW_ALL skips paths/URLs); copilot tolerates the repeats from older ai_command strings
 cat > /opt/locki/bin/high/copilot << 'EOF'
 #!/bin/sh
-exec "$(locki-command-real-or-autoinstalled copilot)" --yolo --no-auto-update "$@"
+exec "$(locki-command-real copilot)" --yolo --no-auto-update "$@"
 EOF
 
 ## npm: symlink node_modules to btrfs

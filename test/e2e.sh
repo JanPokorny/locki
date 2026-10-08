@@ -634,6 +634,8 @@ FAKE_CLAUDE="$XDG_DATA_HOME/locki/home/.local/bin/claude"
 mkdir -p "$(dirname "$FAKE_CLAUDE")"
 printf '#!/bin/bash\necho "claude $* END"\n' > "$FAKE_CLAUDE"
 chmod +x "$FAKE_CLAUDE"
+# the sandbox tools' claude precedes ~/.local/bin; only Locki's high shims precede it
+locki x -m "$LOGIN" cp /root/.local/bin/claude /opt/locki/bin/high/claude
 printf 'ai_command = "claude --yolo -c"\nide_command = "true"\n' > "$AI_CONFIG"
 assert_output "locki ai drops -c without a claude transcript" "claude --yolo END" locki ai -m "$LOGIN"
 CLAUDE_PROJ="$XDG_DATA_HOME/locki/home/.claude/projects/$(worktree_of "$LOGIN" | sed 's/[^a-zA-Z0-9]/-/g')"
@@ -641,12 +643,15 @@ mkdir -p "$CLAUDE_PROJ"
 echo '{"type":"user","entrypoint":"cli","message":{"role":"user","content":"hi"}}' > "$CLAUDE_PROJ/00000000-0000-0000-0000-000000000000.jsonl"
 assert_output "locki ai keeps -c with a claude transcript" "claude --yolo -c END" locki ai -m "$LOGIN"
 rm -f "$FAKE_CLAUDE"
+locki x -m "$LOGIN" rm -f /opt/locki/bin/high/claude
 mv "$AI_CONFIG.bak" "$AI_CONFIG"
 
 FAKE_COPILOT="$XDG_DATA_HOME/locki/home/.local/bin/copilot"
 printf '#!/bin/bash\necho "copilot $* END"\n' > "$FAKE_COPILOT"
 chmod +x "$FAKE_COPILOT"
-assert_output "locki x copilot gets locki ai's permission flags" "copilot --yolo --no-auto-update --continue END" locki x -m "$LOGIN" copilot --continue
+# without mise on PATH, locki-command-real falls back to the fake instead of the sandbox tools' copilot
+assert_output "locki x copilot gets locki ai's permission flags" "copilot --yolo --no-auto-update --continue END" \
+    locki x -m "$LOGIN" sh -c 'export PATH=/opt/locki/bin/high:/root/.local/bin:/usr/bin:/bin; exec copilot --continue'
 rm -f "$FAKE_COPILOT"
 
 CODEX_CONFIG="$XDG_DATA_HOME/locki/home/.codex/config.toml"
