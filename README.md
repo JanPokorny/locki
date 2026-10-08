@@ -105,7 +105,7 @@ Each sandbox gets its own [worktree](https://git-scm.com/docs/git-worktree) (a f
 
 - While `locki ai` opens a coding agent, `locki exec` (or short `locki x`) is the low-level version which can run any command. Pass a command to run in a sandbox, use `--match`/`-m` to select by branch substring or sandbox id: `locki exec -m big-refactor -- pytest`.
 
-- The first `locki ai` run prompts you to pick a default harness and editor. Re-run `locki setup` to change them, or edit `~/.config/locki/config.toml` directly — the keys are full command lines, e.g. `ai_command = "agy --dangerously-skip-permissions -c"` and `ide_command = "code ."`. A repo can override `ai_command` via a `locki.toml` in its root; `ide_command` is user-only (it launches on your host).
+- The first `locki ai` run prompts you to pick a default harness and editor. Re-run `locki setup` to change them, or edit `~/.config/locki/config.toml` directly — the keys are full command lines, e.g. `ai_command = "agy --dangerously-skip-permissions -c"` and `ide_command = "code ."`. A repo can override `ai_command` via a `locki.toml` in its root; `ide_command` is user-only (it launches on your host). To run a different agent just once, name it first: `locki ai codex` (or `claude`, `opencode`, `agy`, `pi`, `copilot`) uses that agent's default flags; naming your configured agent keeps your `ai_command` flags.
 
 - Ask your agent to forward ports, or use `locki port-forward` for more control.
 

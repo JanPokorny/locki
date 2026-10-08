@@ -14,9 +14,10 @@ from locki.services.worktree import WorktreeInfo, worktrees
 from locki.utils import CLEAR_LINE, pretty_path, sandbox_options
 
 
-def enter_sandbox(worktree: WorktreeInfo, command: list[str]) -> typing.NoReturn:
+def enter_sandbox(worktree: WorktreeInfo, command: list[str], *, agent: str | None = None) -> typing.NoReturn:
     """Bring up everything a sandbox needs (home, VM, worktree, container, daemon),
-    run *command* in it interactively, and exit with its return code."""
+    run *command* in it interactively, and exit with its return code.
+    *agent* is the explicitly chosen agent name, echoed in the "return to this sandbox" hint."""
     click.echo(f"{SPINNER} Entering a Locki sandbox.", err=True)
 
     WORKTREES.mkdir(parents=True, exist_ok=True)
@@ -40,7 +41,7 @@ def enter_sandbox(worktree: WorktreeInfo, command: list[str]) -> typing.NoReturn
     click.echo(f"{EXIT} Exited Locki sandbox.", err=True)
     click.echo(f"{INFO} Return to this sandbox:", err=True)
     click.echo(
-        f"{INFO}      via AI: {click.style(f'locki ai -m {worktree.wt_id}', fg='green')}"
+        f"{INFO}      via AI: {click.style(f'locki ai -m {worktree.wt_id}' + (f' {agent}' if agent else ''), fg='green')}"
         f" (or just {click.style('locki ai', fg='green')} and find it in the list)",
         err=True,
     )

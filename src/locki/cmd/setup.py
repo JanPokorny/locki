@@ -12,7 +12,7 @@ from locki.config import LockiConfig, load_config, save_user_config
 from locki.paths import HOME, SANDBOX_HOME, USER_CONFIG
 from locki.runes import INFO, SUCCESS
 
-AI_TEMPLATES = {
+AGENT_TEMPLATES = {
     "Claude": "claude --dangerously-skip-permissions -c",
     "Antigravity": "agy --dangerously-skip-permissions -c",
     "Codex": "codex --yolo resume",
@@ -76,13 +76,13 @@ COPY_FILES = [
 @click.option("--defaults", is_flag=True, default=False, help="Skip interactive prompts, use defaults.")
 @click.option("--copy", "copy_only", is_flag=True, default=False, help="Only copy AI config files into sandbox home.")
 def setup_cmd(defaults: bool, copy_only: bool):
-    """Interactive setup wizard (AI harness, editor, config copy)."""
+    """Interactive setup wizard (agent, editor, config copy)."""
     do_copy = copy_only
 
     if not copy_only:
         if defaults or not sys.stdin.isatty():
             if not USER_CONFIG.exists():
-                save_user_config("ai_command", AI_TEMPLATES["Claude"])
+                save_user_config("ai_command", AGENT_TEMPLATES["Claude"])
                 save_user_config("ide_command", IDE_TEMPLATES["VSCode"])
             return
 
@@ -92,8 +92,8 @@ def setup_cmd(defaults: bool, copy_only: bool):
         from InquirerPy.base.control import Choice
 
         ai_command = inquirer.select(
-            message="Default AI harness for 'locki ai':",
-            choices=[Choice(value=cmd, name=name) for name, cmd in AI_TEMPLATES.items()],
+            message="Default agent for 'locki ai':",
+            choices=[Choice(value=cmd, name=name) for name, cmd in AGENT_TEMPLATES.items()],
         ).execute()
         save_user_config("ai_command", ai_command)
 

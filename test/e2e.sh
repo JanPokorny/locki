@@ -640,7 +640,14 @@ CLAUDE_PROJ="$XDG_DATA_HOME/locki/home/.claude/projects/$(worktree_of "$LOGIN" |
 mkdir -p "$CLAUDE_PROJ"
 echo '{"type":"user","entrypoint":"cli","message":{"role":"user","content":"hi"}}' > "$CLAUDE_PROJ/00000000-0000-0000-0000-000000000000.jsonl"
 assert_output "locki ai keeps -c with a claude transcript" "claude --yolo -c END" locki ai -m "$LOGIN"
-rm -f "$FAKE_CLAUDE"
+assert_output "locki ai <agent> uses config when it is the same agent" "claude --yolo -c END" locki ai -m "$LOGIN" Claude
+FAKE_CODEX="$XDG_DATA_HOME/locki/home/.local/bin/codex"
+printf '#!/bin/bash\necho "codex $* END"\n' > "$FAKE_CODEX"
+chmod +x "$FAKE_CODEX"
+assert_output "locki ai <agent> uses the template" "codex --yolo resume END" locki ai -m "$LOGIN" codex
+assert_output "locki ai <agent> forwards remaining args" "codex --yolo resume extra END" locki ai -m "$LOGIN" codex extra
+assert_output "locki ai <agent> names it in the return hint" "locki ai -m $LOGIN codex" bash -c "locki ai -m $LOGIN codex 2>&1"
+rm -f "$FAKE_CLAUDE" "$FAKE_CODEX"
 mv "$AI_CONFIG.bak" "$AI_CONFIG"
 
 # ── locki list outside git repo ─────────────────────────────────────────────
