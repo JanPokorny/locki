@@ -11,12 +11,18 @@ set +x
 echo '__AGENTS_MD_B64__' | base64 -d | tee /etc/claude-code/CLAUDE.md /etc/codex/AGENTS.md /etc/opencode/AGENTS.md /etc/copilot/.github/instructions/system.instructions.md > /dev/null
 set -x
 
+## The codex app-server daemon (>= 0.156) refuses its socket dir unless root or the current
+## user owns it; the shared 9p home shows host uid, so it never starts. One daemon per shared
+## home would also be shared across sandboxes. Nothing in a one-TUI sandbox needs it.
 cat > /etc/codex/config.toml << EOF
 approval_policy = "never"
 sandbox_mode = "danger-full-access"
 cli_auth_credentials_store = "file"
 developer_instructions = "/etc/codex/AGENTS.md"
 projects."$LOCKI_WORKTREES_HOME".trust_level = "trusted"
+
+[features]
+daemon_auto_start = false
 EOF
 
 # MARK: libatomic
