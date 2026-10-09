@@ -70,6 +70,13 @@ COPY_DIRS = [
 COPY_FILES = [
     ".claude.json",
 ]
+# OAuth state: access token + refresh token. Refresh tokens rotate on use, so a host copy
+# and a sandbox copy fork on the first refresh and the other side's login "expires". Seed
+# these once; afterwards the sandbox keeps its own chain (shared by all sandboxes).
+CREDENTIAL_FILES = {
+    ".claude/.credentials.json",
+    ".codex/auth.json",
+}
 
 
 @click.command("setup")
@@ -127,8 +134,12 @@ def setup_cmd(defaults: bool, copy_only: bool):
 
     if do_copy:
         backup_suffix = f".{int(time.time())}.backup"
+        kept: list[pathlib.Path] = []
 
         def copy_with_backup(src: pathlib.Path, dst: pathlib.Path) -> None:
+            if dst.relative_to(SANDBOX_HOME).as_posix() in CREDENTIAL_FILES and dst.exists():
+                kept.append(dst)
+                return
             with contextlib.suppress(OSError):
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 if dst.exists() or dst.is_symlink():
@@ -164,6 +175,11 @@ def setup_cmd(defaults: bool, copy_only: bool):
             f"{SUCCESS} Copied AI config files to sandbox home. Copy again anytime with {click.style('locki setup --copy', fg='green')}.",
             err=True,
         )
+        for dst in kept:
+            click.echo(
+                f"{INFO} Kept the sandbox's own login in ~/{dst.relative_to(SANDBOX_HOME)} (delete it to reseed from host).",
+                err=True,
+            )
 
     if not copy_only:
         click.echo(f"\n{SUCCESS} Config saved to {USER_CONFIG}", err=True)
