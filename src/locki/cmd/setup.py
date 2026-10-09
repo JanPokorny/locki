@@ -16,7 +16,7 @@ AI_TEMPLATES = {
     "Claude": "claude --dangerously-skip-permissions -c",
     "Antigravity": "agy --dangerously-skip-permissions -c",
     "Codex": "codex --yolo resume",
-    "OpenCode": "opencode",
+    "OpenCode": "opencode --continue",
     "Pi": "pi -c",
     "Copilot": "copilot --yolo --no-auto-update --continue",
 }
