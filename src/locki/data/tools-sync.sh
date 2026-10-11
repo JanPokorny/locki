@@ -23,10 +23,10 @@ ROOT=/usr/local/share/mise
 CACHE=/var/lib/locki/tools-cache
 USER=locki-tools
 
-MISE_VERSION="2026.9.17"
+MISE_VERSION="2026.10.2"
 case "$(uname -m)" in
-  x86_64)  arch="x64";   checksum="8d1bcbc0b2ba167ee765e7410502c3f89974d0195eb8ec74537bc93bb367420d";;
-  aarch64) arch="arm64"; checksum="46717187f93d4ebfff8b87a30da3f5939af995057c0c1a855e968f0ee4d19c88";;
+  x86_64)  arch="x64";   checksum="79a2bf0ffc9b8a9a6391344e875b3c3679c15053fda3e8728ddf1790d63db788";;
+  aarch64) arch="arm64"; checksum="5d3368679ce0cc37fb222511a04c61426cded69f0cda0f8248d03970dc34f303";;
   *) echo "unsupported architecture: $(uname -m)" >&2; exit 1;;
 esac
 
