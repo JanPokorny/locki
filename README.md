@@ -113,6 +113,7 @@ Each sandbox gets its own [worktree](https://git-scm.com/docs/git-worktree) (a f
 
 - Locki sandboxes provide [Mise](https://mise.jdx.dev) for tool version management -- replacing `nvm`, `rbenv`, `brew` etc. with a single tool. Adding `mise.toml` to your repo with tool versions and task definitions will help agents and humans alike: ask your agent to do it!
 
+- Sandbox login "expired" while the host still works? The sandbox home holds its own copy of the OAuth tokens, and refresh tokens rotate on use, so a host copy and a sandbox copy can't stay in sync. Just log in once inside any sandbox (`/login` in Claude, `codex login`); it persists across sandboxes. `locki setup --copy` seeds credentials only when the sandbox has none, so re-copying skills and instructions won't clobber that login.
 - Want to use custom AI configuration in the VM -- instructions, skills, MCP servers, ...? Sandboxes share a home folder accessible at `~/.local/share/locki/home` on host (or `$XDG_DATA_HOME/locki/home`). For example, you can edit `~/.local/share/locki/home/.claude/CLAUDE.md` for sandbox-specific instructions.
 
 - Something is broken? Try `locki vm delete` -- it will preserve your worktrees and settings, but the VM and sandboxes will be recreated from scratch on next run.
