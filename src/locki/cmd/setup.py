@@ -1,12 +1,15 @@
 import contextlib
+import json
 import os
 import pathlib
 import shlex
 import shutil
 import sys
 import time
+import tomllib
 
 import click
+import tomlkit
 
 from locki.config import LockiConfig, load_config, save_user_config
 from locki.paths import HOME, SANDBOX_HOME, USER_CONFIG
@@ -77,6 +80,23 @@ CREDENTIAL_FILES = {
     ".claude/.credentials.json",
     ".codex/auth.json",
 }
+# MCP servers added inside a sandbox (`claude mcp add`, a tool's own setup) point at sandbox
+# paths and serve every sandbox, so a re-copy keeps them: per server name, the sandbox's
+# entry wins over the host's (whole entries, so a changed `args` list is replaced, not unioned).
+MCP_SERVER_KEYS = {
+    ".claude.json": "mcpServers",
+    ".codex/config.toml": "mcp_servers",
+    ".config/opencode/opencode.json": "mcp",
+}
+
+
+def _load(path: pathlib.Path):
+    text = path.read_text()
+    return tomlkit.loads(text) if path.suffix == ".toml" else json.loads(text)
+
+
+def _dump(path: pathlib.Path, data) -> None:
+    path.write_text(tomlkit.dumps(data) if path.suffix == ".toml" else json.dumps(data, indent=2))
 
 
 @click.command("setup")
@@ -135,11 +155,19 @@ def setup_cmd(defaults: bool, copy_only: bool):
     if do_copy:
         backup_suffix = f".{int(time.time())}.backup"
         kept: list[pathlib.Path] = []
+        kept_servers: list[pathlib.Path] = []
 
         def copy_with_backup(src: pathlib.Path, dst: pathlib.Path) -> None:
-            if dst.relative_to(SANDBOX_HOME).as_posix() in CREDENTIAL_FILES and dst.exists():
+            rel = dst.relative_to(SANDBOX_HOME).as_posix()
+            if rel in CREDENTIAL_FILES and dst.exists():
                 kept.append(dst)
                 return
+            servers: dict = {}
+            # not through a symlink: a link planted in the sandbox must not leak its target
+            if (key := MCP_SERVER_KEYS.get(rel, "")) and dst.is_file() and not dst.is_symlink():
+                with contextlib.suppress(OSError, ValueError):  # a torn or hand-edited file: nothing to keep
+                    text = dst.read_text()
+                    servers = dict((tomllib.loads(text) if key == "mcp_servers" else json.loads(text)).get(key) or {})
             with contextlib.suppress(OSError):
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 if dst.exists() or dst.is_symlink():
@@ -155,6 +183,12 @@ def setup_cmd(defaults: bool, copy_only: bool):
                 else:
                     shutil.copy2(src, dst)
                 dst.chmod(dst.stat().st_mode | 0o600)  # store-sourced files arrive mode 444
+                if servers:
+                    with contextlib.suppress(OSError, ValueError):  # unparsable host copy: it arrives as-is
+                        data = _load(dst)
+                        data[key] = {**(data.get(key) or {}), **servers}
+                        _dump(dst, data)
+                        kept_servers.append(dst)
 
         for rel in COPY_DIRS:
             src_root = HOME / rel
@@ -180,6 +214,8 @@ def setup_cmd(defaults: bool, copy_only: bool):
                 f"{INFO} Kept the sandbox's own login in ~/{dst.relative_to(SANDBOX_HOME)} (delete it to reseed from host).",
                 err=True,
             )
+        for dst in kept_servers:
+            click.echo(f"{INFO} Kept the sandbox's own MCP servers in ~/{dst.relative_to(SANDBOX_HOME)}.", err=True)
 
     if not copy_only:
         click.echo(f"\n{SUCCESS} Config saved to {USER_CONFIG}", err=True)
