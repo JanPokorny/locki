@@ -10,6 +10,12 @@ mount -o remount,noatime / || true
 modprobe vhost_net || true
 echo vhost_net > /etc/modules-load.d/locki.conf
 
+# Every open `locki x` / `locki ai` holds one session on Lima's multiplexed ssh connection,
+# and sshd's default MaxSessions (10) refuses the next one: ssh then falls back to a fresh
+# unmultiplexed connection, warning about the existing ControlSocket on every command.
+echo "MaxSessions 100" > /etc/ssh/sshd_config.d/00-locki.conf
+systemctl reload sshd || true
+
 if ! command -v incus >/dev/null 2>&1; then
   echo "root:1000000:1000000000" >> /etc/subuid
   echo "root:1000000:1000000000" >> /etc/subgid
