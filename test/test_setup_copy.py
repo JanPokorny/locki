@@ -86,4 +86,10 @@ assert set(new_backups) <= {".claude.json", ".codex/config.toml"}, new_backups
 setup_cmd.main(["--copy"], standalone_mode=False)
 assert not (SANDBOX_HOME / ".claude" / "CLAUDE.md").is_symlink(), "symlinked dst must be replaced by a real copy"
 
+# codex's git scratch tree is not config: it is skipped in the walk
+(HOME / ".codex" / ".tmp" / "x").mkdir(parents=True)
+(HOME / ".codex" / ".tmp" / "x" / "f").write_text("scratch")
+setup_cmd.main(["--copy"], standalone_mode=False)
+assert not (SANDBOX_HOME / ".codex" / ".tmp").exists(), ".codex/.tmp must not be copied"
+
 print("test_setup_copy: OK")

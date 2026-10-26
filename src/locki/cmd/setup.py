@@ -74,6 +74,10 @@ COPY_DIRS = [
 COPY_FILES = [
     ".claude.json",
 ]
+# Caches under a config dir that the tool rebuilds itself: thousands of files, nothing to sync.
+SKIP_DIRS = {
+    ".codex/.tmp",  # codex re-clones plugin marketplaces here at startup (~7k files, 200 MB)
+}
 # OAuth state: access token + refresh token. Refresh tokens rotate on use, so a host copy
 # and a sandbox copy fork on the first refresh and the other side's login "expires". Seed
 # these once; afterwards the sandbox keeps its own chain (shared by all sandboxes).
@@ -211,6 +215,9 @@ def setup_cmd(defaults: bool, copy_only: bool):
                     dirnames.clear()
                     continue
                 walked.add(real)
+                dirnames[:] = [
+                    d for d in dirnames if (pathlib.Path(dirpath) / d).relative_to(HOME).as_posix() not in SKIP_DIRS
+                ]
                 for name in filenames:
                     src = pathlib.Path(dirpath) / name
                     copy_with_backup(src, SANDBOX_HOME / rel / src.relative_to(src_root))
