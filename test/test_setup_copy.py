@@ -6,6 +6,7 @@ import os
 import pathlib
 import tempfile
 import tomllib
+import types
 
 tmp = pathlib.Path(tempfile.mkdtemp())
 os.environ["HOME"] = str(tmp / "host")
@@ -58,5 +59,37 @@ assert codex["model"] == "m" and codex["mcp_servers"] == {
 setup_cmd.main(["--copy"], standalone_mode=False)
 claude = json.loads((SANDBOX_HOME / ".claude.json").read_text())
 assert "leak" not in claude["mcpServers"], claude
+
+# An unchanged file is neither backed up nor rewritten: a re-copy of an identical host must
+# create no new backups at all (a home-manager hook runs this on every config change).
+(HOME / ".claude" / "plugins").mkdir()
+(HOME / ".claude" / "plugins" / "state.json").write_text(json.dumps({"installPath": str(HOME / "x")}))
+(HOME / ".claude" / "store.md").write_text("from-store")
+(HOME / ".claude" / "store.md").chmod(0o444)
+os.utime(HOME / ".claude" / "store.md", (0, 0))
+setup_cmd.main(["--copy"], standalone_mode=False)
+assert (SANDBOX_HOME / ".claude" / "plugins" / "state.json").read_text() == json.dumps({"installPath": "/root/x"})
+import locki.cmd.setup as setup_mod  # noqa: E402
+
+clock = iter(range(10**9, 10**9 + 100))
+setup_mod.time = types.SimpleNamespace(time=lambda: next(clock))  # unique backup suffix per run
+before = set(SANDBOX_HOME.rglob("*.backup"))
+setup_cmd.main(["--copy"], standalone_mode=False)
+new_backups = [
+    b.relative_to(SANDBOX_HOME).as_posix().rsplit(".", 2)[0] for b in set(SANDBOX_HOME.rglob("*.backup")) - before
+]
+# only the MCP-merged files legitimately differ from the host copy and get re-copied
+assert set(new_backups) <= {".claude.json", ".codex/config.toml"}, new_backups
+# ...but a symlinked sandbox file is always replaced, even when its target is identical
+(SANDBOX_HOME / ".claude" / "CLAUDE.md").unlink()
+(SANDBOX_HOME / ".claude" / "CLAUDE.md").symlink_to(HOME / ".claude" / "CLAUDE.md")
+setup_cmd.main(["--copy"], standalone_mode=False)
+assert not (SANDBOX_HOME / ".claude" / "CLAUDE.md").is_symlink(), "symlinked dst must be replaced by a real copy"
+
+# codex's git scratch tree is not config: it is skipped in the walk
+(HOME / ".codex" / ".tmp" / "x").mkdir(parents=True)
+(HOME / ".codex" / ".tmp" / "x" / "f").write_text("scratch")
+setup_cmd.main(["--copy"], standalone_mode=False)
+assert not (SANDBOX_HOME / ".codex" / ".tmp").exists(), ".codex/.tmp must not be copied"
 
 print("test_setup_copy: OK")

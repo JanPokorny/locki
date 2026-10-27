@@ -1,4 +1,5 @@
 import contextlib
+import filecmp
 import json
 import os
 import pathlib
@@ -73,6 +74,10 @@ COPY_DIRS = [
 COPY_FILES = [
     ".claude.json",
 ]
+# Caches under a config dir that the tool rebuilds itself: thousands of files, nothing to sync.
+SKIP_DIRS = {
+    ".codex/.tmp",  # codex re-clones plugin marketplaces here at startup (~7k files, 200 MB)
+}
 # OAuth state: access token + refresh token. Refresh tokens rotate on use, so a host copy
 # and a sandbox copy fork on the first refresh and the other side's login "expires". Seed
 # these once; afterwards the sandbox keeps its own chain (shared by all sandboxes).
@@ -162,6 +167,20 @@ def setup_cmd(defaults: bool, copy_only: bool):
             if rel in CREDENTIAL_FILES and dst.exists():
                 kept.append(dst)
                 return
+            # Plugin state JSONs record absolute host paths (installLocation,
+            # installPath); the sandbox home is /root, so rewrite the prefix
+            # or Claude Code reports "cache-miss" for every marketplace.
+            rewrite = ".claude/plugins/" in str(src) and src.suffix == ".json"
+            # Unchanged file: nothing to back up or copy. Compare content, not stat: store-sourced
+            # files have mode 444 and an epoch mtime. A symlinked dst is never "unchanged" (see below).
+            with contextlib.suppress(OSError, ValueError):
+                if dst.is_file() and not dst.is_symlink():
+                    if rewrite:
+                        same = dst.read_text() == src.read_text().replace(str(HOME), "/root")
+                    else:
+                        same = filecmp.cmp(src, dst, shallow=False)
+                    if same:
+                        return
             servers: dict = {}
             # not through a symlink: a link planted in the sandbox must not leak its target
             if (key := MCP_SERVER_KEYS.get(rel, "")) and dst.is_file() and not dst.is_symlink():
@@ -175,10 +194,7 @@ def setup_cmd(defaults: bool, copy_only: bool):
                 # Follow symlinks: a symlinked "copy" would let sandbox settings
                 # writes escape to the host target (e.g. bypassPermissions merged
                 # into the real ~/.claude/settings.json).
-                # Plugin state JSONs record absolute host paths (installLocation,
-                # installPath); the sandbox home is /root, so rewrite the prefix
-                # or Claude Code reports "cache-miss" for every marketplace.
-                if ".claude/plugins/" in str(src) and src.suffix == ".json":
+                if rewrite:
                     dst.write_text(src.read_text().replace(str(HOME), "/root"))
                 else:
                     shutil.copy2(src, dst)
@@ -199,6 +215,9 @@ def setup_cmd(defaults: bool, copy_only: bool):
                     dirnames.clear()
                     continue
                 walked.add(real)
+                dirnames[:] = [
+                    d for d in dirnames if (pathlib.Path(dirpath) / d).relative_to(HOME).as_posix() not in SKIP_DIRS
+                ]
                 for name in filenames:
                     src = pathlib.Path(dirpath) / name
                     copy_with_backup(src, SANDBOX_HOME / rel / src.relative_to(src_root))
