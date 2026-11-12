@@ -400,6 +400,7 @@ class ContainerService:
     def exec_interactive(self, worktree: WorktreeInfo, command: list[str]) -> subprocess.CompletedProcess:
         """Run *command* in the sandbox container with inherited stdio."""
         env = self.env(worktree)
+        forwarded = self.forwarded_env | set(load_config(worktree.repo).forward_env)
         return vm.shell(
             [
                 "bash",
@@ -413,7 +414,7 @@ class ContainerService:
                         "--cwd",
                         shlex.quote(str(worktree.path)),
                         *(f"--env={k}={v}" for k, v in env.items()),
-                        *(f'--env={name}="${name}"' for name in self.forwarded_env),
+                        *(f'--env={name}="${name}"' for name in forwarded),
                         "--",
                         "sh",
                         "-c",
@@ -423,7 +424,7 @@ class ContainerService:
                     ]
                 ),
             ],
-            self.forwarded_env,
+            forwarded,
         )
 
 

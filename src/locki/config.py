@@ -3,6 +3,7 @@ import functools
 import logging
 import pathlib
 import platform
+import re
 import tomllib
 
 from locki.paths import CONFIG, USER_CONFIG
@@ -28,7 +29,8 @@ _ARCH_HINTS: dict[str, list[str]] = {
 }
 
 
-_USER_ONLY_KEYS = frozenset({"ide_command"})
+# forward_env: a repo must not be able to pull host secrets into a sandbox.
+_USER_ONLY_KEYS = frozenset({"ide_command", "forward_env"})
 
 
 @dataclasses.dataclass
@@ -36,6 +38,7 @@ class LockiConfig:
     incus_image: str | dict[str, str] = "images:fedora/44"
     ai_command: str = ""
     ide_command: str = ""
+    forward_env: list[str] = dataclasses.field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: dict) -> "LockiConfig":
@@ -45,7 +48,13 @@ class LockiConfig:
             if field.name not in data:
                 continue
             value = data[field.name]
-            if not isinstance(value, str) and not (
+            if field.name == "forward_env":
+                # names are interpolated into a shell command line, see ContainerService.exec_interactive
+                if not isinstance(value, list) or not all(
+                    isinstance(v, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", v) for v in value
+                ):
+                    fail("Invalid config: 'forward_env' must be a list of environment variable names.")
+            elif not isinstance(value, str) and not (
                 field.name == "incus_image"
                 and isinstance(value, dict)
                 and all(isinstance(v, str) for v in value.values())
